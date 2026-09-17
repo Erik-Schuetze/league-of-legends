@@ -34,6 +34,7 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		windowEnd   string
 		windowDays  = cfg.Aggregate.SourceWindowDays
 		minCellN    = cfg.Aggregate.MinCellN
+		maxRejected = cfg.Aggregate.MaxRejectedRows
 		duckdbBin   string
 		allowMism   bool
 		metricsAddr = cfg.MetricsAddr
@@ -53,6 +54,8 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 	fs.IntVar(&windowDays, "window-days", windowDays, "length of the source window in days")
 	fs.IntVar(&minCellN, "min-cell-n", minCellN,
 		"cells with fewer observations are suppressed and counted, never published")
+	fs.IntVar(&maxRejected, "max-rejected-rows", maxRejected,
+		"participant rows without a champion or a role tolerated before the build refuses to publish")
 	fs.StringVar(&duckdbBin, "duckdb-bin", "",
 		"pinned duckdb client, empty means $LOLSTATS_DUCKDB_BIN or PATH")
 	fs.BoolVar(&allowMism, "duckdb-allow-mismatch", false,
@@ -84,6 +87,12 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		return fail(stderr, "build", err)
 	}
 
+	// The gates are built from the floor here rather than left to Build's
+	// default, because the default would discard the operator's allowance for
+	// rows Riot itself reports as position-less.
+	gates := aggregate.DefaultGateConfig(minCellN)
+	gates.MaxRejectedRows = maxRejected
+
 	result, buildErr := aggregate.Build(ctx, aggregate.BuildOptions{
 		RawRoot:    rawRoot,
 		AggRoot:    aggRoot,
@@ -95,6 +104,7 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		WindowEnd:  windowEnd,
 		WindowDays: windowDays,
 		MinCellN:   minCellN,
+		Gates:      gates,
 		GitSHA:     gitSHA(getenv),
 		DuckDBBin:  duckdbBin,
 		DuckDB: aggregate.DuckDBSettings{

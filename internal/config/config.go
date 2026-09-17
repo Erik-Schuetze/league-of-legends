@@ -135,6 +135,15 @@ type Aggregate struct {
 	// Cells with fewer observations than this are suppressed and counted,
 	// never published. See docs/contracts.md.
 	MinCellN int
+	// How many participant rows may lack a champion or a role before a build
+	// refuses to publish. Zero, the default, is "the archive must classify
+	// every row it contains": a rejected row lowers every rate it should have
+	// contributed to, so the build stops rather than publish a biased tier
+	// list. The deployed value is an allowance measured against the archive
+	// instead of zero, because Riot's own payloads contain a small number of
+	// rows it marks as position-less (see the MaxRejectedRows note in
+	// internal/aggregate/gate.go).
+	MaxRejectedRows int
 	// Trailing window of days of raw data a build reads.
 	SourceWindowDays int
 	// v1 publishes a single unsegmented bracket; the value is still explicit
@@ -216,9 +225,12 @@ const (
 	defaultRowsPerPart      = 20000
 	defaultCompressionLevel = 3
 
-	defaultAggRoot         = "/var/lib/lolstats/agg"
-	defaultSchemaVersion   = 1
-	defaultMinCellN        = 100
+	defaultAggRoot       = "/var/lib/lolstats/agg"
+	defaultSchemaVersion = 1
+	defaultMinCellN      = 100
+	// A fail-closed archive gate: zero tolerant rows unless an operator has
+	// measured a reason to allow some. See Aggregate.MaxRejectedRows.
+	defaultMaxRejectedRows = 0
 	defaultSourceWindow    = 14
 	defaultQueueID         = 420
 	defaultBracket         = "all"
@@ -269,6 +281,7 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			Root:             r.str(env("AGG_ROOT"), defaultAggRoot),
 			SchemaVersion:    r.integer(env("AGG_SCHEMA_VERSION"), defaultSchemaVersion),
 			MinCellN:         r.integer(env("AGG_MIN_CELL_N"), defaultMinCellN),
+			MaxRejectedRows:  r.nonNegativeInteger(env("AGG_MAX_REJECTED_ROWS"), defaultMaxRejectedRows),
 			SourceWindowDays: r.integer(env("AGG_SOURCE_WINDOW_DAYS"), defaultSourceWindow),
 			Bracket:          r.str(env("AGG_BRACKET"), defaultBracket),
 			QueueID:          r.integer(env("AGG_QUEUE_ID"), defaultQueueID),
@@ -357,6 +370,27 @@ func (r *reader) integer(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// nonNegativeInteger is for counts where a negative value would invert the
+// meaning of the setting rather than be wrong loudly: a "maximum of -1" is a
+// maximum that allows nothing, which reads as a configured allowance but
+// behaves as the strictest possible gate.
+func (r *reader) nonNegativeInteger(key string, def int) int {
+	v, ok := r.raw(key)
+	if !ok {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	switch {
+	case err != nil:
+		r.fail(key, "is not an integer")
+	case n < 0:
+		r.fail(key, "must not be negative")
+	default:
+		return n
+	}
+	return def
 }
 
 // int32Range is for values a dependency demands at 32-bit width, such as

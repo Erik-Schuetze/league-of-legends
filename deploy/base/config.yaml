@@ -89,3 +89,16 @@ data:
   # DuckDB's own default here is "90% of available disk space", which on this
   # node is the whole disk shared with every other workload.
   LOLSTATS_AGG_DUCKDB_MAX_TEMP_SIZE: "10GiB"
+  # The input gate refuses to publish when a participant row has neither a
+  # champion nor a role, because such a row silently lowers every rate it
+  # should have contributed to. The live archive is not perfectly clean: Riot
+  # reports one participant per remake with teamPosition "" and
+  # individualPosition "Invalid" (its literal sentinel), and the build would
+  # otherwise refuse every night. Measured over 2026-09-04..2026-09-17 EUW/420:
+  # 3 rejected rows of 27,790 for patch 16.18, 7 for the whole two-patch window.
+  # 25 is several times that measurement and under a tenth of a percent of the
+  # window, so a genuine classification regression - which rejects a large
+  # fraction of the archive, not a handful of rows - still stops the build.
+  # The excluded rows are never assigned a guessed role; every run logs
+  # rejected_rows and the effective allowance.
+  LOLSTATS_AGG_MAX_REJECTED_ROWS: "25"

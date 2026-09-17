@@ -74,11 +74,12 @@ rather than one at a time.
 | `LOLSTATS_AGG_ROOT` | `/var/lib/lolstats/agg` | Aggregate output root, served at `/agg` |
 | `LOLSTATS_AGG_SCHEMA_VERSION` | `1` | Artifact envelope version. Changing it needs an ADR |
 | `LOLSTATS_AGG_MIN_CELL_N` | `100` | Minimum sample size for a published cell |
+| `LOLSTATS_AGG_MAX_REJECTED_ROWS` | `0` | Participant rows without a champion or a role a build tolerates before it refuses to publish. Deployed as `25`, an allowance measured against position-less rows Riot itself reports |
 | `LOLSTATS_AGG_SOURCE_WINDOW_DAYS` | `14` | Trailing window of raw data a build reads |
 | `LOLSTATS_AGG_BRACKET` | `all` | Bracket segment. `all` in v1 |
 | `LOLSTATS_AGG_QUEUE_ID` | `420` | Ranked solo/duo |
 | `LOLSTATS_AGG_PATCH` | - | Patch to build, `major.minor`. Empty means the newest in the archive |
-| `LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT` | `1GiB` | Hard ceiling for each DuckDB client. Must stay well under the pod's memory limit — DuckDB otherwise sizes itself from the host's RAM |
+| `LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT` | `2GiB` | Hard ceiling for each DuckDB client. Must stay well under the pod's memory limit — DuckDB otherwise sizes itself from the host's RAM |
 | `LOLSTATS_AGG_DUCKDB_THREADS` | `2` | DuckDB thread pool. Matches the aggregate Job's CPU limit; the host-derived default is the node's core count |
 | `LOLSTATS_AGG_DUCKDB_TEMP_DIR` | `$TMPDIR` | Parent of the `duckdb-spill` directory DuckDB spills into. Must be writable: root filesystems here are read-only |
 | `LOLSTATS_AGG_DUCKDB_MAX_TEMP_SIZE` | `10GiB` | Ceiling on that spill directory. DuckDB's own default is 90 % of the node's free disk |
