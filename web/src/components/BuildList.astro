@@ -53,16 +53,18 @@ const entryFor = (id: number) => entries?.[id];
       <ol class="rows" role="list">
         {shown.map((build) => (
           <li class="row">
-            {/* With a lookup each key is its game-data icon and carries the name
-                as alt text, so the cell is announced and not hidden; the numeric
-                key list is dropped because the names now say the same thing.
-                Without a lookup the keys are not buildable into image paths, so
-                the frozen numeric chips render instead. */}
+            {/* The key is rendered as text, not as a game-data icon: rehosting or
+                transforming Riot art is not permitted (docs/compliance.md §5, gate
+                check 2), and the hotlinked icons are what overran §7.4's 300 KiB
+                first-load budget. The lookup supplies the name, so the cell is
+                still announced and nothing is hidden; without a lookup the keys
+                are not buildable into image paths, so the frozen numeric chips
+                render instead. */}
             <span class="key" aria-hidden={entries ? undefined : 'true'}>
               {build.key.map((id) => {
                 const entry = entryFor(id);
                 return entry ? (
-                  <img class="icon" src={entry.icon} alt={entry.name} width="24" height="24" loading="lazy" />
+                  <span class="chip">{entry.name}</span>
                 ) : (
                   <span class="chip">{id}</span>
                 );
