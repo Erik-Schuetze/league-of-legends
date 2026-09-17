@@ -7,7 +7,7 @@ import (
 // The byte-parity tests that used to live beside this helper compared the Go
 // tier's HTML against web/dist - the Astro build of the tree this project has
 // retired - and were retired with it (docs/contracts.md section 5). The tree
-// itself was deleted on 2026-09-17. What is left
+// itself was deleted on 2026-09-18. What is left
 // here is the fixture renderer those tests were built on, which the a11y and
 // freeze assertions below use as a fixed, network-free corpus.
 

@@ -278,7 +278,7 @@ compliance: served-pages
 
 # Kept as an alias, because it used to be a second corpus: the target scanned the
 # pages a running tier served while `compliance` scanned web/dist. The Astro tree
-# was deleted on 2026-09-17 and there is only one corpus left, so this runs the
+# was deleted on 2026-09-18 and there is only one corpus left, so this runs the
 # same gate over the same pages rather than being dropped from the CI job list.
 .PHONY: compliance-served
 compliance-served: compliance
