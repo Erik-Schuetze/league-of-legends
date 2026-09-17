@@ -1,0 +1,264 @@
+# Nightly logical dump of the control-plane database (plan risk R12: Postgres is
+# the only thing here that is not reproducible from files, and it is a single
+# replica on a single node).
+#
+# 04:30 Europe/Berlin: after aggregate (01:00), discover-seeds (02:10),
+# static-sync (03:10), site-build (03:40) and the 04:20 maintain tick, so the
+# dump contains the result of the whole night; and off the hour, like every other
+# job here, so it does not contend with the ones that fire at :00.
+#
+# The dump is `pg_dump --format=custom` and not `pg_dumpall`: the custom format is
+# what makes a selective restore possible (`pg_restore --table=matches`), and the
+# database is the unit that gets restored - the roles that own it are covered by
+# the `globals.sql` written beside each dump, which is small and is what makes a
+# restore onto a fresh cluster possible without guessing at the role.
+#
+# The image is the *same pinned postgres image the StatefulSet runs*: the client
+# major version matches the server, and it is a digest that is already being
+# pulled by this cluster. No new image, and no image of our own, is introduced to
+# make a backup. `pg_dump` and `pg_restore` both live in it (verified: PostgreSQL
+# 16.10, /usr/bin/pg_dump).
+#
+# The volume it writes to is the ReadWriteMany `lolstats-data` claim. That is
+# deliberate - an artifact on the node's own disk would be lost with the node -
+# but it is also why this job alone does not satisfy R12 on its own: see
+# docs/runbooks/restore-postgres.md.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-postgres
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: backup-postgres
+spec:
+  schedule: "30 4 * * *"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  # A missed start is not worth catching up on: the next night's dump is a
+  # complete dump. Ten minutes of grace covers a node that is briefly busy.
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # No second attempt: a dump that failed because the server was unreachable
+      # will not be fixed by running it again four seconds later, and a retry
+      # makes one bad night look like two bad nights in the job history.
+      backoffLimit: 0
+      # An hour is generous for a database whose largest table is a fetch queue;
+      # it exists so a hung NFS write cannot hold the job open until the next
+      # night's run would have started.
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lolstats
+            app.kubernetes.io/component: backup-postgres
+        spec:
+          restartPolicy: Never
+          securityContext:
+            # The restricted Pod Security profile is enforced on this namespace,
+            # so this is the same shape as every other workload here: a numeric
+            # non-root uid, a runtime default seccomp profile, and a Group ID
+            # that makes the freshly provisioned volume writable. 65532 is the
+            # uid the Go workloads use for this volume, which is the uid that is
+            # known to be able to write to it.
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup-postgres
+              image: postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1
+              # The image's entrypoint initialises a *server* when it is allowed
+              # to run; this container is a client. Replacing the entrypoint is
+              # what keeps it a client.
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # Backups are the one artifact whose permissions matter more
+                  # than their contents: the dump carries the role's password
+                  # hash and every match id in the queue. Nothing here is ever
+                  # world-readable, and nothing is created group-writable.
+                  umask 077
+
+                  root="${BACKUP_ROOT:-/var/lib/lolstats/backups}"
+                  daily="$root/postgres/daily"
+                  weekly="$root/postgres/weekly"
+                  keep_daily="${BACKUP_KEEP_DAILY:-7}"
+                  keep_weekly="${BACKUP_KEEP_WEEKLY:-4}"
+
+                  mkdir -p "$daily" "$weekly"
+                  # A `.partial` file can only be a leftover of a job this
+                  # container is replacing - concurrencyPolicy is Forbid, so no
+                  # other run can be writing one.
+                  rm -f "$daily"/*.partial "$daily"/*.partial.toc 2>/dev/null || true
+
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  name="lolstats-$stamp.dump"
+                  out="$daily/$name"
+                  partial="$out.partial"
+
+                  echo "backup-postgres: pg_dump $PGDATABASE from $PGHOST:$PGPORT"
+                  echo "backup-postgres: writing $out"
+
+                  # The dump lands under a .partial name and is renamed only after
+                  # it has been read back. A dump that dies halfway therefore
+                  # cannot be mistaken for a backup that exists - the failure
+                  # mode this guards against is a truncated file that looks like
+                  # an artifact on a listing but fails months later, at restore
+                  # time, when the only copy is already gone.
+                  pg_dump \
+                    --format=custom \
+                    --compress=zstd:3 \
+                    --no-owner \
+                    --no-acl \
+                    --file="$partial"
+
+                  # Read the archive back before trusting it. `--list` parses the
+                  # custom-format header and the table of contents, so a truncated
+                  # or unreadable file fails here rather than in a runbook.
+                  pg_restore --list "$partial" >"$partial.toc"
+                  entries="$(wc -l <"$partial.toc" | tr -d ' ')"
+                  if [ "$entries" -lt 10 ]; then
+                    echo "backup-postgres: FATAL: the archive contains only $entries TOC entries" >&2
+                    exit 1
+                  fi
+                  rm -f "$partial.toc"
+
+                  # Roles are not part of a database dump. This is what lets the
+                  # runbook restore onto a cluster that does not have the role
+                  # yet, and it is the reason a restore does not start with
+                  # "permission denied for schema public".
+                  if pg_dumpall --globals-only >"$partial.globals" 2>"$partial.globals.err"; then
+                    rm -f "$partial.globals.err"
+                  else
+                    # Loud, but not fatal: the database dump above is the artifact
+                    # that matters, and failing the whole night because the role
+                    # listing was refused would trade a small loss for a large
+                    # one. The file that is left behind says so in the place
+                    # somebody restoring will actually look.
+                    echo "backup-postgres: WARNING: pg_dumpall --globals-only failed:" >&2
+                    sed 's/^/  /' "$partial.globals.err" >&2 || true
+                    rm -f "$partial.globals.err"
+                    printf -- '-- pg_dumpall --globals-only failed. The database dump beside this file is complete, but restoring it onto a fresh cluster needs the role created by hand first: see docs/runbooks/restore-postgres.md\n' >"$partial.globals"
+                  fi
+
+                  # Row counts and a schema fingerprint, taken from the live
+                  # server. scripts/backup-verify.sh computes the same two things
+                  # from a restored copy and fails on any difference, so this
+                  # file is not a log line - it is the baseline that later has to
+                  # be reproduced.
+                  pgtables="select string_agg(format('select %L::text as t, count(*) as n from %I.%I', tablename, schemaname, tablename), ' union all ') from pg_tables where schemaname not in ('pg_catalog', 'information_schema')"
+                  counts="$(psql --no-psqlrc --tuples-only --no-align --command="$pgtables")"
+                  {
+                    echo "# lolstats postgres backup"
+                    echo "dump: $name"
+                    echo "utc: $stamp"
+                    echo "server: $(psql --no-psqlrc --tuples-only --no-align --command='show server_version')"
+                    echo "pg_dump: $(pg_dump --version)"
+                    echo "toc_entries: $entries"
+                    echo "bytes: $(wc -c <"$partial" | tr -d ' ')"
+                    echo "# schema fingerprint (md5 of table.column:type:nullability)"
+                    echo "schema_md5: $(psql --no-psqlrc --tuples-only --no-align --command="select md5(string_agg(t, chr(10) order by t)) from (select table_name || '.' || column_name || ':' || data_type || ':' || is_nullable as t from information_schema.columns where table_schema = 'public') s")"
+                    echo "# rows per table"
+                    if [ -n "$counts" ]; then
+                      psql --no-psqlrc --tuples-only --no-align --field-separator=' ' --command="$counts" | sort
+                    fi
+                  } >"$partial.manifest"
+
+                  # Only now does the artifact get its real name.
+                  mv "$partial.globals" "$daily/$name.globals.sql"
+                  mv "$partial.manifest" "$daily/$name.manifest"
+                  mv "$partial" "$out"
+                  # A file rather than a symlink: the volume is NFS, and the
+                  # runbook's `cat` works on every client without a symlink
+                  # resolution surprise.
+                  printf '%s\n' "$name" >"$root/postgres/LATEST"
+
+                  # Sunday promotes the night's dump into the weekly set, so the
+                  # policy keeps both a recent tail and something older than a
+                  # week.
+                  if [ "$(date -u +%u)" = "7" ]; then
+                    cp -p "$out" "$weekly/$name"
+                    echo "backup-postgres: promoted $name to weekly"
+                  fi
+
+                  # Retention, oldest first. The names are UTC timestamps, so a
+                  # lexical sort is a chronological sort and does not depend on
+                  # the mtimes an NFS client reports.
+                  prune() {
+                    dir="$1"
+                    keep="$2"
+                    n=0
+                    for f in $(ls -1 "$dir" | grep -E '^lolstats-[0-9]{8}T[0-9]{6}Z\.dump$' | sort -r); do
+                      n=$((n + 1))
+                      if [ "$n" -gt "$keep" ]; then
+                        rm -f "$dir/$f" "$dir/$f.manifest" "$dir/$f.globals.sql"
+                        echo "backup-postgres: pruned $dir/$f"
+                      fi
+                    done
+                  }
+                  prune "$daily" "$keep_daily"
+                  prune "$weekly" "$keep_weekly"
+
+                  echo "backup-postgres: done, $(wc -c <"$out" | tr -d ' ') bytes in $out"
+              envFrom:
+                - configMapRef:
+                    name: lolstats-backup-config
+              env:
+                # libpq reads these directly, which is why the dump is a two-line
+                # command rather than a hand-built connection string: no DSN is
+                # interpolated into a shell word, and no password ever appears in
+                # the process arguments.
+                - name: PGHOST
+                  value: lolstats-postgres.lolstats.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: POSTGRES_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: POSTGRES_PASSWORD
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: POSTGRES_DB
+                # pg_dump reads ~/.pgpass and tries to write a history file
+                # there. The root filesystem is read-only and the image's uid has
+                # no home, so it is pointed at the one writable mount.
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/lolstats
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: lolstats-data
+            - name: tmp
+              emptyDir: {}

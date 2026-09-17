@@ -1,0 +1,94 @@
+# Refreshes the crawl frontier from the EUW ladders. It runs once a day because
+# the input - who is currently ranked - changes on a human timescale, and because
+# every extra run is a burst of Riot API calls spent on a frontier that is
+# already wide enough.
+#
+# 02:10 is after the 01:00 aggregate build, so the summary a run produces covers
+# a patch boundary cleanly, and it is well outside the nightly backup window of
+# the rest of the homelab.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: discover-seeds
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: discover-seeds
+spec:
+  schedule: "10 2 * * *"
+  # The plan's schedules are wall-clock times for a person reading the logs, not
+  # UTC offsets; without this the job would drift by an hour twice a year.
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lolstats
+            app.kubernetes.io/component: discover-seeds
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: discover-seeds
+              # TODO(plan section 10, Phase 1): pin `latest` to
+              # v<semver>@sha256:<digest> once the release workflow has published
+              # a tag, here and in the other jobs.
+              image: ghcr.io/erik-schuetze/league-of-legends:latest
+              command: ["/lolstats-ingest"]
+              args: ["discover-seeds"]
+              envFrom:
+                - configMapRef:
+                    name: lolstats-config
+              env:
+                - name: GOMEMLIMIT
+                  value: 256MiB
+                - name: LOLSTATS_POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: DSN
+                - name: LOLSTATS_RIOT_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-riot
+                      key: RIOT_API_KEY
+                      # Optional so a cluster with no Riot key still runs every
+                      # job that does not need one, and so this job fails with
+                      # its own clear message instead of a pod that never starts.
+                      optional: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/lolstats
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: lolstats-data
+            - name: tmp
+              emptyDir: {}

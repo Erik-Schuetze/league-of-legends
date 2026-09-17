@@ -1,0 +1,124 @@
+---
+import { integer } from '../lib/format';
+import SampleSizeNotice from './SampleSizeNotice.astro';
+
+interface Props {
+  title: string;
+  href?: string;
+  tone?: 'default' | 'accent';
+  sampleN?: number;
+  minCellN?: number;
+}
+
+const { title, href, tone = 'default', sampleN, minCellN } = Astro.props;
+
+// A dynamic tag keeps the whole card a single link without nesting anything
+// inside it, and without rendering the same slot twice.
+const Tag = href ? 'a' : 'article';
+
+// With a minimum cell size the card hands the sample line to SampleSizeNotice,
+// which owns the disclosure rule; without one it keeps the frozen bare `n` line.
+// Both values are needed: a notice for a missing n would print a sample size of
+// zero, which is worse than printing nothing. See ADR-006.
+const showNotice = sampleN !== undefined && minCellN !== undefined;
+---
+
+<Tag class={`ds-card tone-${tone}`} href={href}>
+  <h3 class="title">{title}</h3>
+  <div class="body"><slot /></div>
+  {
+    showNotice ? (
+      <div class="notice-slot">
+        <SampleSizeNotice n={sampleN} minCellN={minCellN} />
+      </div>
+    ) : (
+      sampleN !== undefined && (
+        <p class="sample">
+          <span class="ds-visually-hidden">Sample </span>
+          <span class="v">n {integer(sampleN)}</span>
+        </p>
+      )
+    )
+  }
+</Tag>
+
+<style>
+  .ds-card {
+    display: block;
+    padding: var(--space-4);
+    background-color: var(--bg-light);
+    box-shadow: var(--shadow-sm);
+    transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+  }
+
+  a.ds-card {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* The card lifts towards its shadow, which is the reference design's whole
+     interaction vocabulary. */
+  a.ds-card:hover {
+    transform: translate(2px, 2px);
+    box-shadow: var(--edge), 6px 6px 0 0 var(--accent-color);
+  }
+
+  a.ds-card:hover .title {
+    color: var(--accent-color);
+  }
+
+  .tone-accent {
+    background-color: var(--accent-color);
+    color: var(--text-on-dark);
+  }
+
+  .title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--fs-lg);
+  }
+
+  .tone-accent .title {
+    color: var(--text-on-dark);
+  }
+
+  a.ds-card.tone-accent:hover .title {
+    color: var(--text-on-dark);
+    text-decoration: underline;
+  }
+
+  .body > :last-child {
+    margin-bottom: 0;
+  }
+
+  .sample {
+    margin: var(--space-3) 0 0;
+    padding-top: var(--space-2);
+    border-top: var(--border-width) solid var(--hairline);
+    font-size: var(--fs-xs);
+  }
+
+  .sample .v {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The composed notice keeps its own edge and lead label; the card only
+     removes the trailing gap so the card's padding stays the visible frame.
+     On an accent card the notice is drawn on a light surface, because its text
+     colours are the light-surface pair. */
+  .notice-slot {
+    margin-top: var(--space-3);
+  }
+
+  .notice-slot :global(.notice) {
+    margin-bottom: 0;
+  }
+
+  .tone-accent .notice-slot :global(.notice) {
+    background-color: var(--bg-light);
+  }
+
+  .tone-accent .sample {
+    border-top-color: var(--text-on-dark);
+  }
+</style>

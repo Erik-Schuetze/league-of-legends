@@ -1,0 +1,45 @@
+---
+// The page's own implementation of the frozen `StatValue` API
+// (docs/contracts.md section 3). `unavailable` renders an explicit missing
+// value and the reason, never a zero: a suppressed statistic and a statistic of
+// zero are different facts, and only one of them is in the artifact.
+
+import { decimal, integer, percent } from '../../lib/format';
+
+interface Props {
+  value: number;
+  format?: 'percent' | 'integer' | 'decimal';
+  digits?: number;
+  label?: string;
+  n?: number;
+  unavailable?: boolean;
+}
+
+const { value, format = 'percent', digits = 2, label, n, unavailable = false } = Astro.props;
+
+function render(input: number): string {
+  switch (format) {
+    case 'integer':
+      return integer(input);
+    case 'decimal':
+      return decimal(input, digits);
+    default:
+      return percent(input, digits);
+  }
+}
+---
+
+<span class="fallback-stat">
+  {unavailable ? (
+    <>
+      <span class="fallback-stat__value fallback-stat__value--unavailable">-</span>
+      <span class="fallback-stat__reason">not published: the sample is below the threshold for this cell</span>
+    </>
+  ) : (
+    <>
+      {label && <span class="fallback-stat__label">{label}</span>}
+      <span class="fallback-stat__value">{render(value)}</span>
+      {n !== undefined && <span class="fallback-stat__n">n = {integer(n)}</span>}
+    </>
+  )}
+</span>

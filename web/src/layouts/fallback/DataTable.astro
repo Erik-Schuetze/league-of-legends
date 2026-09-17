@@ -1,0 +1,91 @@
+---
+// The page's own implementation of the frozen `DataTable` API
+// (docs/contracts.md section 3). It server-renders a complete <table> in
+// initialSortKey order and emits no client script, so every page that shows
+// numbers is correct with JavaScript disabled.
+//
+// Only used when web/src/components/DataTable.astro is absent.
+
+import type { CellValue, Column, Row } from '../../lib/rows';
+import { decimal, integer, percent } from '../../lib/format';
+
+interface Props {
+  columns: Column[];
+  rows: Row[];
+  caption?: string;
+  initialSortKey?: string;
+  initialSortDir?: 'asc' | 'desc';
+  emptyMessage?: string;
+  dense?: boolean;
+}
+
+const {
+  columns,
+  rows,
+  caption,
+  initialSortKey,
+  initialSortDir = 'desc',
+  emptyMessage = 'No data for this selection.',
+  dense = false,
+} = Astro.props;
+
+/** Numbers sort as numbers, everything else as text, and gaps always sort last. */
+function rank(value: CellValue): number {
+  if (value === null || value === '') return 3;
+  if (typeof value === 'number') return 0;
+  if (value === 'withheld' || value === 'no sample') return 2;
+  return 1;
+}
+
+function sorted(source: Row[]): Row[] {
+  if (!initialSortKey) return source;
+  const key = initialSortKey;
+  const direction = initialSortDir === 'asc' ? 1 : -1;
+  return [...source].sort((a, b) => {
+    const left = a[key];
+    const right = b[key];
+    const byRank = rank(left) - rank(right);
+    if (byRank !== 0) return byRank;
+    if (typeof left === 'number' && typeof right === 'number') return (left - right) * direction;
+    return String(left).localeCompare(String(right)) * direction;
+  });
+}
+
+function display(value: CellValue, column: Column): string {
+  if (value === null) return '-';
+  if (typeof value !== 'number') return value;
+  switch (column.format) {
+    case 'percent':
+      return percent(value, column.digits ?? 2);
+    case 'integer':
+      return integer(value);
+    case 'decimal':
+      return decimal(value, column.digits ?? 2);
+    default:
+      return String(value);
+  }
+}
+
+const body = sorted(rows);
+---
+
+<table class:list={['fallback-data-table', dense ? 'fallback-data-table--dense' : null]}>
+  {caption && <caption>{caption}</caption>}
+  <thead>
+    <tr>
+      {columns.map((column) => (
+        <th scope="col" class:list={[column.align === 'end' ? 'fallback-is-end' : null]}>{column.label}</th>
+      ))}
+    </tr>
+  </thead>
+  <tbody>
+    {body.map((row) => (
+      <tr>
+        {columns.map((column) => (
+          <td class:list={[column.align === 'end' ? 'fallback-is-end' : null]}>{display(row[column.key] ?? null, column)}</td>
+        ))}
+      </tr>
+    ))}
+  </tbody>
+</table>
+{body.length === 0 && <p class="fallback-data-table__empty">{emptyMessage}</p>}

@@ -1,0 +1,84 @@
+version: 2
+
+updates:
+  # Go module dependencies. This is the ecosystem most likely to produce an
+  # advisory that affects this codebase, so it gets the most frequent check.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # One PR for routine bumps instead of a dozen. A security update still
+      # opens on its own, because Dependabot bypasses groups for advisories.
+      go-modules:
+        patterns:
+          - "*"
+
+  # The Astro site. Separate from the Go modules because a frontend major
+  # upgrade and a Go patch bump have nothing in common as review tasks.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(web)"
+    groups:
+      web:
+        patterns:
+          - "*"
+
+  # The other two images this project publishes. Separate entries because
+  # Dependabot reads one Dockerfile per directory: the base images here are
+  # pinned by digest too, and without these the pins would go stale silently -
+  # which is the one failure mode digest pinning is supposed to prevent.
+  - package-ecosystem: docker
+    directory: /build/caddy
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(docker)"
+  - package-ecosystem: docker
+    directory: /build/site
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(docker)"
+
+  # Actions in .github/workflows, which are pinned to full commit SHAs. This
+  # is what keeps those pins from going stale, and it rewrites both the SHA
+  # and the trailing "# vX.Y.Z" comment.
+  - package-ecosystem: github-actions
+    directory: /.github/workflows
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Base images in the Dockerfile. Both stages are pinned by digest, and this
+  # is what proposes the next one - which is the point of pinning: the bump
+  # arrives as a reviewable diff instead of happening silently under a tag.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(docker)"
+    ignore:
+      # The final stage is distroless; a major Debian bump changes the base
+      # entirely and is worth doing deliberately rather than weekly.
+      - dependency-name: "gcr.io/distroless/static-debian12"
+        update-types: ["version-update:semver-major"]

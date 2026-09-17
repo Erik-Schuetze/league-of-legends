@@ -1,0 +1,67 @@
+# Where backups go and how long they are kept. This is a separate ConfigMap from
+# `lolstats-config` on purpose: that one describes what the service *is* and is
+# read by every workload, while these keys are read by two CronJobs and by
+# nothing else. It also means the backup destinations can be changed without
+# touching a map that the ingest worker and the web tier both depend on.
+#
+# The paths are inside the ReadWriteMany volume, so every artifact below leaves
+# the node it was produced on - but it stays in the same NFS export, which means
+# moving it somewhere a raid failure cannot reach is a *configuration change to
+# this file* plus one edit elsewhere, not a rewrite:
+#
+#   RESTIC_REPOSITORY  ->  sftp:user@second-machine:/srv/restic/lolstats
+#                          s3:https://s3.example.invalid/lolstats-restic
+#                          (plus the credentials the backend needs, which are
+#                          added as extra keys in the `lolstats-restic` Secret -
+#                          see deploy/README.md, section Backups)
+#
+# The edit elsewhere is an egress rule. deploy/base/network/default-deny.yaml
+# denies all egress in this namespace and allows exactly DNS, Riot over 443 for
+# the four ingest components and in-namespace 5432/9090/8080, so a remote
+# repository hangs and then times out until deploy/base/network/allow.yaml has a
+# rule selecting `app.kubernetes.io/component: backup-archive` on the port the
+# medium uses (22 for sftp, 443 for s3). docs/runbooks/restore-raw.md, section
+# "When off-site media appears", is the checklist.
+#
+# Until that line changes, the restic snapshot is a copy on the same filesystem
+# as the data it protects. That is a guard against a bad write, an accidental
+# `rm`, and a corrupted file. It is NOT a guard against the volume itself
+# dying, and plan risk R6 therefore stays open. docs/runbooks/restore-raw.md
+# says so in the same words.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lolstats-backup-config
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: backup
+data:
+  # Root of the backup tree on the RWX volume:
+  #   backups/postgres/daily/    the nightly logical dumps
+  #   backups/postgres/weekly/   the Sunday promotion of those dumps
+  #   backups/restic/            the raw-archive repository (non-off-site)
+  #   backups/postgres/LATEST    the file name of the most recent dump
+  BACKUP_ROOT: "/var/lib/lolstats/backups"
+
+  # Postgres logical dumps: seven daily dumps and four weekly ones. Seven dailies
+  # cover "we noticed at the end of the week that something was wrong on
+  # Tuesday"; four weeklies cover "the corruption is older than a week". The
+  # dumps hold only the control plane - the frontier, the queue and the build
+  # manifest - because match payloads and aggregates are files, so keeping
+  # eleven of them costs megabytes, not gigabytes.
+  BACKUP_KEEP_DAILY: "7"
+  BACKUP_KEEP_WEEKLY: "4"
+
+  # Raw-archive snapshots. restic deduplicates, so `--keep-monthly` costs only
+  # the chunks that are unique to that month, and a month of history is the
+  # policy that matters for data Riot keeps for two years and timelines for one.
+  RESTIC_REPOSITORY: "/var/lib/lolstats/backups/restic"
+  RESTIC_CACHE_DIR: "/tmp/restic-cache"
+  RESTIC_KEEP_DAILY: "7"
+  RESTIC_KEEP_WEEKLY: "4"
+  RESTIC_KEEP_MONTHLY: "6"
+
+  # The snapshots are attributed to a fixed host name so that retention groups
+  # them together. The pod name changes on every run and `forget` groups by host,
+  # so a per-pod name would silently disable retention instead of failing.
+  RESTIC_HOST: "lolstats-archive"

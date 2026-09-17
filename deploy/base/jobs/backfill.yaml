@@ -1,0 +1,104 @@
+# Suspended on purpose: this is the manual repair tool, not part of the night.
+# It re-processes a bounded key range from the raw archive, and running it on a
+# schedule would mean re-fetching data that is already archived at a cost in Riot
+# API budget for no new information.
+#
+# To use it, an operator creates a one-off job with the range they want. The
+# range cannot be supplied by `--from=cronjob` alone - a job created that way
+# carries only the `backfill` argument and exits 2 with a usage message, because
+# the subcommand refuses to guess which slice of the archive to reprocess:
+#
+#   kubectl -n lolstats create job backfill-manual --from=cronjob/backfill \
+#     --dry-run=client -o json \
+#   | python3 -c 'import json,sys; j=json.load(sys.stdin); j["spec"]["template"]["spec"]["containers"][0]["args"] += ["-from","2026-01-01T00:00:00Z","-to","2026-02-01T00:00:00Z"]; json.dump(j,sys.stdout)' \
+#   | kubectl apply -f -
+#
+# `-puuid <uuid>` is the other accepted form: one player instead of a window.
+# The manifest itself stays parameter-free so that the schedule can never run an
+# unbounded backfill by accident.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backfill
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: backfill
+spec:
+  # A schedule is required by the API even when suspend is true. This one never
+  # fires: the job is only ever started by hand.
+  schedule: "0 4 * * 0"
+  timeZone: Europe/Berlin
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lolstats
+            app.kubernetes.io/component: backfill
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backfill
+              # TODO(plan section 10, Phase 1): pin to a digest once a tag exists.
+              image: ghcr.io/erik-schuetze/league-of-legends:latest
+              command: ["/lolstats-ingest"]
+              args: ["backfill"]
+              envFrom:
+                - configMapRef:
+                    name: lolstats-config
+              env:
+                - name: GOMEMLIMIT
+                  value: 1GiB
+                - name: LOLSTATS_POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: DSN
+                - name: LOLSTATS_RIOT_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-riot
+                      key: RIOT_API_KEY
+                      # A backfill that only reprocesses the archive must work
+                      # without a key; one that re-fetches needs it.
+                      optional: true
+              resources:
+                # Deliberately larger than the worker: a manual backfill is a
+                # burst that someone is waiting on, and it is not running while
+                # they sleep.
+                requests:
+                  cpu: 250m
+                  memory: 1Gi
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/lolstats
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: lolstats-data
+            - name: tmp
+              emptyDir: {}

@@ -1,0 +1,138 @@
+# The long-running half of the pipeline: one process that drains the fetch queue
+# and is the only thing in the system that writes raw/.
+#
+# It is a Deployment rather than a CronJob because the work is a queue, not a
+# schedule: a run that starts every hour cannot adapt to Riot's rate limits, and
+# it cannot keep a warm connection pool. One replica, deliberately - the archive
+# has a single writer, and the queue claim is the concurrency control
+# (`-concurrency`), not a second pod.
+#
+# Credentials: the worker refuses to start without RIOT_API_KEY and a DSN
+# (`require(cfg.Riot, cfg.Postgres)` in cmd/lolstats-ingest). Both are supplied
+# as optional env vars so that a missing Secret is a plain start-up error instead
+# of a stuck CreateContainerConfigError, and so that the rest of the namespace -
+# Postgres, the web tier, the site build, aggregate and maintain - comes up
+# healthy with no Riot key at all. This one pod is the exception: key-free, it
+# logs the missing key and restarts until the operator installs
+# `lolstats-riot` (see deploy/README.md). Nothing depends on it being up.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lolstats-ingest
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: ingest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lolstats
+      app.kubernetes.io/component: ingest
+  strategy:
+    # The archive is written in parts and the queue is in Postgres, so two
+    # workers overlapping briefly is safe; Surge would still cost a second 512Mi
+    # reservation on a shared node, which is not worth it.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lolstats
+        app.kubernetes.io/component: ingest
+    spec:
+      # A long grace period: the worker stops claiming new jobs on SIGTERM and
+      # finishes the ones in flight, which is what keeps a restart from leaving
+      # half-written parts behind.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        # The distroless nonroot uid. Fixed here so the RWX archive cannot end
+        # up owned by a uid that only exists inside one image.
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ingest
+          # TODO(plan section 10, Phase 1): the first published tag is not
+          # pushed yet. Replace `latest` with `v<semver>@sha256:<digest>` here
+          # and in the other workloads as soon as the release workflow has run
+          # once, so a rollout is reproducible from this file alone.
+          image: ghcr.io/erik-schuetze/league-of-legends:latest
+          command: ["/lolstats-ingest"]
+          args: ["worker"]
+          envFrom:
+            - configMapRef:
+                name: lolstats-config
+          env:
+            - name: GOMEMLIMIT
+              # Go reads no memory limit from the cgroup, so without this the
+              # collector aims at the node's 16 GB and the kernel OOM-kills the
+              # container long before the heap is anywhere near its limit. Set
+              # to the memory request, with the hard limit above it, so the soft
+              # limit always wins.
+              value: 512MiB
+            - name: LOLSTATS_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: lolstats-postgres
+                  key: DSN
+            - name: LOLSTATS_RIOT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lolstats-riot
+                  key: RIOT_API_KEY
+                  # Optional on purpose: the queue, the archive and the site
+                  # have to be usable, and every test and local run has to work,
+                  # with no Riot key in the cluster. The worker reports the
+                  # missing key and stays up instead of crash-looping.
+                  optional: true
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/lolstats
+            - name: tmp
+              mountPath: /tmp
+          # Both probes hit the metrics listener, which is the only port the
+          # worker opens. It is a real dependency: the process serves metrics
+          # from the same goroutine that would be serving work.
+          startupProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: lolstats-data
+        - name: tmp
+          emptyDir: {}

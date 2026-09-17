@@ -1,0 +1,21 @@
+# BuildKit reads the ignore file next to the Dockerfile first, before the one at
+# the context root. That is why this file exists at all: the build context for
+# the site image is web/, and the root .dockerignore - the one that excludes web/
+# from the Go image's context - is not consulted from there.
+#
+# Without this, a local `npm install` or `npm run build` would be uploaded as
+# part of the context and `COPY . .` would land the host's node_modules (macOS
+# binaries, if you are on a Mac) on top of the ones `npm ci` just installed in
+# the image. The build would still succeed and the nightly site build would then
+# fail for reasons that make no sense from inside the cluster.
+node_modules
+dist
+.astro
+.output
+.cache
+.vite
+*.log
+.env
+.env.*
+*.pem
+*.key

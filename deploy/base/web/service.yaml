@@ -1,0 +1,25 @@
+# The only route into this namespace, and it is not public: this Service is
+# what the shared Caddy in namespace `web` proxies to for lol.erik-schuetze.dev.
+# No LoadBalancer and no Ingress, so the cluster keeps exactly one address and
+# one certificate for all of its sites.
+#
+# The port is named because the shared Caddy's upstream is written as
+# `lolstats-web.lolstats.svc.cluster.local:80`; this is port 80 on the Service
+# and 8080 in the container.
+apiVersion: v1
+kind: Service
+metadata:
+  name: lolstats-web
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

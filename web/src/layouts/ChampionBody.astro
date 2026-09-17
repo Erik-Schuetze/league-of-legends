@@ -1,0 +1,364 @@
+---
+// A champion page: /champions/<slug> (every role the champion was played in)
+// and /champions/<slug>/<role> (one role, in depth).
+//
+// Both are the same page with a different scope, so both are rendered here. The
+// numbers come from the champion artifact when the aggregator published one and
+// from the tier list cells otherwise, because a champion that appears in a tier
+// list has a real sample even if no detail artifact was written for it.
+//
+// The champion's icon is referenced from Riot's Data Dragon CDN with an
+// explicit size and lazy loading; no image is vendored into this repository.
+
+import DataTable from './fallback/DataTable.astro';
+import FallbackBuildList from './fallback/BuildList.astro';
+import EmptyState from './EmptyState.astro';
+import JsonLd from './JsonLd.astro';
+import SampleSizeNotice from './fallback/SampleSizeNotice.astro';
+import StatValue from './fallback/StatValue.astro';
+import TierBadge from './fallback/TierBadge.astro';
+import type { Cell, Champion, Matchups, Role, StaticChampion } from '../types/agg';
+import { integer, utcStamp, windowLabel } from '../lib/format';
+import { cellAvailability } from '../lib/artifacts';
+import { buildLookup } from '../lib/build-lookup';
+import { componentProviding } from '../lib/components';
+import { roleLabel, roleSlug } from '../lib/roles';
+import {
+  NO_SAMPLE,
+  WITHHELD,
+  championMatchupRows,
+  championRoleColumns,
+  championRoleRows,
+  matchupColumns,
+  type Column,
+  type Row,
+} from '../lib/rows';
+import { emptyReason, type Snapshot } from '../lib/page';
+import { iconUrl } from '../lib/site';
+import { absoluteUrl, jsonLdDataset } from '../lib/seo';
+
+interface Props {
+  snap: Snapshot;
+  champion: StaticChampion;
+  /** The tier list cells this champion has in the snapshot, one per role. */
+  cells: Cell[];
+  /** The champion detail artifact, when the aggregator published one. */
+  artifact: Champion | null;
+  /** Set on /champions/<slug>/<role>. */
+  role?: Role;
+  matchups?: Matchups | null;
+}
+
+const { snap, champion, cells, artifact, role, matchups = null } = Astro.props;
+const partition = snap.partition;
+
+// The design system's BuildList is used when it declares `lookup`, the prop that
+// turns a build key into the item, rune or spell it names; until then this page
+// renders its own implementation of the same API, which does. Either way the
+// lookup is assembled here and passed, so the call below does not change when
+// the component lands.
+const BuildList = await componentProviding('BuildList', FallbackBuildList, ['lookup']);
+const lookup = buildLookup(snap.site.ddragonVersion);
+const minCellN = partition?.min_cell_n ?? 0;
+
+const cellForRole = (candidate: Role): Cell | null =>
+  artifact?.roles.find((entry) => entry.role === candidate)?.stats ??
+  cells.find((cell) => cell.role === candidate) ??
+  null;
+
+// A cell the aggregator published with no games in it is not a role the champion
+// was played in, and saying so would be a claim the artifact does not support.
+const hasGames = (candidate: Role): boolean => {
+  const cell = cellForRole(candidate);
+  return cell !== null && Number.isFinite(cell.n) && cell.n > 0;
+};
+
+// Every role this champion has a real sample in, in the canonical order.
+const playedRoles: Role[] = [];
+for (const candidate of ['TOP', 'JUNGLE', 'MID', 'BOTTOM', 'SUPPORT'] as Role[]) {
+  if (hasGames(candidate)) playedRoles.push(candidate);
+}
+
+const roleStats: Cell | null = role ? cellForRole(role) : null;
+const roleDetail = role ? artifact?.roles.find((entry) => entry.role === role) ?? null : null;
+
+// The overview lists the roles this champion was played in; the role page lists
+// the champion's other roles, so a reader can move sideways without going back.
+const listedRoles = role ? playedRoles.filter((candidate) => candidate !== role) : playedRoles;
+const roleRows: Row[] = role
+  ? []
+  : championRoleRows(
+      playedRoles.map((candidate) => ({
+        role: candidate,
+        stats: cellForRole(candidate) as Cell,
+        items: [],
+        runes: [],
+        spells: [],
+        skill_orders: [],
+      })),
+      snap.site,
+      minCellN,
+    );
+
+const matchupsForRole = role !== undefined && matchups !== null ? matchups : null;
+const matchupRows = matchupsForRole ? championMatchupRows(matchupsForRole, champion.id, snap.site, minCellN) : [];
+const matchupMinN = matchupRows.reduce(
+  (lowest, row) => (typeof row.n === 'number' && (lowest === null || row.n < lowest) ? row.n : lowest),
+  null as number | null,
+);
+
+const skillOrderColumns: Column[] = [
+  { key: 'order', label: 'Skill order', sortable: true },
+  { key: 'n', label: 'Games (n)', align: 'end', sortable: true, format: 'integer' },
+  { key: 'win_rate', label: 'Win rate', align: 'end', sortable: true, format: 'percent' },
+];
+const skillOrderRows: Row[] = (roleDetail?.skill_orders ?? []).map((entry) => ({
+  order: entry.order,
+  n: entry.n,
+  win_rate: cellAvailability(entry, minCellN) === 'published' ? entry.win_rate : WITHHELD,
+}));
+
+const icon = iconUrl(champion.icon, snap.site.ddragonVersion);
+const stats = roleStats;
+const statAvailability = stats ? cellAvailability(stats, minCellN) : null;
+const unpublishable = statAvailability !== null && statAvailability !== 'published';
+
+const headline = role ? `${champion.name} ${roleLabel(role).toLowerCase()}` : champion.name;
+const url = absoluteUrl(role ? `/champions/${champion.slug}/${roleSlug(role)}/` : `/champions/${champion.slug}/`, Astro.site, Astro.url);
+---
+
+<article>
+  <h1>
+    {headline}
+    {partition ? ` - patch ${partition.patch}` : ''}
+  </h1>
+  {
+    icon && (
+      <img class="fallback-champion-icon" src={icon} alt={`${champion.name} champion icon`} width="64" height="64" loading="lazy" decoding="async" />
+    )
+  }
+  <p>
+    {
+      role
+        ? stats && stats.n > 0
+          ? `${champion.name} played in ${roleLabel(role).toLowerCase()} in ${partition ? `${partition.region} ranked solo queue on patch ${partition.patch}` : 'this snapshot'}, with every rate shown next to the number of games it was measured over.`
+          : `${champion.name} has no published cell in ${roleLabel(role).toLowerCase()} in this snapshot, so this page states that rather than an estimate.`
+        : `${champion.name} is known to this build as Data Dragon ${snap.site.ddragonVersion}${
+            partition
+              ? playedRoles.length > 0
+                ? ` and was played in ${playedRoles.length} role${playedRoles.length === 1 ? '' : 's'} on patch ${partition.patch}`
+                : ` and has no published cell in any role on patch ${partition.patch}`
+              : ''
+          }.`
+    }
+  </p>
+
+  {
+    partition ? (
+      <p>
+        Bracket {partition.bracket} &middot; source window{' '}
+        {windowLabel(partition.source_window.from, partition.source_window.to)} &middot; generated{' '}
+        {utcStamp(partition.generated_at)}
+      </p>
+    ) : null
+  }
+
+  {
+    role && listedRoles.length > 0 ? (
+      <>
+        <h2>Other roles in this snapshot</h2>
+        <ul class="fallback-champion-links">
+          {listedRoles.map((candidate) => (
+            <li>
+              <a href={`/champions/${champion.slug}/${roleSlug(candidate)}`}>
+                {champion.name} {roleLabel(candidate).toLowerCase()}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </>
+    ) : null
+  }
+
+  {
+    stats ? (
+      <>
+        <h2>
+          {role ? `${roleLabel(role)} statistics` : 'Statistics'}
+        </h2>
+        <SampleSizeNotice n={stats.n} minCellN={minCellN} suppressedCells={partition?.suppressed_cells} role={role} />
+        <p class="fallback-stat-row">
+          <StatValue value={stats.win_rate} format="percent" label="Win rate" n={stats.n} unavailable={unpublishable} />
+          <StatValue value={stats.pick_rate} format="percent" label="Pick rate" unavailable={unpublishable} />
+          <StatValue value={stats.ban_rate} format="percent" label="Ban rate" unavailable={unpublishable} />
+          <StatValue
+            value={stats.ci95_half_width}
+            format="percent"
+            label="95% interval half-width"
+            unavailable={unpublishable}
+          />
+        </p>
+        <p>
+          {
+            stats.n > 0 ? (
+              <>
+                Tier <TierBadge tier={stats.tier} n={stats.n} />{' '}
+                {unpublishable
+                  ? `withheld: this cell holds n = ${integer(stats.n)} games, below the n = ${integer(minCellN)} this site publishes from.`
+                  : `measured over n = ${integer(stats.n)} games, so the win rate is ${(stats.win_rate * 100).toFixed(2)}% plus or minus ${(stats.ci95_half_width * 100).toFixed(2)} percentage points at 95% confidence.`}
+              </>
+            ) : (
+              `No tier is shown for this cell: it holds no games yet (n = 0), and a grade without games would be a claim the snapshot cannot support.`
+            )
+          }
+        </p>
+      </>
+    ) : (
+      <EmptyState
+        title={partition ? 'No cells published for this selection' : 'No sample yet'}
+        body={
+          role && partition
+            ? `${champion.name} has no published cell in ${roleLabel(role).toLowerCase()} in this snapshot, so this page reports nothing rather than an estimate.`
+            : emptyReason(snap)
+        }
+        minCellN={partition?.min_cell_n ?? null}
+      />
+    )
+  }
+
+  {
+    roleRows.length > 0 ? (
+      <>
+        <h2>Roles</h2>
+        <DataTable
+          columns={championRoleColumns}
+          rows={roleRows}
+          caption={`${champion.name} by role${partition ? `, patch ${partition.patch}` : ''}`}
+          initialSortKey="n"
+          initialSortDir="desc"
+        />
+        <ul class="fallback-champion-links">
+          {listedRoles.map((candidate) => (
+            <li>
+              <a href={`/champions/${champion.slug}/${roleSlug(candidate)}`}>
+                {champion.name} {roleLabel(candidate).toLowerCase()} in depth
+              </a>
+            </li>
+          ))}
+        </ul>
+      </>
+    ) : null
+  }
+
+  {
+    roleDetail && roleDetail.items.length + roleDetail.runes.length + roleDetail.spells.length > 0 ? (
+      <>
+        <h2>Items, runes and spells</h2>
+        <BuildList
+          title={`Items on ${champion.name} in ${role ? roleLabel(role).toLowerCase() : 'this role'}`}
+          builds={roleDetail.items}
+          kind="items"
+          lookup={lookup}
+        />
+        <BuildList title={`Runes on ${champion.name}`} builds={roleDetail.runes} kind="runes" lookup={lookup} />
+        <BuildList title={`Summoner spells on ${champion.name}`} builds={roleDetail.spells} kind="spells" lookup={lookup} />
+        <p>
+          Builds are the combinations the aggregator observed most often, already ordered by number of games. They are
+          counts of what was played, not a recommendation: this site publishes what happened, and nothing here is a
+          suggestion about what to buy.
+        </p>
+      </>
+    ) : null
+  }
+
+  {
+    skillOrderRows.length > 0 ? (
+      <>
+        <h2>Skill orders</h2>
+        <DataTable
+          columns={skillOrderColumns}
+          rows={skillOrderRows}
+          caption={`${champion.name} skill orders`}
+          initialSortKey="n"
+          initialSortDir="desc"
+        />
+      </>
+    ) : null
+  }
+
+  {
+    role && stats ? (
+      <>
+        <h2>Matchups</h2>
+        {matchupRows.length > 0 ? (
+          <>
+            <p>
+              {champion.name} against every {roleLabel(role).toLowerCase()} opponent the snapshot holds a pair for.
+              {matchupMinN !== null && ` The thinnest pair here has n = ${integer(matchupMinN)} games.`} A pair below the
+              threshold reads "{WITHHELD}" and shows its count only; a pair the snapshot does not contain reads "
+              {NO_SAMPLE}".
+            </p>
+            <DataTable
+              columns={matchupColumns}
+              rows={matchupRows}
+              caption={`${champion.name} matchups in ${roleLabel(role).toLowerCase()}`}
+              initialSortKey="n"
+              initialSortDir="desc"
+            />
+          </>
+        ) : (
+          <EmptyState
+            title="No matchup pairs published"
+            body={`The snapshot holds no matchup pair for ${champion.name} in ${roleLabel(role).toLowerCase()}, so no opponent is shown rather than an estimate.`}
+            minCellN={partition?.min_cell_n ?? null}
+          />
+        )}
+        <p>
+          <a href={`/matchups/${roleSlug(role)}`}>
+            The full {roleLabel(role).toLowerCase()} matchup matrix
+          </a>
+        </p>
+      </>
+    ) : null
+  }
+
+  <h2>How this page is computed</h2>
+  <p>
+    The numbers come from Riot's MATCH-V5 match feed, aggregated per patch and per queue, and this page was rendered from
+    the published aggregate artifact at build time. Win rate is wins divided by games in this cell; the 95% interval is
+    reported so that a small sample cannot look like a precise one. Cells below n = {integer(minCellN)} games are
+    withheld rather than published.
+  </p>
+
+  {
+    stats && partition ? (
+      <JsonLd
+        value={jsonLdDataset({
+          url,
+          name: role
+            ? `${champion.name} ${roleLabel(role)} statistics, League of Legends patch ${partition.patch}`
+            : `${champion.name} statistics, League of Legends patch ${partition.patch}`,
+          description: role
+            ? `Win, pick and ban rates for ${champion.name} in ${roleLabel(role).toLowerCase()}, ${partition.region} ranked solo queue, patch ${partition.patch}.`
+            : `Per-role win, pick and ban rates for ${champion.name}, ${partition.region} ranked solo queue, patch ${partition.patch}.`,
+          patch: partition.patch,
+          sourceWindow: partition.source_window,
+          generatedAt: partition.generated_at,
+          minCellN,
+          sampleSize: stats.n,
+          variables: [
+            { name: 'games played (n)', unit: 'games' },
+            { name: 'win rate', unit: 'win rate' },
+            { name: 'pick rate', unit: 'pick rate' },
+            { name: 'ban rate', unit: 'ban rate' },
+          ],
+        })}
+      />
+    ) : null
+  }
+
+  <p>
+    <a href="/">All roles</a> &middot; <a href={`/champions/${champion.slug}`}>{champion.name} overview</a> &middot;{' '}
+    <a href="/about">How these numbers are produced</a>
+  </p>
+</article>

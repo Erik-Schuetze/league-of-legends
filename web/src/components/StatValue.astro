@@ -1,0 +1,70 @@
+---
+import { decimal, integer, percent } from '../lib/format';
+
+interface Props {
+  value: number;
+  format?: 'percent' | 'integer' | 'decimal';
+  digits?: number;
+  label?: string;
+  n?: number;
+  unavailable?: boolean;
+}
+
+const { value, format = 'percent', digits = 2, label, n, unavailable = false } = Astro.props;
+
+const text =
+  format === 'integer' ? integer(value) : format === 'decimal' ? decimal(value, digits) : percent(value, digits);
+
+const missingReason = 'Not published: the sample is below the minimum cell size.';
+---
+
+<span class="stat" data-format={format}>
+  {label && <span class="label">{label}</span>}
+  {
+    unavailable ? (
+      <span class="value is-missing" data-state="unavailable">
+        <span aria-hidden="true">&mdash;</span>
+        <span class="ds-visually-hidden">{missingReason}</span>
+      </span>
+    ) : (
+      <span class="value">{text}</span>
+    )
+  }
+  {n !== undefined && <span class="n">n {integer(n)}</span>}
+</span>
+
+<style>
+  .stat {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.4rem;
+  }
+
+  .label {
+    font-family: var(--font-body);
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+
+  .value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--primary-color);
+    white-space: nowrap;
+  }
+
+  .is-missing {
+    /* Explicitly missing, never zero. The dash is decorative and the reason is
+       announced in its place. */
+    color: var(--text-muted);
+    font-style: normal;
+  }
+
+  .n {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
+</style>

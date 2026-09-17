@@ -1,0 +1,120 @@
+# Homelab overlay: the environment-specific facts only.
+#
+# Everything that describes *what* the service is lives in ../../base. What is
+# here is what differs because this is the k3s cluster at erik-schuetze.dev:
+# which StorageClass each volume lands on, and which node must not host these
+# pods. ArgoCD points at this directory (see
+# homecluster/argocd-apps/lolstats.yaml) - the base is not applied directly by
+# anything.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lolstats
+
+resources:
+  - ../../base
+
+# The tag is deliberately the same `latest` the base carries: nothing is
+# published to GHCR yet. Once the first tag exists this is the single place to
+# change it, and the change should be a digest rather than a tag -
+#   - name: ghcr.io/erik-schuetze/league-of-legends
+#     newTag: v0.1.0
+#     digest: sha256:...
+# because a tag can be re-pushed while a digest cannot (plan section 5, R13).
+# See deploy/README.md for the full TODO list; there is a matching TODO on each
+# image reference in the base.
+images:
+  - name: ghcr.io/erik-schuetze/league-of-legends
+    newTag: latest
+  - name: ghcr.io/erik-schuetze/league-of-legends-site
+    newTag: latest
+  - name: ghcr.io/erik-schuetze/league-of-legends-caddy
+    newTag: latest
+
+patches:
+  # Tier 2 (ZFS-backed NFS) for the archive and the rendered site: ReadWriteMany,
+  # because the worker, four jobs and two web replicas all mount it, and the
+  # bytes are large and cold. See homecluster/docs/architecture.md section 3.
+  - target:
+      kind: PersistentVolumeClaim
+      name: lolstats-data
+    patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: nfs-client
+
+  # Tier 1 (replicated local NVMe) for Postgres, which is the opposite kind of
+  # workload: small, hot, latency-sensitive, and single-writer. Longhorn rather
+  # than the NFS tier for the same file-locking reason the go-get-a-job PVC
+  # documents.
+  - target:
+      kind: PersistentVolumeClaim
+      name: lolstats-postgres-data
+    patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: longhorn
+      # Cluster convention for anything that has to survive a single N100
+      # dying (see homecluster/postgres/pvc.yaml).
+      - op: add
+        path: /metadata/annotations/longhorn.io~1replica-count
+        value: "2"
+
+  # `vega` is the GPU node. Its `gpu` taint is not enough on its own: the
+  # longhorn replica labels already keep data off it, but a pod that lands there
+  # competes with GPU work for a small OS drive, and the node has a history of
+  # going NotReady. Excluding it explicitly on every workload means placement is
+  # a property of this file rather than of the node's current taints, which
+  # Ansible or a kubelet restart can change without anyone noticing. bee01-03
+  # remain unconstrained, so this does not pin pods to a particular host.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      labelSelector: app.kubernetes.io/name=lolstats
+    patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values:
+                        - vega
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      labelSelector: app.kubernetes.io/name=lolstats
+    patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values:
+                        - vega
+  - target:
+      group: batch
+      version: v1
+      kind: CronJob
+      labelSelector: app.kubernetes.io/name=lolstats
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/spec/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values:
+                        - vega

@@ -1,0 +1,353 @@
+/*
+ * Global stylesheet: reset, page field, focus, print, and the token extension
+ * layer this project needs on top of the frozen palette in tokens.css.
+ *
+ * tokens.css imports this file, so `import '../styles/tokens.css'` - the one
+ * stylesheet import the component contract names for BaseLayout.astro - is
+ * enough to get the whole system. It is safe to import directly as well; both
+ * statements resolve to the same module.
+ *
+ * Scope of the extension layer, and why it is not in tokens.css:
+ * docs/contracts.md section 3 says tokens.css "declares exactly these names and
+ * no others at :root", so the frozen names stay alone in that file while the
+ * semantic scales, the spacing and density rhythm and the composite shadows are
+ * declared here. Components still read tokens and never hard-code a colour.
+ */
+
+:root {
+  /* Type: the brand face is the only family the frozen trio does not cover. */
+  --font-brand: 'Montserrat', 'Inter', system-ui, sans-serif;
+
+  /* Composite shadows. The hard offset is a duplicate of the surface rather
+     than a blur, which is what makes the frame read as brutalist. */
+  --edge: 0 0 0 var(--border-width) var(--accent-color);
+  --shadow-sm: var(--edge), var(--shadow-offset-sm) var(--shadow-offset-sm) 0 0 var(--accent-color);
+  --shadow-md: var(--edge), var(--shadow-offset-md) var(--shadow-offset-md) 0 0 var(--accent-color);
+
+  /* The frozen radii rule is "none", with the portfolio's 5px button the one
+     exception. */
+  --radius-btn: 5px;
+
+  /* Focus. The ring is the token value from the contract; the offset ring is
+     used where the element already owns its box-shadow (cards, tables) so the
+     focus state does not delete the frame. */
+  --focus-ring: 0 0 0 2px var(--accent-color);
+  --focus-ring-offset: 2px;
+
+  /* Spacing. The content area is tight (plan 7.2.1); headings and page framing
+     keep the portfolio's generous scale. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Density, the explicit departure from the portfolio's poster spacing. */
+  --row-pad-y: 7px;
+  --row-pad-x: 10px;
+  --row-pad-y-dense: 3px;
+  --row-pad-x-dense: 8px;
+  --list-gap: 4px;
+  --line-tight: 1.25;
+
+  /* Type scale. The two clamps are the portfolio's own heading clamps, kept so
+     page framing is unchanged; everything below --fs-xl is tighter than the
+     portfolio would use, because it is table furniture. */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: clamp(1.3rem, 2.4vw, 1.9rem);
+  --fs-3xl: clamp(1.6rem, 4.6vw, 3.8rem);
+
+  --content-max: 1200px;
+
+  /* Neutral ink and edges. */
+  --text-muted: #615f57; /* 4.74:1 on --bg-color, 5.36:1 on --bg-light */
+  --text-on-dark: var(--bg-light);
+  --text-on-dark-muted: #8a8b8e; /* 5.30:1 on --primary-color */
+  --accent-on-dark: #a6b2d7; /* 8.58:1 on --primary-color */
+  --hairline: rgba(11, 22, 42, 0.28);
+  --stripe: rgba(11, 22, 42, 0.045);
+  --nav-gradient: linear-gradient(
+    to bottom,
+    var(--bg-color) 40%,
+    rgba(239, 219, 191, 0.5) 80%,
+    rgba(239, 219, 191, 0) 100%
+  );
+
+  /* Print is ink on paper: no tint survives, and the numbers carry the meaning. */
+  --print-paper: #fff;
+  --print-ink: #000;
+  --print-rule: #767676;
+
+  /*
+   * Tier grades. Six steps of one hue, not six hues: a tier is ordinal, so a
+   * sequential ramp is the correct encoding and it survives every form of
+   * colour blindness. The letter is what carries the meaning; the tint only
+   * reinforces it, which is why --tier-ink is a single high-contrast ink that
+   * clears 4.5:1 on the darkest step (6.06:1).
+   */
+  --tier-ink: var(--primary-color);
+  --tier-splus-bg: #7d94d2;
+  --tier-s-bg: #93a4d5;
+  --tier-a-bg: #a8b4d7;
+  --tier-b-bg: #bec4da;
+  --tier-c-bg: #d3d4dc;
+  --tier-d-bg: #e4e0de;
+
+  /*
+   * Win-rate deviation. Also built inside the palette: "above" is the accent
+   * blue, "below" is the primary navy, "level" is untinted. The sign in the
+   * value is mandatory - colour is never the only channel - and the below
+   * state additionally carries a hatch, so the pair is still separable in
+   * greyscale and in print.
+   *
+   * --dev-up-fg clears 4.5:1 on --bg-color, --bg-light and --dev-up-bg, which
+   * is why it is only ever placed on the light step. The heavy steps are for
+   * heatmap fills, which use --tier-ink instead.
+   */
+  --dev-up-bg: #d3d4dc;
+  --dev-up-bg-strong: #a8b4d7;
+  --dev-up-fg: var(--accent-color);
+  --dev-down-bg: #d1ccc7;
+  --dev-down-bg-strong: #a3a2a2;
+  --dev-down-fg: var(--text-color);
+  --dev-flat-fg: var(--text-muted);
+  --dev-up-hatch: none;
+  --dev-down-hatch: repeating-linear-gradient(
+    135deg,
+    rgba(11, 22, 42, 0.3) 0 2px,
+    transparent 2px 6px
+  );
+  --dev-empty-bg: #e3ddd2;
+  --dev-empty-hatch: repeating-linear-gradient(
+    135deg,
+    rgba(11, 22, 42, 0.16) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding-top: 4rem; /* clears the fixed navbar, as on the portfolio */
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-color);
+  background-color: var(--bg-color);
+  /* The blueprint grid: the same 27px field the portfolio draws, at 6% alpha so
+     it never competes with a table. */
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+  background-position: center center;
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-family: var(--font-heading);
+  color: var(--primary-color);
+  line-height: var(--line-tight);
+  font-weight: 700;
+}
+
+h1 {
+  font-size: var(--fs-3xl);
+  margin-bottom: var(--space-4);
+}
+
+h2 {
+  font-size: var(--fs-2xl);
+  margin: var(--space-6) 0 var(--space-3);
+}
+
+h3 {
+  font-size: var(--fs-xl);
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+h4 {
+  font-size: var(--fs-lg);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+p {
+  margin: 0 0 var(--space-3);
+}
+
+ul,
+ol {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: var(--accent-color);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--primary-color);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* The islands server-render their controls and reveal them from the client
+   script; `hidden` must therefore win over any display rule a component sets. */
+[hidden] {
+  display: none !important;
+}
+
+/* Statistics. Tabular figures everywhere a column of numbers can appear, so
+   digits line up regardless of which cell is selected or filtered. */
+table,
+th,
+td,
+output,
+time,
+.ds-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-num {
+  font-family: var(--font-mono);
+}
+
+/* Focus. The ring is drawn outside the element, so it lands on the page field
+   rather than on the element's own accent background. */
+:focus-visible {
+  outline: var(--border-width) solid var(--accent-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Skip target for a page's own skip link. */
+[id]:target {
+  scroll-margin-top: 5rem;
+}
+
+.ds-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Opt-in page wrapper for the pages agent. Generous framing, tight content. */
+.ds-container {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 0 var(--space-5) var(--space-8);
+}
+
+/* Horizontal escape hatch for wide tables. Focusable so a keyboard user can
+   scroll it. */
+.ds-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.ds-table-scroll:focus-visible {
+  outline-offset: 0;
+}
+
+@media print {
+  body {
+    /* The grid and the fixed navbar are screen furniture. */
+    padding-top: 0;
+    background: var(--print-paper);
+    color: var(--print-ink);
+  }
+
+  .ds-print-hidden,
+  .ds-navbar {
+    display: none !important;
+  }
+
+  /* A wide table is allowed to overflow the page rather than be clipped to a
+     scroll box the reader cannot reach on paper. */
+  .ds-table-scroll {
+    overflow: visible !important;
+  }
+
+  * {
+    box-shadow: none !important;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  th,
+  td {
+    border-bottom: 1px solid var(--print-rule);
+  }
+
+  a {
+    color: var(--print-ink);
+    text-decoration: underline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

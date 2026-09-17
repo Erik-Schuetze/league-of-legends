@@ -1,0 +1,62 @@
+---
+// /champions/<slug> - every role this champion was played in this snapshot.
+//
+// One page per champion known to the build, so the champion index is complete
+// with or without a published snapshot: with no aggregates the pages render the
+// explicit empty state instead of disappearing, which is what the deployed
+// cluster will do until the first snapshot lands.
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ChampionBody from '../../layouts/ChampionBody.astro';
+import type { StaticChampion } from '../../types/agg';
+import { championFor, patchLabel, snapshot, tierListFor } from '../../lib/page';
+
+export function getStaticPaths() {
+  return snapshot().site.champions.map((champion) => ({
+    params: { slug: champion.slug },
+    props: { champion },
+  }));
+}
+
+interface Props {
+  champion: StaticChampion;
+}
+
+const { champion } = Astro.props;
+const snap = snapshot();
+const tierList = tierListFor(snap);
+const artifact = championFor(snap, champion.id);
+const cells = tierList ? tierList.cells.filter((cell) => cell.champion_id === champion.id) : [];
+
+const partition = snap.partition;
+const title = partition
+  ? `${champion.name} statistics, patch ${partition.patch} - League of Legends - LoL Stats`
+  : `${champion.name} statistics - League of Legends - LoL Stats`;
+const description = partition
+  ? `${champion.name} win, pick and ban rates by role for League of Legends patch ${partition.patch}, ` +
+    `${partition.region} ranked solo queue, each with the number of games behind it.`
+  : `${champion.name} statistics are not published yet: no aggregate snapshot exists for this site, so this page ` +
+    `renders an explicit empty state.`;
+
+const hasCells = cells.length > 0;
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  patch={patchLabel(snap)}
+  canonical={`/champions/${champion.slug}/`}
+  generatedAt={snap.generatedAt}
+  active={`/champions/${champion.slug}`}
+  noindex={!hasCells}
+>
+  <ChampionBody snap={snap} champion={champion} cells={cells} artifact={artifact} />
+  {
+    hasCells ? null : (
+      <p>
+        {champion.name} comes from the Data Dragon {snap.site.ddragonVersion} champion list checked into this
+        repository, which is why the page exists before the first snapshot does.
+      </p>
+    )
+  }
+</BaseLayout>

@@ -1,0 +1,201 @@
+---
+import type { Role } from '../types/agg';
+import { ROLES, roleLabel, roleSlug } from '../lib/roles';
+
+interface Props {
+  patch: string;
+  active?: string;
+  roles?: Role[];
+}
+
+const { patch, active, roles = ROLES } = Astro.props;
+
+const tierHref = (role: Role) => `/tier-list/${roleSlug(role)}`;
+const matchupHref = (role: Role) => `/matchups/${roleSlug(role)}`;
+const isCurrent = (href: string) => active === href || active === `${href}/`;
+---
+
+<header class="ds-navbar ds-print-hidden">
+  <nav class="bar" aria-label="Site">
+    <a class="brand" href="/">lolstats</a>
+
+    <ul class="roles">
+      {
+        roles.map((role) => (
+          <li>
+            <a
+              class="link"
+              href={tierHref(role)}
+              aria-current={isCurrent(tierHref(role)) ? 'page' : undefined}
+            >
+              {roleLabel(role)}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+
+    <details class="menu">
+      <summary class="summary">Matchups</summary>
+      <ul class="panel">
+        {
+          roles.map((role) => (
+            <li>
+              <a
+                class="link"
+                href={matchupHref(role)}
+                aria-current={isCurrent(matchupHref(role)) ? 'page' : undefined}
+              >
+                {roleLabel(role)}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </details>
+
+    <p class="patch"><span class="ds-visually-hidden">Patch </span>{patch}</p>
+  </nav>
+</header>
+
+<style>
+  .ds-navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    padding: 0.75rem 1.5rem;
+    /* The gradient and the blur are lifted from the reference design: the bar
+       dissolves into the page instead of drawing a hard line across the grid. */
+    background: var(--nav-gradient);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1.25rem;
+    max-width: var(--content-max);
+    margin: 0 auto;
+  }
+
+  .brand {
+    font-family: var(--font-brand);
+    font-weight: 700;
+    font-size: var(--fs-lg);
+    letter-spacing: -0.02em;
+    color: var(--primary-color);
+    text-decoration: none;
+  }
+
+  .brand:hover {
+    color: var(--accent-color);
+  }
+
+  .roles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .link {
+    display: inline-block;
+    padding: 0.15rem 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--text-color);
+    text-decoration: none;
+    /* Reserves the active underline's space so the bar never reflows. */
+    border-bottom: var(--border-width) solid transparent;
+  }
+
+  .link:hover {
+    color: var(--accent-color);
+  }
+
+  .link[aria-current='page'] {
+    color: var(--primary-color);
+    border-bottom-color: var(--accent-color);
+  }
+
+  .menu {
+    position: relative;
+  }
+
+  .summary {
+    display: inline-block;
+    padding: 0.15rem 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--text-color);
+    border-bottom: var(--border-width) solid transparent;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .summary::after {
+    content: ' +';
+    color: var(--accent-color);
+  }
+
+  .menu[open] > .summary::after {
+    content: ' -';
+  }
+
+  .summary:hover {
+    color: var(--accent-color);
+  }
+
+  .panel {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    min-width: 12rem;
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    list-style: none;
+    background-color: var(--bg-light);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .panel .link {
+    border-bottom-color: transparent;
+  }
+
+  .patch {
+    margin: 0 0 0 auto;
+    padding: 0.1rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-on-dark);
+    background-color: var(--primary-color);
+  }
+
+  @media (max-width: 47.99rem) {
+    .ds-navbar {
+      padding: 0.6rem 1rem;
+    }
+
+    .bar {
+      gap: 0.2rem 0.85rem;
+    }
+
+    .panel {
+      min-width: 10rem;
+    }
+  }
+</style>

@@ -1,0 +1,30 @@
+# One volume for everything that is neither the control plane nor the image:
+#
+#   raw/   the immutable archive of every payload Riot returned - the primary
+#          copy, and the only data here that cannot be regenerated
+#   agg/   published aggregates, raw/ transformed into what the site reads
+#   site/  the rendered HTML the web tier serves
+#
+# ReadWriteMany because four writers and one reader mount it at the same time,
+# from different nodes: the ingest worker, the aggregate job, the site build,
+# and both web replicas. The overlay sets the storage class; the base stays
+# cluster-agnostic.
+#
+# `Delete=false` is load-bearing. Without it, one moment where this file is
+# missing from git - a bad merge, a typo in an overlay - is enough for ArgoCD
+# to delete the claim, and with it the archive of data Riot retains for only
+# two years.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lolstats-data
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+  labels:
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi

@@ -1,0 +1,58 @@
+version: "2"
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused)
+  # matches the sibling go-get-a-job project, so the two repositories stay
+  # consistent for anyone reading both.
+  default: standard
+  enable:
+    # Mirrors govulncheck's job one level down: catches the call patterns
+    # that are insecure regardless of which dependency versions are in use.
+    - gosec
+    # A response body that is never closed leaks the underlying connection -
+    # and the crawler holds a lot of them.
+    - bodyclose
+    # Catches %w/%v slips in error wrapping, which silently break
+    # errors.Is/As for callers.
+    - errorlint
+    # Flags http.NewRequest where a *WithContext variant exists, so a request
+    # cannot outlive the run's context. The Riot client must be cancellable.
+    - noctx
+    - unconvert
+
+  settings:
+    gosec:
+      excludes:
+        # math/rand is only ever used for non-security purposes here
+        # (jittered backoff, partition shuffling). Nothing in this pipeline
+        # derives a key, a token, or an identifier from it.
+        - G404
+    errorlint:
+      # The pipeline wraps errors with %w throughout; treat any %v on an
+      # error value as a mistake rather than allowing it.
+      errorf: true
+
+  exclusions:
+    generated: lax
+    rules:
+      # Test files routinely ignore errors on cleanup calls, spin up
+      # httptest servers with hardcoded credentials, and issue requests
+      # without a context.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - noctx
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Erik-Schuetze/league-of-legends
