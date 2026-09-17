@@ -9,13 +9,26 @@ Two repositories are involved: the Alertmanager bundle lives in `homecluster`
 
 ## The gap
 
-`monitoring/prometheus/lolstats-rules.yaml` in the `homecluster` repo defines 12
-alerts - `LolstatsCrawlStale`, `LolstatsCrawlStalled`, `LolstatsFrontierNotDraining`,
-`LolstatsIngestMetricsAbsent`, `LolstatsBuildNotScheduled`, `LolstatsBuildJobFailed`,
-`LolstatsBuildStuck`, `LolstatsBuildFailures`, `LolstatsRiotRateLimited`,
-`LolstatsRiotAuthFailures`, `LolstatsRiotKeyRevoked`, `LolstatsRiotKeyOld`.
+`monitoring/prometheus/lolstats-rules.yaml` in the `homecluster` repo defines **9
+alerts in 3 groups**. Count them from the cluster rather than from this page: the list
+has changed once already and will change again, and a runbook that lists rules nobody
+loads is the same defect as a rule that can never fire.
+
+```console
+kubectl -n monitoring get prometheusrule lolstats-prometheus-rule -o json \
+  | jq -r '[.spec.groups[] | {group: .name, alerts: [.rules[].alert], count: (.rules|length)}]
+           | .[] | "\(.group)\t\(.count)\t\(.alerts|join(", "))"'
+# lolstats-crawl    4  LolstatsCrawlStale, LolstatsCrawlStalled, LolstatsFrontierNotDraining, LolstatsIngestMetricsAbsent
+# lolstats-build    2  LolstatsBuildNotScheduled, LolstatsBuildJobFailed
+# lolstats-riot-api 3  LolstatsRiotRateLimited, LolstatsRiotAuthFailures, LolstatsRiotKeyRevoked
+
+kubectl -n monitoring get prometheusrule lolstats-prometheus-rule -o json \
+  | jq '[.spec.groups[].rules[]] | length'
+# 9
+```
+
 `prometheus-persistant` sets `ruleSelector: {}`, so the operator loads all of them
-and they evaluate on every interval. A firing alert is visible on Prometheus'
+and they evaluate on every interval (30s). A firing alert is visible on Prometheus'
 `/alerts` page and in Grafana, and that is where it stops:
 
 ```console
@@ -30,7 +43,48 @@ No resources found
 The cluster has never had an Alertmanager. Prometheus has nowhere to send
 notifications, so nothing is routed: no webhook, no email, no page. Stale crawl,
 stale build, elevated 403/429 and key age all fire into an empty
-`activeAlertmanagers` list.
+`activeAlertmanagers` list - delivery terminates nowhere, and the gap is in the
+*route*, not in the rules. The cost of closing it is not the opt-in bundle below; it
+is an `alerting.alertmanagers` block in the **shared**
+`monitoring/prometheus/prometheus.yaml`, which rolls the single-replica Prometheus
+that serves every site on this cluster (Step 2, and "Why this is not enabled by
+default").
+
+### Three rules were removed on 2026-09-17 - do not re-add them
+
+They were removed because they could never fire, and a rule that cannot fire
+manufactures coverage that does not exist. Each one is recoverable only with the
+wiring named below.
+
+| rule | why it could not fire |
+| --- | --- |
+| `LolstatsBuildStuck` | **Hold unreachable.** `lolstats-aggregate`'s Jobs carry `activeDeadlineSeconds: 7200`, and the Job API applies that deadline to the Job as a whole, so `kube_job_status_active > 0` cannot persist for any sane `for:`. Measured with 30s and 60s probe Jobs: the deadline kill drops `kube_job_status_active` to `0` within one scrape interval and sets `kube_job_status_failed = 1`, which `LolstatsBuildJobFailed` already alerts on. There is also no measured build duration to derive a hold from - the CronJob has never been scheduled. |
+| `LolstatsBuildFailures` | **Inert producer.** `lolstats_build_failures_total` is a lazily-created `CounterVec` child (`internal/obs/obs.go:161`) whose only writer is the aggregate binary (`internal/aggregate/build.go:171`), and that binary runs as a CronJob that nothing scrapes: no `ports:` in its Job template, no Service, no PodMonitor (the Prometheus CR sets `serviceMonitorSelector: {}` but leaves the PodMonitor selector unset). `count(lolstats_build_failures_total)` is `0` series - it has never been scraped. Re-add it only with a Pushgateway or a long-lived aggregate worker whose `serveMetrics()` (`cmd/lolstats-aggregate/main.go:141`) is actually reachable. |
+| `LolstatsRiotKeyOld` | **Dead gauge.** `lolstats_riot_key_age_seconds` is a plain Gauge (`internal/obs/obs.go:125`) written only by `SetRiotKeyAge` (`internal/obs/obs.go:206`), whose only call site sits behind a type assertion that cannot succeed: the two-value `Age() (time.Duration, bool)` assertion in `internal/crawl/worker.go` (line 891 at commit `436b0f7`) is satisfied only by the test fake (`internal/crawl/fakes_test.go:940`), never by the ingest's real client, which exposes `Keys() *KeyProvider` (`internal/riot/client.go:222`). The gauge is therefore scraped as a constant `0` while `/readyz` reports the true age (observed `138s` and `10980s` at different times, with `/metrics` reading `0` in both); CI stays green because the fake does implement the assertion. Even if it were wired up, `KeyProvider.Age()` (`internal/riot/key.go:101`) measures process key lifetime, not key age, so it could never answer the question the alert asked. The whole `lolstats-riot-key` group was removed with it. |
+
+### Standing rule: no rule may be re-added unless it can fire
+
+Before adding or restoring a rule in `lolstats-rules.yaml`, prove two things against
+the live Prometheus: the metric it reads **exists** (a rule referencing a series no
+scraped process produces can never fire), and its `for:` is **shorter than the
+failure it detects and longer than healthy operation** (a hold shorter than what it
+waits for fires on a healthy system; a longer one is coverage theatre).
+
+- The key-age gauge fix is **in flight in another lane** (`internal/riot`,
+  `internal/crawl`). Until it lands and the value is observed to track `/readyz`, no
+  rule in this file may read `lolstats_riot_key_age_seconds`.
+- `LolstatsRiotRateLimited` was re-thresholded from measurement rather than
+  intuition: the old `share > 0.05` alone was unreachable (the highest 15m 429 share
+  ever recorded on this key is `0.0160`), so the expression is now `share > 0.03`
+  **and** total traffic `>= 0.01 req/s` - the second clause stops a nearly idle
+  window from paging on a single 429. It is measured, but not trigger-proven: a real
+  429 cannot be induced without asking Riot for more than the dev key allows.
+- **Unproven, recorded as unproven:** whether
+  `lolstats_riot_requests_total{status="401"}` increments for a real revoked
+  *production* key. Proving it would mean swapping the live key for a revoked one on
+  the running crawler, which is not a trade worth making. What *is* proven is that
+  Riot answers **401**, not 403, for a revoked key, so both Riot auth rules match
+  `status=~"401|403"`.
 
 ## Step 1 - apply the opt-in bundle
 
