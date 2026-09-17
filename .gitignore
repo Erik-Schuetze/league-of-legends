@@ -52,21 +52,23 @@ deploy/secret.yaml
 # `go build -o build/lolstats-web` did exactly that once.
 /build/lolstats-*
 
-# `web/` is the retired Astro tree, and it is still built in order to be
-# measured: `npm install` runs inside it and the serve-time gates read its
-# `dist/`. None of those outputs is ever committed.
+# `web/` was the retired Astro tree, built in order to be measured while it was
+# being dismantled: `npm install` ran inside it and the serve-time gates read its
+# `dist/`. None of those outputs was ever committed. The tree itself was deleted
+# outright on 2026-09-18 - not one tracked file under `web/` remains - and the
+# four rules below stay anyway, for the reason given at the foot of this block.
 #
 # These four rules are RESTORED, not new. They lived at `.gitignore:36-40` under
 # a `# Web` heading until commit `1d670fe` ("move the Astro tree's data out from
-# under web/") deleted them for a directory it had not deleted yet — `web/` still
-# holds 82 tracked files and is the tree lane M3 is still working in, so `web/`
-# is exactly where `npm install` and `astro build` still run. Measured
-# consequence, with the rules gone: **10,862 untracked files** in the working
-# tree (`web/node_modules/`, `web/dist/`, `web/.astro/`), one `git add -A` away
-# from being committed as project history — the same class of trap as the `.zz-*`
-# and nested-worktree-gitlink incidents above. Restored in `5524545` and
-# `web/.vercel/` here, so that `git status` is a usable signal again while the
-# tree is being dismantled.
+# under web/") deleted them for a directory it had not deleted yet — at that
+# moment `web/` still held 82 tracked files and was the tree lane M3 was still
+# working in, so `web/` is exactly where `npm install` and `astro build` still
+# ran. Measured consequence, with the rules gone: **10,862 untracked files** in
+# the working tree (`web/node_modules/`, `web/dist/`, `web/.astro/`), one
+# `git add -A` away from being committed as project history — the same class of
+# trap as the `.zz-*` and nested-worktree-gitlink incidents above. Restored in
+# `5524545` and `web/.vercel/` here, so that `git status` was a usable signal
+# again while the tree was being dismantled.
 #
 # Keep them even after `web/` is gone: a rule for a deleted directory is a
 # harmless no-op, whereas its absence is a live trap the moment anything
