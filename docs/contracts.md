@@ -707,6 +707,18 @@ wrong reason:
   gated nothing; a `SKIP` is a failure here, and `make test-parity
   WEB_DIST_SKIP=1` is the negative control that proves it.
 
+  `make parity-mutation-control` proves the other half: that the comparison is
+  live. It renames one attribute in the reference page (`lang="en"` becomes
+  `lang="zz"` in `web/dist/index.html`), requires `make test-parity` to exit
+  non-zero, and requires the failure to be *that* mutation - the comparison
+  prints the first differing offset with the bytes either side, so `lang="zz"`
+  has to appear on the reference side of the `home` excerpt. It then restores the
+  page and checks the hash. It rewrites the reference tree in place, because the
+  test reads `../../web/dist` and has no override, so it runs last and alone; and
+  it deliberately does **not** assert that the unmutated tree passes, because
+  that is what `Test` in the build workflow asserts, and a control that re-asserted
+  it would report an unrelated parity break as this control's failure.
+
   CI shows the gate is now load-bearing. Run
   [35269826778](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35269826778)
   executes `TestRenderParity` and fails it on a design-token rename in the served
