@@ -297,14 +297,29 @@ have been overtaken, and one of them was wrong.
 ```sh
 sh scripts/backup-status.sh          # the whole picture, exit code 0 only if all of it is fresh
 kubectl -n lolstats get cronjob backup-postgres backup-archive
-kubectl -n lolstats get secret lolstats-restic     # exists now: 17 Sep
+kubectl -n lolstats get secret lolstats-restic     # ABSENT - deleted 2026-09-17, see below
 ```
 
-- The `lolstats-restic` Secret exists (created out of band; its value is stored
-  off-cluster, because a lost password makes every snapshot unreadable).
+**Correction, 2026-09-17T23:33Z (coordinator, measured with `kubectl -n lolstats get secret`):
+the `lolstats-restic` Secret is NOT in the namespace.** It was created out of band that
+evening to prove the restic path, and it was then deleted along with the operations lane's
+other evidence objects, before anyone noticed that `deploy/base/jobs/backup-archive.yaml`
+names it in three places: `envFrom.secretRef`, `env.RESTIC_PASSWORD.secretKeyRef`, and
+`volumes.restic-secret`. **All three are `optional: true`**, so this is not a broken
+workload: the nightly job still starts and exits 1 with its own designed message
+(`FATAL: RESTIC_PASSWORD is empty or the lolstats-restic Secret does not exist`). What is
+lost is the ability to *read* the snapshots below from inside the cluster - not the
+snapshots, and not the data, which the raw archive still holds on the same volume. Nothing
+was actually protecting anything: a repository on a path inside the same NFS export is
+explicitly a non-off-site copy (the job prints exactly that), so R6 is neither better nor
+worse for this. **Recreating the Secret is an owner step, not a code change** - restore it
+from the off-cluster copy of the password described above. Do **not** generate a fresh
+password here: it would look like a working credential while being unable to decrypt a
+single existing snapshot.
+
 - Snapshots exist: `63eaf09e` (2026-09-17T18:36Z), `7220621a` (18:42Z), `ccafc2f5`
   (18:44Z) - 802 files, 1.329 GiB in the tree, ~190 MiB stored. This runbook now
-  has something to restore.
+  has something to restore, **but not until the Secret above is restored first**.
 - The repository is still `/var/lib/lolstats/backups/restic`, a path on the same
   NFS export as the archive. **R6 stays accepted and unmet.** There is still no
   destination that leaves the premises; `docs/runbooks/offsite-options.md` is the
