@@ -236,7 +236,7 @@ form rule was therefore vacuous - it had nothing to be wrong about. The
 replacement asserts the invariant the rule stood in for: the tier's controls are
 answered by the server, so they need no JavaScript.**
 
-`web/dist` holds 1063 built HTML pages and **zero** `<form>` elements: the sort
+`web/dist` held 1063 built HTML pages and **zero** `<form>` elements: the sort
 and filter bar is rendered by the Go tier, not by the reference tree. So a check
 4 that only read `web/dist` would have passed for the wrong reason - it reported
 `(0 checked)` - and could not have caught a JS-only control, because the tree it
@@ -329,9 +329,10 @@ and no `/riot.txt` is published, and it fails when a `/riot.txt` appears without
 a configured token, or when a configured token is not published, or when any page
 claims Riot has verified the site while no token is configured. The claim is
 gated; the errand is not invented. The tier's own half is proved in code, not by
-argument: `internal/webtier/parity_test.go` fails if `/riot.txt` is published
+argument: `internal/webtier/fixtures_test.go` fails if `/riot.txt` is published
 without a token and fails if it is not published once
-`LOLSTATS_RIOT_VERIFICATION_TOKEN` is set.
+`LOLSTATS_RIOT_VERIFICATION_TOKEN` is set. That assertion moved there on
+2026-09-18, from the `parity_test.go` this paragraph used to name - see gap 7.
 
 ## Checkpoint register
 
@@ -348,13 +349,13 @@ free and ungated; no MMR/ELO calculator anywhere; no data-broker behaviour.
 
 | Sub-requirement | Status | Reason and evidence |
 | --- | --- | --- |
-| Terms of Service published | met | `web/src/pages/legal/terms.astro` builds to `/legal/terms`; the built page carries the 13 required sections, from acceptable use to a "Governing law" clause and an explicit Riot non-endorsement section |
-| Privacy Policy published | met | `web/src/pages/legal/privacy.astro` builds to `/legal/privacy` |
-| Non-endorsement disclaimer visible | met | `web/src/pages/disclaimer.astro` builds to `/disclaimer`; 4 of 4 compliance pages render the frozen sentence verbatim, and every one of the 1063 built pages links to `/disclaimer` |
+| Terms of Service published | met | `internal/webtier/templates/pages/terms.body.tmpl` is served at `/legal/terms`; the page carries the 13 required sections, from acceptable use to a "Governing law" clause and an explicit Riot non-endorsement section |
+| Privacy Policy published | met | `internal/webtier/templates/pages/privacy.body.tmpl` is served at `/legal/privacy` |
+| Non-endorsement disclaimer visible | met | `internal/webtier/templates/pages/disclaimer.tmpl` is served at `/disclaimer`; 4 of 4 compliance pages render the frozen sentence verbatim, and every page in the served corpus links to `/disclaimer` |
 | `riot.txt` hosted | **pending, and deliberately not a gate** | `astro.config.mjs` publishes `dist/riot.txt` only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set, and the tier republishes it the same way. It is unset, so **no `riot.txt` exists and none is offered** - a placeholder would be a false claim, and the live tier returns 404 for it. The token is issued to the domain owner after they start a production-key application, so this is owner action, not code work. Gate check 5 is the gate that fires on a *false* claim, not on the honest absence - see the `/riot.txt` decision in amendment 2 |
-| Free tier genuinely free and ungated | met | gate check 4: no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any of the 1063 built pages or in the pages the tier served; every form the tier serves is a `method="get"` form with an on-origin `action` (3 of them, all filter bars) whose named controls are inside them, and every control it offers provably changes the document without JavaScript (digests in amendment 2) - see the amendments below |
+| Free tier genuinely free and ungated | met | gate check 4: no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any page of the served corpus; every form the tier serves is a `method="get"` form with an on-origin `action` (3 of them, all filter bars) whose named controls are inside them, and every control it offers provably changes the document without JavaScript (digests in amendment 2) - see the amendments below |
 | No MMR/ELO calculator anywhere | met | gate check 1: 1370 files scanned, 4 rating mentions, all 4 exempt negations of the standing prohibition, 0 rating-like identifiers or keys. The count moves as the other workstreams add files; the run in the evidence log, not this number, is the evidence |
-| No data-broker behaviour | met | gate check 9: the published artifact schema (`web/src/types/agg.d.ts`, `agg.schema.json`) declares no PUUID and no served JSON file carries one; `web/dist` contains no raw-archive path |
+| No data-broker behaviour | met | gate check 9: the published artifact schema (`schema/agg.d.ts`, generated from `internal/aggmodel`, and `agg.schema.json`) declares no PUUID and no served JSON file carries one; the served corpus contains no raw-archive path |
 
 **Next step (owner).** None. **Superseded 2026-09-17:** the owner answered plan
 question 6 by choosing publication - real crawled Riot data is served from the
@@ -397,7 +398,7 @@ Riot polices display, not only API access.
 **Status: met for the v1 artifact set; the trigger is live for anything new.**
 The frozen route table in `docs/contracts.md` section 1.3 covers a tier list,
 champion detail, matchups and the legal pages. Nothing beyond that is published.
-`web/src/types/agg.d.ts` and `fixtures/agg/agg.schema.json` are the whole
+`internal/aggmodel/schema.go` and `fixtures/agg/agg.schema.json` are the whole
 published shape, and gate checks 1 and 9 re-prove on every run that it carries no
 rating-like value and nothing per-player.
 
@@ -433,11 +434,14 @@ table above. If the no-data-broker or no-MMR clause has changed, re-run
 art, splash art or marks beyond that.
 
 **Status: met.** The only Riot assets are Data Dragon static data (champion,
-item, rune and summoner-spell names and icons, plus numeric ids), taken at build
-time by `web/scripts/fetch-ddragon.mjs`. Gate check 2 scans image references in
-the built HTML and CSS and confirms every absolute image origin is
-`https://ddragon.leagueoflegends.com`; the current build has 2378 `<img>` tags on
-that origin and no other absolute image origin at all. No champion art, splash
+item, rune and summoner-spell names and icons, plus numeric ids), checked into
+the repository under `projection/` and embedded at `internal/webtier/data/*.json`
+(`internal/webtier/data.go`; `TestEmbeddedProjectionsMatchTheRepository` fails if
+the two drift). No build-time fetch remains - `web/scripts/fetch-ddragon.mjs`
+went with the Astro tree on 2026-09-18. Gate check 2 scans image references in
+the **served** HTML and CSS and confirms every absolute image origin is
+`https://ddragon.leagueoflegends.com`; the captured corpus of 2026-09-18 carries
+1038 `<img>` tags on that origin and no other absolute image origin at all. No champion art, splash
 art, loading screen, logo or Riot mark is loaded from anywhere else, and the
 favicon is a local file.
 
@@ -492,7 +496,8 @@ renders its substantive content for an anonymous reader, and all of it renders
 **without JavaScript** - the tables are server-rendered and the island only adds
 sorting and filtering.
 
-Evidence: gate check 4 scans all 1063 built pages for a password or email field,
+Evidence: gate check 4 scans the whole captured corpus (1063 pages in the
+2026-09-18 capture) for a password or email field,
 a `name="password"`/`name="email"` field, a login, sign-in, sign-up, register,
 subscribe, pricing or checkout route, `data-paywall` or a "Sign in"/"Sign up"
 link, and finds none; it separately requires that every form in those pages is a
@@ -521,13 +526,17 @@ sh scripts/compliance-check.sh          # check 1
 
 What it scans: every `*.go`, `*.sql`, `*.ts`, `*.js`, `*.mjs`, `*.astro`,
 `*.json`, `*.html` and `*.css` file under the repository root, excluding
-`node_modules`, `.git` and `.agent-artifacts`. That includes the built HTML in
-`web/dist`, so the scan covers what is actually served as well as what is
-written. **1370 files** on the last run; the count grows as the other workstreams
-add files, so the recorded run is the evidence and the number is orientation only.
+`node_modules`, `.git`, `.agent-artifacts` and `.astro`. That includes the
+captured served corpus under `bin/served-pages`, so the scan covers what is
+actually served as well as what is written. **1370 files** on the last run; the
+count grows as the other workstreams add files, so the recorded run is the
+evidence and the number is orientation only. The scan fails if it reads fewer
+than 200 files, and fails again if it finds no rating mention at all: a scan that
+read nothing, or that cannot match the standing prohibition, is reported as a
+broken pattern rather than as clean code.
 
 What it finds: **4 lines mention a rating, and all 4 are negations** of the hard
-prohibition - the standing `NO_RATING_TEXT` statement in `web/src/lib/legal.ts`,
+prohibition - the standing `NoRatingText` constant in `internal/webtier/brand.go`,
 its use on the About page, and the same sentence as it appears in the served
 `/about` and `/disclaimer` HTML. A line is exempt only when a negation word
 precedes the token on the same line, and the exempt lines are printed so a
@@ -536,10 +545,11 @@ keys or columns exist** - the scan also looks for the declaration and key forms
 (`mmr`, `elo`, `rating`, `skill_rating`, `matchmaking_rating`, `player_rating`,
 `hidden_rating`) with explicit non-identifier delimiters.
 
-Coverage: Go (the control plane, the crawler and the aggregator), SQL (the
-migrations, including the view and column names), TypeScript and Astro (the
-frontend), and the aggregate artifact schema in `web/src/types/agg.d.ts` plus
-`fixtures/agg/agg.schema.json`. Lead-by-lead, there is no field, no column, no
+Coverage: Go (the control plane, the crawler, the aggregator and the tier that
+renders the pages), SQL (the migrations, including the view and column names),
+the served HTML and CSS, and the aggregate artifact schema in
+`schema/agg.d.ts` (generated by `go run ./cmd/gen-types` from
+`internal/aggmodel`) plus `fixtures/agg/agg.schema.json`. Lead-by-lead, there is no field, no column, no
 view and no page that could carry such a value, so none can be displayed.
 
 ### The privacy policy describes what the implementation actually does
@@ -551,10 +561,10 @@ nothing is collected.
 
 | Claim | How it was checked | Result |
 | --- | --- | --- |
-| No cookies, and none set on the site's behalf | `grep -rniE 'set-cookie\|set_cookie\|cookie' deploy/` and `grep -rniE 'document\.cookie' web/src/` | no match in either |
-| No analytics, advertising, tracking pixel or third-party embed | gate check 3 over all 1063 built pages | no executable third-party resource; every script, embed and preconnect is same-origin |
+| No cookies, and none set on the site's behalf | `grep -rniE 'set-cookie\|set_cookie\|cookie' deploy/` and `grep -rniE 'document\.cookie' internal/webtier/` | no match in either |
+| No analytics, advertising, tracking pixel or third-party embed | gate check 3 over the whole captured corpus (1063 pages in the 2026-09-18 capture) | no executable third-party resource; every script, embed and preconnect is same-origin |
 | No accounts, logins, forms or user submissions | gate check 4 | no form, credential field or auth route |
-| Nothing stored on the device | no `document.cookie`, no `localStorage` or `sessionStorage` use anywhere in `web/src` | absent |
+| Nothing stored on the device | nothing in the served corpus and nothing in the tier: `grep -rniE 'document\.cookie\|localStorage\|sessionStorage' internal/webtier/ bin/served-pages` returns no match | absent |
 | The access log is the only processing | `deploy/base/web/caddyfile.yaml:80` - `log { output stdout }`, and `grep -rniE 'fluent\|vector\|promtail\|filebeat\|logstash' deploy/` | logs go to container stdout; **no log shipper, no log store and no retention configuration exists**, which is why the policy says the practical retention is days, until the container is replaced |
 | The Data Dragon icon request is disclosed | the privacy policy names `ddragon.leagueoflegends.com`, states that it receives the visitor's IP address and user agent, that Riot Games is established in the United States, and that this is therefore a transfer outside the EEA | disclosed rather than omitted |
 
@@ -572,8 +582,10 @@ archive, and it publishes no per-player identifiable data.
 
 Evidence: gate check 9. The raw archive - verbatim Riot payloads - lives on the
 cluster and is never fetched by a visitor. The deployed artifact root is `/agg`;
-`web/dist` contains **no** `/agg` path, **no** JSON file at all, and no path
-matching `*/raw/*` or `*/archive/*`. The published artifact schema declares no
+no served page links to or fetches anything under it (the only occurrence of the
+string `/agg` in the corpus of 2026-09-18 is the About page's prose describing
+the pipeline), the corpus contains **no** JSON file at all and no path matching
+`*/raw/*` or `*/archive/*`. The published artifact schema declares no
 PUUID, no summoner id, no account id, no Riot id and no profile icon id, and the
 check proves its pattern works by requiring it to match in
 `internal/contract/contract.go`, where the crawler genuinely stores a PUUID
@@ -594,24 +606,28 @@ and `fixtures/README.md` states that nothing in the directory is real Riot data.
 Data Dragon static data (names, icons, numeric ids) and nothing else: no champion
 art, no splash art, no loading screens, no Riot marks.
 
-Reproduce against the built output:
+Reproduce against the captured served corpus (`make served-pages` refreshes it):
 
 ```
-grep -rhoE 'https?://[A-Za-z0-9.-]+' web/dist --include='*.html' --include='*.css' \
+grep -rhoE 'https?://[A-Za-z0-9.-]+' bin/served-pages --include='*.html' --include='*.css' \
   | tr '[:upper:]' '[:lower:]' | sort -u
 ```
 
 Every origin that appears in an image, icon, `og:image`, `twitter:image`,
 `<source>` or CSS `url()` position is `ddragon.leagueoflegends.com/cdn/`.
-Gate check 2 is the automated form: it extracts those references from the built
+Gate check 2 is the automated form: it extracts those references from the served
 HTML and CSS, then removes the Data Dragon origin and fails if anything remains.
-The current build has 2378 `<img>` tags pointing at the Data Dragon CDN and
-**zero** other absolute image origins; nothing else is loaded from a third
-party, and the remaining references are same-origin.
+The captured corpus of 2026-09-18 carries 1038 `<img>` tags pointing at the Data
+Dragon CDN and **zero** other absolute image origins; nothing else is loaded from
+a third party, and the remaining references are same-origin.
 
-Data Dragon is fetched at build time by `web/scripts/fetch-ddragon.mjs`, so the
-build needs network access but the served site does not, and no visitor's page
-view causes a Riot request.
+No build fetches Data Dragon any more. The static data is checked in under
+`projection/`, embedded by `internal/webtier/data.go`, and the frozen tree
+reserves `/agg/v1/static/<ddragon_version>/` for it (`docs/contracts.md` section
+4; the serving gate warns if that prefix is absent from the served root). The
+tier reads its own copy at render time and makes no outbound request, so no
+visitor's page view causes a Riot request; the build-time
+`web/scripts/fetch-ddragon.mjs` went with the Astro tree on 2026-09-18.
 
 ## Standing constraints
 
@@ -631,7 +647,8 @@ one of them is a decision that needs an ADR:
 - **The data state is disclosed on the page, not inferred by the reader.** Every
   page carries the patch, region, queue and bracket it was built from, plus the
   aggregate manifest's `source` (`demo`, `riot-match-v5`, or no data), rendered
-  from `web/src/lib/legal.ts` and `web/src/lib/site.ts`.
+  from the tier's own constants and build metadata (`internal/webtier/brand.go`,
+  `internal/webtier/view_feeds.go` and the page templates).
 - **Rank attribution is disclosed as a snapshot.** The tier and division in a
   frontier entry are where a PUUID was discovered, not where it is now.
 - **Secrets are never committed and never baked into an image.** The Riot key is
@@ -646,11 +663,13 @@ successes is not a register.
 1. ~~**The frozen non-endorsement sentence is verbatim on 4 pages, not on all
    1063.**~~ **Closed.** The footer served its own paraphrase on all 1063 pages
    while the exact frozen sentence reached only the four compliance pages. Both
-   footers now render `NON_ENDORSEMENT_TEXT` from `web/src/lib/legal.ts` itself,
-   so the approved sentence is served byte for byte on every built page in every
+   footers now render `NonEndorsementText` from `internal/webtier/brand.go`, the
+   constant that took over the string `web/src/lib/legal.ts` used to hold, so the
+   approved sentence is served byte for byte on every page in every
    data state, and gate check 6 fails any page that states the notice in other
    wording. The `web/src/layouts/fallback/Footer.astro` wording quoted here
-   before the fix is no longer published anywhere.
+   before the fix is no longer published anywhere, and the file itself went with
+   the Astro tree on 2026-09-18.
 2. ~~**The build names a reserved placeholder hostname.**~~ **Closed in the
    code, open in the deployment.** With `LOLSTATS_SITE_URL` unset the 1063 built
    pages used to carry `lolstats.example.invalid` in their canonicals and the
@@ -683,35 +702,54 @@ successes is not a register.
    that holds is in `deploy/base/web/go-deployment.yaml`. What the gap recorded
    was that the posture was this workstream's interpretation rather than the
    owner's decision - that is the part that changed.
-7. **The render-parity reference is out of step with the served design layer -
-   open, and owned by the design lanes.** `internal/webtier/parity_test.go`
-   compares the tier's bytes with `web/dist`, and the served sheet on `main` no
-   longer matches it: `internal/webtier/assets/astro/JsonLd.BEq7AnVK.css` says
-   `--surface:#f1eae0` (and emits `.ds-panel{background-color:var(--surface)}`)
-   where `web/dist/_astro/JsonLd.BEq7AnVK.css` says `--bg-light:#f1eae0`, and
-   `shell.tmpl` now appends the frozen `assets/css/*` layer after it. Every route
-   therefore mismatches at offset ~1700 and the `Test` step fails on `main` in
-   runs [35266202608](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266202608),
-   [35266466674](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266466674),
-   [35266653629](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266653629),
-   [35267893161](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35267893161)
-   and [35269826778](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35269826778)
-   - identical at `8524dfe` and at the gates commit `0a247c6`, and reproducible
-   locally with `make test-parity` (exit 2). This is the gate working, not a
-   flake: it is exactly the class of change the parity tests exist to catch, and
-   it was invisible while they ran before `npm run build` and skipped. The
-   resolution is a decision this register does not own - either the Astro
-   reference moves with the design layer, or the reference is re-frozen against
-   the served output as part of retiring it (`docs/contracts.md` section 5) - but
-   the gate is fail-closed in both directions, so nothing can silently drop the
-   comparison. Until it is resolved, the `verify` job stops at `Test` and the
-   compliance steps after it do not run in CI.
+7. **The render-parity reference was out of step with the served design layer -
+   closed 2026-09-18, by retiring the reference rather than re-freezing it.** The
+   byte-parity gate and its live variant were retired on 2026-09-17 (`8e23d67`,
+   which deleted `internal/webtier/parity_test.go` and `live_parity_test.go`), and
+   the pre-rendered Astro tree they compared against was deleted on 2026-09-18
+   (`65f2983`). Nothing in the repository now carries a `TestRenderParity`, a
+   `make test-parity` target, a `WEB_DIST_*` variable, or a mutation control:
+   `scripts/parity-mutation-control.sh` went with them. Two consequences a reader
+   should take from this item: the two resolution options it named are moot,
+   because there is no second corpus left to re-freeze against, and the design
+   authority is now the Go tier's own executable assertions
+   (`internal/webtier/frozen_tokens_test.go`, `a11y_contract_test.go`) rather than
+   a byte comparison with a tree no deployment renders from. The `/riot.txt`
+   assertion the parity test carried was not dropped with it: it moved to
+   `internal/webtier/fixtures_test.go` (see the `/riot.txt` decision above).
+   The part of this item that was not parity - a red `Test` step stopping the
+   compliance steps behind it - was fixed on 2026-09-17 by giving the launch gates
+   their own workflow, and the parity half of that cause is gone with the gate.
+
+   *The finding as recorded on 2026-09-17, kept because it is the only traceable
+   record of the five runs it cites, and because those runs are the evidence that
+   motivated the retirement. Every clause in it describes what was true that day:*
+
+   > `internal/webtier/parity_test.go` compared the tier's bytes with `web/dist`,
+   > and the served sheet on `main` no longer matched it: the served
+   > `internal/webtier/assets/astro/JsonLd.BEq7AnVK.css` said
+   > `--surface:#f1eae0` (and emitted `.ds-panel{background-color:var(--surface)}`)
+   > where `web/dist/_astro/JsonLd.BEq7AnVK.css` said `--bg-light:#f1eae0`, and
+   > `shell.tmpl` appended the frozen `assets/css/*` layer after it. Every route
+   > therefore mismatched at offset ~1700 and the `Test` step failed on `main` in
+   > runs [35266202608](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266202608),
+   > [35266466674](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266466674),
+   > [35266653629](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266653629),
+   > [35267893161](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35267893161)
+   > and [35269826778](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35269826778)
+   > - identical at `8524dfe` and at the gates commit `0a247c6`, and reproducible
+   > locally with `make test-parity` (exit 2). It was the gate working, not a
+   > flake, and it was invisible while the parity tests ran before `npm run build`
+   > and skipped. Until it was resolved, the `verify` job stopped at `Test` and
+   > the compliance steps after it did not run in CI.
+
 
 ## Non-endorsement disclaimer text
 
-The wording lives in one place, `web/src/lib/legal.ts`, and this page quotes it
-rather than restating it. All four compliance pages import it, and both footers
-(`web/src/components/Footer.astro`, `web/src/layouts/fallback/Footer.astro`)
+The wording lives in one place, `internal/webtier/brand.go` (`NonEndorsementText`),
+and this page quotes it rather than restating it. All four compliance pages render
+it, and both footers in the tier's templates
+(`internal/webtier/templates/components.tmpl` and the page shells)
 render it instead of carrying a paraphrase, so the site and this register cannot
 drift apart.
 
@@ -720,7 +758,7 @@ drift apart.
 > Riot Games properties. Riot Games and all associated properties are trademarks
 > or registered trademarks of Riot Games, Inc.
 
-Gate check 6 reads the sentence back out of `web/src/lib/legal.ts` and requires it
+Gate check 6 reads the sentence back out of `internal/webtier/brand.go` and requires it
 to appear word for word on the built `/disclaimer` page. Changing this wording is
 a compliance change, not a copy change.
 
@@ -731,7 +769,9 @@ a compliance change, not a copy change.
   `web/src/lib/legal.ts` (operator identity, contact address, effective date,
   non-endorsement sentence, data-source sentence). The contact address is
   configured by the `LOLSTATS_CONTACT_EMAIL` environment variable, documented in
-  that file, with a working default.
+  that file, with a working default. (Those strings are `internal/webtier/brand.go`
+  constants and the `internal/webtier/templates/pages/*.tmpl` bodies now; the
+  Astro files they were written in went with the tree on 2026-09-18.)
 - `EFFECTIVE_DATE` is a single constant and "last updated" is derived from it, so
   there is no second date to forget.
 - `scripts/compliance-check.sh` and `make compliance` were added, together with
@@ -751,8 +791,9 @@ a compliance change, not a copy change.
   `demo`, no data, or `riot-match-v5` from the manifest's `source`, and the
   champion pages, `/about`, the landing page, the privacy policy, the table and
   matchup notes and the JSON-LD datasets now read their claims from that state:
-  only a `riot-match-v5` build describes MATCH-V5, and `web/src/lib/seo.ts`
-  throws rather than publish a Dataset `measurementTechnique` in any other state.
+  only a `riot-match-v5` build describes MATCH-V5, and the tier's JSON-LD builder
+  (`internal/webtier/view_dataset.go`) returns its `errNotLive` error rather than
+  publish a Dataset `measurementTechnique` in any other state.
   Gate check 11 asserts that every built page carries the labelling its declared
   state requires, so a page cannot lose its banner or claim a state it is not in.
 - **Checks 3 and 4 were amended on 2026-09-17** for the server-rendered tier,
@@ -791,7 +832,7 @@ a compliance change, not a copy change.
   was relaxed: `web/dist` carried zero `<form>` elements, so check 4's form rule
   could only ever have passed vacuously against it. The record of the original
   two-corpus amendment is kept [[#Amendment 2]] below.
-- **The gate gained a second corpus, on 2026-09-17.** `web/dist` holds zero
+- **The gate gained a second corpus, on 2026-09-17.** `web/dist` held zero
   `<form>` elements - the tier renders the filter bar - so check 4's form rule
   was vacuous against the only corpus it read, and check 3's script-free count
   was 1038 of 1063 in the same direction. `scripts/capture-served-pages.sh` now
@@ -825,23 +866,29 @@ a compliance change, not a copy change.
   result is produced. `docker-build.yml` still carries every step, because its
   `verify` job is what stands between a commit and a published image; the
   workflow file's header records this. The immediate consequence is that the
-  compliance evidence for that date is readable even while the parity gate is
-  red.
-- **The parity gate gained a mutation control, on 2026-09-17.** The ordering fix
-  proved the parity tests *run* (`make test-parity` fails on `SKIP`, and a design
+  compliance evidence for that date is readable even while the parity gate was
+  red - a gate that existed only until 2026-09-18, when it was retired with the
+  reference tree; see gap 7 and the next entry.
+- **The parity gate gained a mutation control, on 2026-09-17.** **Deleted
+  2026-09-18** with the gate it controlled (`8e23d67`): both
+  `scripts/parity-mutation-control.sh` and `make parity-mutation-control` are gone,
+  and the reference tree the control rewrote in place no longer exists. The record
+  is kept because it is the evidence that the ordering fix worked while the gate
+  was live. What the control did while it existed: it
+  proved the parity tests *ran* (`make test-parity` failed on `SKIP`, and a design
   token rename did redden `TestRenderParity` in CI), but not that they still
-  *compare*: a comparison that had been neutered - both renderers swapping in the
-  same wrong bytes, say - would report `PASS`. `scripts/parity-mutation-control.sh`
-  and `make parity-mutation-control` close that: the reference page is mutated
-  (`lang="en"` -> `lang="zz"` in `web/dist/index.html`), the gate must exit
-  non-zero, the `home` route must be the case that fails, the mutation must appear
-  on the reference side of the first-difference excerpt, and the page must come
-  back byte for byte (hash-compared). Observed: 6 controls held, 0 broken
-  (`bin/parity-mutation-pass.log`). Two further paths are exercised by hand: an
-  interrupted run is recovered by restoring the validated backup so the page is
-  never left mutated, and a backup that does not look like an original is
-  *refused* rather than written over the tree. The control is also controlled:
-  with a stub `make` that exits 0 - a gate that no longer compares anything - the
-  control reports `RESULT: FAIL - 3 control(s) held, 3 broken`
-  (`bin/parity-mutation-stub.log`). It runs as the last step of `Launch gates`,
-  after every scan that reads the reference tree, because it rewrites it in place.
+  *compared*: a comparison that had been neutered - both renderers swapping in the
+  same wrong bytes, say - would have reported `PASS`. The control closed that: the
+  reference page was mutated
+  (`lang="en"` -> `lang="zz"` in `web/dist/index.html`), the gate had to exit
+  non-zero, the `home` route had to be the case that failed, the mutation had to
+  appear on the reference side of the first-difference excerpt, and the page had
+  to come back byte for byte (hash-compared). Observed: 6 controls held, 0 broken
+  (`bin/parity-mutation-pass.log`). Two further paths were exercised by hand: an
+  interrupted run was recovered by restoring the validated backup so the page was
+  never left mutated, and a backup that did not look like an original was
+  *refused* rather than written over the tree. The control was also controlled:
+  with a stub `make` that exited 0 - a gate that no longer compared anything - the
+  control reported `RESULT: FAIL - 3 control(s) held, 3 broken`
+  (`bin/parity-mutation-stub.log`). It ran as the last step of `Launch gates`,
+  after every scan that read the reference tree, because it rewrote it in place.
