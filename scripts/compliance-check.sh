@@ -74,6 +74,28 @@ lower() { tr '[:upper:]' '[:lower:]'; }
 # Built pages are one enormous line each, so report matches without the line.
 trim() { cut -c1-200; }
 
+# Search a NUL-delimited list of paths:  list_grep <list-file> <grep args...>
+#
+# grep must never be invoked with an empty operand list. GNU xargs, which is what
+# the CI runner has, still runs the command once when the list is empty, so
+# `xargs -0 grep -LE pattern < empty.bin` becomes `grep -LE pattern` with no file
+# operands and grep reads *standard input* instead of failing. The check then
+# reported "(standard input)" as a page carrying no honesty banner, because the
+# runner's stdin was not empty: a false FAIL on a clean tree. The reverse is
+# worse, and is why this is a correctness bug rather than a nuisance - a pattern
+# that happens to match stdin hides a real violation behind a pass. BSD xargs and
+# BSD grep read an empty stdin and stay silent, so the hole does not exist on the
+# development machine, only in CI. Short-circuiting the empty list is the
+# portable fix, and every scan below that reads a list file goes through it.
+list_grep() {
+	list_grep_list=$1
+	shift
+	if [ -s "$list_grep_list" ]; then
+		xargs -0 grep "$@" < "$list_grep_list" 2>/dev/null
+	fi
+	return 0
+}
+
 # Read one string constant out of a TypeScript module, or print nothing.
 #
 # The constants these checks turn into patterns are declared in site.ts and
@@ -195,7 +217,7 @@ note "scanned $rating_scanned files: Go, SQL, TS/JS, Astro, JSON, HTML and CSS (
 if [ "$rating_scanned" -lt 200 ]; then
 	fail "the rating scan read only $rating_scanned files, which is too few to be evidence; the find expression is wrong, not the code clean"
 else
-	xargs -0 grep -InE "$RATING_TOKENS" < "$WORK/rating-scan-files.bin" > "$WORK/rating-hits.txt" 2>/dev/null || true
+	list_grep "$WORK/rating-scan-files.bin" -InE "$RATING_TOKENS" > "$WORK/rating-hits.txt"
 	rating_hits=$(count_lines "$WORK/rating-hits.txt")
 	if [ "$rating_hits" -eq 0 ]; then
 		fail 'the rating scan found no mention of a rating at all, not even the standing prohibition in web/src/lib/legal.ts; the pattern is wrong rather than the code clean'
@@ -203,7 +225,7 @@ else
 		grep -iE "$RATING_NEGATED" "$WORK/rating-hits.txt" > "$WORK/rating-exempt.txt" 2>/dev/null || true
 		rating_exempt=$(count_lines "$WORK/rating-exempt.txt")
 		rating_violations=$((rating_hits - rating_exempt))
-		xargs -0 grep -InE "$RATING_IDENTIFIER" < "$WORK/rating-scan-files.bin" > "$WORK/rating-identifiers.txt" 2>/dev/null || true
+		list_grep "$WORK/rating-scan-files.bin" -InE "$RATING_IDENTIFIER" > "$WORK/rating-identifiers.txt"
 		rating_ids=$(count_lines "$WORK/rating-identifiers.txt")
 		if [ "$rating_violations" -eq 0 ] && [ "$rating_ids" -eq 0 ]; then
 			pass "0 violations: $rating_hits lines mention a rating, all $rating_exempt are the standing prohibition, and no rating-like identifier or key exists"
@@ -688,7 +710,7 @@ elif [ "$control" -lt 1 ]; then
 	fail 'the pattern finds no personal identifier even in internal/contract/contract.go, where puuid is genuinely used; the scan proves nothing'
 else
 	note "the pattern works: internal/contract/contract.go carries $control line(s) with such a field, as the crawler requires, and none of them is an aggregate type"
-	xargs -0 grep -InE "$PERSONAL" < "$WORK/personal-files.bin" > "$WORK/personal-hits.txt" 2>/dev/null || true
+	list_grep "$WORK/personal-files.bin" -InE "$PERSONAL" > "$WORK/personal-hits.txt"
 	personal_hits=$(count_lines "$WORK/personal-hits.txt")
 	if [ "$personal_hits" -eq 0 ]; then
 		pass 'the published artifact schema carries no PUUID, summoner id, account id, Riot id or profile icon id, and neither does any served JSON file'
@@ -717,7 +739,7 @@ if [ ! -d "$ROOT/fixtures" ] || [ "$committed_count" -eq 0 ]; then
 	fail 'no payload fixture was found under fixtures/, so the committed-provenance claim cannot be checked and the earlier result would have been vacuous'
 else
 	find "$ROOT/fixtures" -type f \( -name '*.json' -o -name '*.jsonl' \) -print0 > "$WORK/committed-files.bin" 2>/dev/null || true
-	xargs -0 grep -hoE '"(puuid|summonerId|riotIdGameName|riotIdTagline)"[[:space:]]*:[[:space:]]*"[^"]*"' < "$WORK/committed-files.bin" > "$WORK/committed-ids.txt" 2>/dev/null || true
+	list_grep "$WORK/committed-files.bin" -hoE '"(puuid|summonerId|riotIdGameName|riotIdTagline)"[[:space:]]*:[[:space:]]*"[^"]*"' > "$WORK/committed-ids.txt"
 	committed_ids=$(count_lines "$WORK/committed-ids.txt")
 	note "scanned $committed_count committed payload fixture(s) under fixtures/: $committed_ids player-identifier value(s)"
 	if [ "$committed_ids" -lt 10 ]; then
@@ -800,18 +822,18 @@ else
 	# grep -L lists the files that do NOT match. The built pages are one long
 	# line each, so an anchored </html>$ matches only a page that really ends
 	# where it should; a page cut short has no line that ends with it.
-	xargs -0 grep -LE '</html>$' < "$WORK/pages.bin" > "$WORK/pages-truncated.txt" 2>/dev/null || true
+	list_grep "$WORK/pages.bin" -LE '</html>$' > "$WORK/pages-truncated.txt"
 	# A page must declare a state, and then carry the banner for that state.
-	xargs -0 grep -LE 'data-state="(demo|live|no-data)"' < "$WORK/pages.bin" > "$WORK/pages-bannerless.txt" 2>/dev/null || true
+	list_grep "$WORK/pages.bin" -LE 'data-state="(demo|live|no-data)"' > "$WORK/pages-bannerless.txt"
 	for state in demo live no-data; do
-		xargs -0 grep -Fl "data-state=\"$state\"" < "$WORK/pages.bin" > "$WORK/pages-$state.txt" 2>/dev/null || true
+		list_grep "$WORK/pages.bin" -Fl "data-state=\"$state\"" > "$WORK/pages-$state.txt"
 	done
 	tr '\n' '\0' < "$WORK/pages-demo.txt" > "$WORK/pages-demo.bin"
-	xargs -0 grep -LE "$(ere "$PREVIEW_TEXT")|$(ere "$UNVERIFIED_PREVIEW_TEXT")" < "$WORK/pages-demo.bin" > "$WORK/pages-unlabelled.txt" 2>/dev/null || true
+	list_grep "$WORK/pages-demo.bin" -LE "$(ere "$PREVIEW_TEXT")|$(ere "$UNVERIFIED_PREVIEW_TEXT")" > "$WORK/pages-unlabelled.txt"
 	tr '\n' '\0' < "$WORK/pages-live.txt" > "$WORK/pages-live.bin"
-	xargs -0 grep -LF 'state-banner--live' < "$WORK/pages-live.bin" > "$WORK/pages-live-broken.txt" 2>/dev/null || true
+	list_grep "$WORK/pages-live.bin" -LF 'state-banner--live' > "$WORK/pages-live-broken.txt"
 	tr '\n' '\0' < "$WORK/pages-no-data.txt" > "$WORK/pages-no-data.bin"
-	xargs -0 grep -LF "$NO_DATA_HEADING" < "$WORK/pages-no-data.bin" > "$WORK/pages-no-data-broken.txt" 2>/dev/null || true
+	list_grep "$WORK/pages-no-data.bin" -LF "$NO_DATA_HEADING" > "$WORK/pages-no-data-broken.txt"
 	truncated=$(count_lines "$WORK/pages-truncated.txt")
 	bannerless=$(count_lines "$WORK/pages-bannerless.txt")
 	unlabelled=$(count_lines "$WORK/pages-unlabelled.txt")
@@ -844,6 +866,45 @@ else
 			sort -u "$WORK/pages-no-data-broken.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
 		fi
 	fi
+fi
+
+# ---------------------------------------------------------------------------
+check '12. The scan harness cannot mistake its own standard input for a page'
+# Every scan above hands a NUL-delimited list of paths to list_grep. Two harness
+# faults would make those scans lie, and both are cheaper to rule out than to
+# assume: an empty list that grep answers from its standard input - a false FAIL
+# on a clean tree, and a false PASS whenever the pattern matches stdin - and a
+# guard that has stopped feeding grep the non-empty list at all, which silently
+# turns every scan above into a no-op. The stdin that was read came from the CI
+# runner, which is not empty, and that is exactly why the fault was absent on the
+# development machine and present only in CI.
+: > "$WORK/harness-empty.bin"
+harness_stdin=0
+# Both flags the scans use, because they fail differently: GNU grep -L reports an
+# empty input as a file with no matching lines and prints "(standard input)",
+# while -l prints nothing for it. Checking only -l would have passed the broken
+# harness that produced the CI failure, since check 11's two broken scans use -L.
+for flag in -LF -lF; do
+	harness_stdin=$((harness_stdin +
+		$(printf 'must-not-be-read\n' |
+			{ list_grep "$WORK/harness-empty.bin" "$flag" 'must-not-be-read' > "$WORK/harness-empty-out.txt"; count_lines "$WORK/harness-empty-out.txt"; })))
+done
+printf '%s\0' "$DIST/index.html" > "$WORK/harness-one.bin"
+harness_probe=0
+# The positive half, for both flags: -L must list a file whose text cannot
+# contain the pattern, and -l must list the same file for a pattern it does
+# contain. Either call returning nothing means the guard has stopped handing
+# grep its list, and the scans above are no-ops that pass.
+harness_probe=$((harness_probe +
+	$(list_grep "$WORK/harness-one.bin" -LF 'no-built-page-contains-this-marker' > "$WORK/harness-one-out.txt" </dev/null
+		count_lines "$WORK/harness-one-out.txt")))
+harness_probe=$((harness_probe +
+	$(list_grep "$WORK/harness-one.bin" -lF '<html' > "$WORK/harness-one-out.txt" </dev/null
+		count_lines "$WORK/harness-one-out.txt")))
+if [ "$harness_stdin" -eq 0 ] && [ "$harness_probe" -eq 2 ]; then
+	pass 'an empty path list yields no match with either flag, even when the pattern is on standard input, and a one-file list yields its file for both -L and -l'
+else
+	fail "the scan harness is broken, so the scans above prove nothing: the empty list produced $harness_stdin match(es) where 0 is required, and the one-file list produced $harness_probe where 2 are required"
 fi
 
 # ---------------------------------------------------------------------------

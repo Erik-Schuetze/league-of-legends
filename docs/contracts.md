@@ -691,7 +691,11 @@ wrong reason:
   starts the tier over the checked-in fixture tree and again over a deliberately
   corrupt aggregate root, and `make compliance` plus `make
   compliance-negative-control` run the launch-blocking compliance gate and its
-  negative controls.
+  negative controls. The gate's scans hand a NUL-delimited list of paths to
+  `grep`, whose empty-list behaviour differs between GNU (the CI runner) and BSD
+  (macOS), so check 12 asserts that both an empty list and a real list behave and
+  `make compliance-gnu` re-runs the gate in a GNU userland locally; the reason is
+  recorded in `docs/compliance.md`.
 
 ## 6. Ownership map
 
