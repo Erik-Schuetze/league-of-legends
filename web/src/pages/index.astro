@@ -24,10 +24,10 @@ const live = site.state === 'live';
 
 const title = live
   ? 'LoL Stats - League of Legends ranked statistics from Riot match data'
-  : 'LoL Stats - League of Legends ranked statistics, published as static pages';
+  : 'LoL Stats - League of Legends ranked statistics';
 
 const description = live
-  ? 'Patch-specific League of Legends ranked tier lists and champion matchups, published as static pages. ' +
+  ? 'Patch-specific League of Legends ranked tier lists and champion matchups, computed from Riot match data. ' +
     'Every win rate carries its sample size, and thin samples are withheld rather than shown.'
   : site.state === 'demo'
     ? 'What this site publishes, how the numbers are produced, and an honest statement of where the numbers on ' +
@@ -50,12 +50,12 @@ const minCellN = partition?.min_cell_n ?? null;
 >
   <JsonLd value={jsonLdWebsite(site, url, description)} />
 
-  <h1>Ranked statistics, published as static pages</h1>
+  <h1>Ranked statistics, every rate with its sample size</h1>
 
   <p>
     {live
-      ? 'This site aggregates League of Legends ranked matches into per-patch tier lists and champion matchup tables, then pre-renders them.'
-      : 'This site publishes per-patch tier lists and champion matchup tables, pre-rendered as static pages.'}{' '}
+      ? 'This site aggregates League of Legends ranked matches into per-patch tier lists and champion matchup tables.'
+      : 'This site publishes per-patch tier lists and champion matchup tables.'}{' '}
     There is no client-side data fetching and no JavaScript is required to read any page: what the HTML says is the whole
     product.{' '}
     {site.state === 'demo'
