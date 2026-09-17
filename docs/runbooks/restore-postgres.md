@@ -248,3 +248,47 @@ step 2.
   `emptyDir`: it is lost when the pod restarts, and it is not a backup.
 - Restoring a dump taken by an *older* migration set and then not running
   `migrate up` leaves the worker writing rows the schema cannot accept.
+
+## Retention cannot remove the last recoverable artifact, 2026-09-18
+
+The concern is the obvious one: a retention policy that prunes "old" dumps while
+`LATEST` still points at one, or a prune that runs before the day's dump is
+published, turns a backup set into an empty directory with a stale pointer beside
+it. Read against `deploy/base/jobs/backup-postgres.yaml`, the order of operations
+is:
+
+1. `pg_dump -Fc` writes to `"$partial"`, a name the prune grep does **not**
+   match, then the globals and manifest are written through the same `.partial`
+   prefix;
+2. `mv "$partial" "$daily/$name"` - the artifact gets its real name only after
+   the dump has succeeded;
+3. `printf '%s\n' "$name" >"$root/postgres/LATEST"` - the pointer is written
+   from the same `$name` that was just published;
+4. **then** Sunday's promotion (`cp -p` into `weekly/`) and **then** `prune`.
+
+`prune` sorts with `sort -r`, so a name is ranked by recency and only ranks
+greater than the keep count are removed. The file `LATEST` names is always rank
+1, so the pointer can never reference a file prune removed. With fewer dumps
+than the keep count - which is the situation today - `prune` removes nothing at
+all, and a run killed between step 3 and step 4 leaves *more* dumps than the
+policy allows and self-corrects on the next run rather than fewer.
+
+Observed on the cluster 2026-09-18 00:15 CEST: `2 daily, 0 weekly dump(s)` -
+`weekly/` is empty because promotion happens on Sundays (`date -u +%u` = 7) and
+the first dump was taken on a Thursday. `LATEST` holds
+`lolstats-20260917T183639Z.dump`, the newest of the two, with sha256
+`c12a7e0ef3d787be06d92107cdb3aa286bcffde810d30162e4d0fb102f1d6711` and 53
+`pg_restore --list` TOC entries that parse back out of the stored file.
+
+Two things this does **not** cover, so nobody relies on it:
+
+- the `.partial` family is never pruned by design (it is never matched), so a
+  series of failed runs grows `daily/` with files nobody will restore. Watch the
+  directory size in `backup-status.sh` output rather than expecting prune to
+  clean up after a failure;
+- `weekly/` receives a `cp -p` of the `.dump` only, so a weekly entry has no
+  `.manifest` beside it. The row counts and `schema_md5` for an older dump live
+  in the daily copy of that manifest, and the daily copy is what prune removes
+  after `BACKUP_KEEP_DAILY` - so the weekly dump is restorable but is not
+  self-describing. If you need the manifest of a dump that is only in `weekly/`,
+  take it from the restored database rather than from a file.
