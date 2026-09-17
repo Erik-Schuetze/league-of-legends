@@ -10,5 +10,16 @@ secret.yaml
 # Local-only edits to a manifest, for trying something out without committing it.
 *.local.yaml
 
+# ---- additions: operations workstream (restic) ----
+# The filled-in copy of deploy/base/ops/restic-secret.example.yaml holds the
+# restic repository password and, when a destination exists, its credentials.
+# It is never part of the build either: it is applied by hand, like the two
+# Secrets above. This rule exists so that a filled-in copy cannot reach the
+# repository by accident.
+restic-secret.yaml
+**/restic-secret.yaml
+!**/restic-secret.example.yaml
+# ---- end additions: operations workstream (restic) ----
+
 # Rendered output from `kubectl kustomize`, useful to diff by hand.
 /rendered/
