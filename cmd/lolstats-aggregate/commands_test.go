@@ -250,3 +250,71 @@ func TestBuildRefusesToPublishFromAStalledCrawl(t *testing.T) {
 		}
 	})
 }
+
+// TestCrawlMaxAgeComesFromTheEnvironment is the wiring test for the deployed
+// posture. The nightly job carries no argv flag: the bound arrives as a
+// ConfigMap value, and the flag's only job is to default from it. Driving the
+// whole invocation is what makes this decisive - the flag layer is exactly where
+// a checked-but-unused value would hide.
+//
+// The DSN is unreachable on purpose. What the environment value has to prove is
+// not that the check finds fresh data but that it runs at all, and that a check
+// which cannot answer refuses instead of publishing.
+func TestCrawlMaxAgeComesFromTheEnvironment(t *testing.T) {
+	root := demoRoot(t)
+	env := func(name string) (string, bool) {
+		switch name {
+		case CrawlMaxAgeEnv:
+			return "26h", true
+		case "LOLSTATS_POSTGRES_DSN":
+			return "postgres://nobody@127.0.0.1:1/nothing?sslmode=disable&connect_timeout=1", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runEnv([]string{"build", "--agg", root}, &stdout, &stderr, env)
+	if code == exitOK {
+		t.Fatalf("build with %s=26h and an unreachable database published anyway\nstdout: %s",
+			CrawlMaxAgeEnv, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "checking crawl freshness") {
+		t.Fatalf("stderr = %q, want the freshness check to be what failed "+
+			"(a build that skipped the check would fail further along)", stderr.String())
+	}
+}
+
+// TestCrawlMaxAgeRefusesToGuessAtAMalformedValue covers the degradation that
+// would undo the guard silently. Reading a bound that does not parse as "no
+// bound" turns a typo in a ConfigMap into a nightly job that republishes a
+// frozen archive under a fresh timestamp - the precise outcome the bound exists
+// to prevent - so the value is refused loudly instead.
+func TestCrawlMaxAgeRefusesToGuessAtAMalformedValue(t *testing.T) {
+	root := demoRoot(t)
+	before, err := os.ReadFile(manifestFile(root))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	env := func(name string) (string, bool) {
+		if name == CrawlMaxAgeEnv {
+			return "26 hours", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runEnv([]string{"build", "--agg", root}, &stdout, &stderr, env)
+	if code == exitOK {
+		t.Fatalf("build with %s unparseable succeeded\nstdout: %s", CrawlMaxAgeEnv, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), CrawlMaxAgeEnv) {
+		t.Errorf("stderr = %q, want it to name %s", stderr.String(), CrawlMaxAgeEnv)
+	}
+	after, err := os.ReadFile(manifestFile(root))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the manifest changed even though the build refused to run")
+	}
+}

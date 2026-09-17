@@ -101,27 +101,20 @@ spec:
               command: ["/lolstats-aggregate"]
               # `build` with its patch and bracket from LOLSTATS_AGG_PATCH and
               # LOLSTATS_AGG_BRACKET, so promoting a new patch is a ConfigMap
-              # change and not a manifest change. One flag is nevertheless
-              # spelled out here, because it is the job's safety property.
+              # change and not a manifest change. The build's safety property -
+              # LOLSTATS_AGG_CRAWL_MAX_AGE, the freshness bound that stops a
+              # frozen archive being republished under tonight's timestamp - is a
+              # ConfigMap value for the same reason and is documented there.
               #
-              # -crawl-max-age: a snapshot's generated_at is the time of the
-              # *build*, not the age of the data behind it, so an archive that
-              # stopped moving - an expired 24-hour development key, ingest
-              # scaled to zero - would otherwise be republished every night
-              # under a fresh timestamp and the site would present week-old
-              # matches as current. 26h is one nightly cycle plus slack: after a
-              # normal day the job runs, and once the archive has gone quiet it
-              # refuses with the age it measured, exits non-zero, and leaves the
-              # published snapshot exactly as it was. Measured cost of the check:
-              # a full pass over a months-old archive is 101s, so a refusal
-              # leaves the whole deadline unused.
-              #
-              # The flag exists only in images built from the commit that adds
-              # it, so this line and the `latest` tag go live together - the push
-              # that adds the flag is the push that republishes the image. An
-              # older binary rejects the unknown flag and fails; it cannot
-              # quietly ignore it and publish anyway.
-              args: ["build", "-crawl-max-age", "26h"]
+              # No argv flag is spelled out on purpose. Manifests and images
+              # reach this cluster from Git on independent schedules, so a flag
+              # that only a new binary understands can arrive first and turn the
+              # nightly job into an "unknown flag" failure that says nothing
+              # about the data. The environment variable cannot do that: a binary
+              # without the check ignores it and behaves exactly as it did
+              # before, so the bound can only ever switch on together with the
+              # code that implements it.
+              args: ["build"]
               envFrom:
                 - configMapRef:
                     name: lolstats-config
