@@ -1,0 +1,120 @@
+# The one thing that has to happen before anything else in this directory: put
+# the database schema on the floor.
+#
+# This is an ArgoCD PreSync hook rather than an ordinary Job sitting in the
+# tree, and both halves of that are deliberate.
+#
+#   * PreSync ordering is the point. Hooks in the PreSync phase run to
+#     completion *before* ArgoCD applies anything else, so no workload here can
+#     start against a schema that is behind the binary. The alternative,
+#     an initContainer on every consumer, buys the same ordering but has to be
+#     replicated into the ingest Deployment and all seven job templates, and it
+#     turns a Postgres that is briefly unreachable into a crash-loop of every
+#     workload instead of one failed hook that says what went wrong.
+#
+#   * `batch/v1` Jobs are effectively immutable: once the controller has run
+#     one, an edit to its pod template is rejected by the API server. A plain
+#     Job in the tree would therefore leave ArgoCD reporting a permanent diff
+#     the first time the migration command, image or resources change, and - the
+#     worse half - an *unchanged* Job does not run again on a later sync. With
+#     `hook-delete-policy: BeforeHookCreation` the previous hook Job is deleted
+#     before the new one is created, so a changed spec applies cleanly and an
+#     unchanged one still re-runs.
+#
+# Re-running on every sync is safe and cheap. `internal/store/migrate.go` takes
+# a session advisory lock (`pg_advisory_lock`, key "lols") so two of these can
+# never interleave with each other or with a manual `kubectl create job`, it
+# keeps a `schema_migrations` ledger of (version, name, sha256 checksum), it
+# re-verifies that checksum before running anything, and each migration body
+# commits atomically with its ledger row. A run with nothing new to do is one
+# round trip that logs "schema is already current". The proof that this holds,
+# including a second run over the same three migrations, is in
+# deploy/README.md, section Migrations.
+#
+# For whoever adds migration 0004: the .sql files are embedded in the image, not
+# copied out of this repository by ArgoCD, so adding one produces no diff in
+# this Application's rendered manifests and therefore no sync. The trigger is
+# whatever ships the new binary - today that is a `latest` re-pull, and once the
+# images are pinned it is the digest bump (see deploy/README.md, Open TODOs).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lolstats-migrate
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: migrate
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    # Deliberately not HookSucceeded: the object has to be gone before the next
+    # sync creates it, otherwise the second sync meets the immutability problem
+    # described above. Deleting the *previous* hook leaves the current one
+    # behind for `kubectl logs`, and ttlSecondsAfterFinished tidies that up.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # `OnFailure`, not the `Never` the CronJobs use, and that difference is load
+  # bearing. A fresh network sandbox in this cluster refuses TCP to the Postgres
+  # ClusterIP for a few seconds after it is created - measured on 2026-09-17:
+  # refused at t+0, accepted at t+20s from the *same* pod, while other pods came
+  # and went. `OnFailure` restarts the container inside that pod, keeping a
+  # sandbox that has already been programmed; `Never` gives every retry a brand
+  # new sandbox, which is why `kubectl create job --from=cronjob/discover-seeds`
+  # failed all three of its attempts in the same window.
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lolstats
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # TODO(plan section 10, Phase 1): pin to a digest with the other
+          # workloads once a tag exists.
+          image: ghcr.io/erik-schuetze/league-of-legends:latest
+          command: ["/lolstats-ingest"]
+          args: ["migrate", "up"]
+          envFrom:
+            - configMapRef:
+                name: lolstats-config
+          # `runMigrate` needs a logger and cfg.Postgres and nothing else, so
+          # this is the whole environment: no Riot key and no data volume. It
+          # reads its SQL out of the binary's embed FS, never off the shared
+          # archive, which is also why it takes no lock that the crawl holds.
+          env:
+            - name: GOMEMLIMIT
+              value: 128MiB
+            - name: LOLSTATS_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: lolstats-postgres
+                  key: DSN
+          resources:
+            # Three small files of DDL. The request is set so the pod is
+            # Burstable rather than BestEffort and cannot be starved out of the
+            # queue behind the crawl.
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
