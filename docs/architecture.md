@@ -117,8 +117,9 @@ That form exists only in the response, so the compliance gate scans responses
 rather than files: `scripts/capture-served-pages.sh` captures the HTML the tier
 actually serves (routes discovered from the tier's own `/sitemap.xml`) and
 `make compliance` scans that corpus on loopback over the fixture tree, in CI as
-well as here. It is the only corpus - the Astro reference tree it used to be
-compared against was deleted on 2026-09-18.
+well as here. It is the only corpus now - the Astro reference tree it used to be
+compared against was retired on 2026-09-17 and deleted on 2026-09-18, so there is
+no second corpus for a byte comparison to come from.
 
 ## Boundaries
 
