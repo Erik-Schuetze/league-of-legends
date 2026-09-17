@@ -18,8 +18,7 @@ aggregate job is bounded by `activeDeadlineSeconds: 7200`, well below 03:40.
 
 ## When to use it
 
-- `LolstatsBuildJobFailed`, `LolstatsBuildNotScheduled` or `LolstatsBuildStuck`
-  fired.
+- `LolstatsBuildJobFailed` or `LolstatsBuildNotScheduled` fired.
 - The site is serving yesterday's numbers, or a patch that exists in the archive
   has no pages.
 - You restored the raw archive (`restore-raw.md`). Nothing derived from it is
