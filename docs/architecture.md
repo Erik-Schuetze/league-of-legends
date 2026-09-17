@@ -113,12 +113,12 @@ requires at least two distinct documents back - so a control that only looks lik
 a control fails the gate. The digests are printed, so the evidence names which
 two bodies differed (docs/compliance.md, amendment 2).
 
-Because that form exists only in the response and not in any built file,
-`scripts/capture-served-pages.sh` captures the HTML the tier actually serves
-(routes discovered from the tier's own `/sitemap.xml`) and the compliance gate
-asserts its checks 3 and 4 over that corpus as well as over `web/dist`:
-`make compliance-served` does both on loopback over the fixture tree, in CI as
-well as here.
+That form exists only in the response, so the compliance gate scans responses
+rather than files: `scripts/capture-served-pages.sh` captures the HTML the tier
+actually serves (routes discovered from the tier's own `/sitemap.xml`) and
+`make compliance` scans that corpus on loopback over the fixture tree, in CI as
+well as here. It is the only corpus - the Astro reference tree it used to be
+compared against was deleted on 2026-09-18.
 
 ## Boundaries
 

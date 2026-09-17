@@ -66,7 +66,7 @@ source of truth and the document is the bug.
 ## Before you say it works
 
 Run `make vet`, `make test`, `make lint` (and `make vuln` for dependency changes,
-`cd web && npm run build` for frontend changes) - or say plainly that you could
+`make compliance` for changes to the served pages or the approved wording) - or say plainly that you could
 not. `make test` skips the DuckDB-dependent analytics tests when the pinned
 client is absent, so `make duckdb && make test-build` is what proves the
 aggregation path actually ran. Never describe a change as tested, working or
