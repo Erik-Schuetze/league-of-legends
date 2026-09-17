@@ -29,7 +29,7 @@ metadata:
     # also the revision that makes the claim fail a test instead of shipping.
     # The image is built from the same tree in both postures; a digest bump is
     # not a data-posture change (see env below).
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:da3c11497a2e3fe2df7c47be38252c1d33928034abc12c134bfc23e08a312241
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:109a30839762f777fbe982813d9e94465bd708b593cdb6fdc1c635c911d3a660
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
@@ -83,66 +83,50 @@ spec:
               protocol: TCP
           envFrom:
             # LOLSTATS_AGG_ROOT, LOLSTATS_SITE_URL and LOLSTATS_METRICS_ADDR
-            # come from here, and so does LOLSTATS_AGG_FIXTURES - currently
-            # "only", the labelled preview. That switch is deliberately global
-            # until the cutover, because deploy/base/config.yaml is shared by
-            # both tiers and the static tier stays up as the fallback until the
-            # Go tier is proven in front of the public URL.
+            # come from here. LOLSTATS_AGG_FIXTURES does too, but the container
+            # declares it again in `env` below: deploy/base/config.yaml is
+            # shared with the ingest tier, and the value that decides what the
+            # public tier serves must not move when another lane moves that one.
             - configMapRef:
                 name: lolstats-config
           env:
             # ------------------------------------------------------------------
-            # PREVIEW BY DEFAULT. The value below is the whole data posture of
-            # this Deployment in one line, and it is set explicitly rather than
-            # inherited from the ConfigMap above so that it cannot change as a
-            # side effect of the shared switch moving.
+            # PUBLISHED DATA, BY OWNER DECISION. The value below is the whole
+            # data posture of this Deployment in one line, and it is set
+            # explicitly rather than inherited from the ConfigMap above so that
+            # it cannot change as a side effect of the shared switch moving.
             #
-            # `only` renders the labelled preview tree with a PREVIEW banner.
-            # That is the posture §12 risk R2 requires of a publicly reachable
-            # site until Riot approves the production key, and the edge counts
-            # as public: web/caddy-service proxies lol.erik-schuetze.dev to this
-            # namespace's tier, so the moment the edge selector points here this
-            # Deployment is on the open internet behind the auth gate alone.
+            # `off` renders LOLSTATS_AGG_ROOT - the published snapshot - and
+            # never substitutes fixtures. A root with no manifest is a loud 503
+            # on the ladder routes, which is the honest answer, not a reason to
+            # fall back to demo data.
             #
-            # NEVER set this to "off" or "auto" as a side effect of anything:
+            # The opposite value was the rule until 2026-09-17. It was gated on
+            # §15 question 6 - whether serving real aggregates was acceptable
+            # before Riot approved the production key - and the owner has
+            # answered it in favour of publishing, waiving the compliance
+            # workstream (docs/decisions, commit b262dcd). Nothing technical
+            # changed: an agg/v1 tree on the PVC has been renderable since the
+            # pipeline first ran, and `only` was ignoring it.
             #
-            #   "off"  renders LOLSTATS_AGG_ROOT, so flipping the edge Caddy
-            #          line publishes the real crawled snapshot to any visitor
-            #          with the gate password - a §12/R2 and §13 publication
-            #          trigger breach with no second step to catch it.
-            #   "auto" is the same hazard one step removed: it serves the real
-            #          snapshot silently as soon as one exists on the PVC, which
-            #          is exactly the state the PVC is already in.
+            # NEVER set this to "only" or "auto":
             #
-            # Real data is a deliberate Phase 5 act, not a default. Two things
-            # must be true before the lines below are uncommented: the Riot
-            # production key is approved (plan.md item 1: the personal/
-            # development key type forbids public use, and it is what the site
-            # is currently built with), and §15 question 6 - whether serving
-            # real aggregates before that approval is acceptable at all - has an
-            # answer from the owner. An agg/v1 tree existing on the PVC from a
-            # real run satisfies the *pipeline* half of Phase 5; it does not
-            # satisfy the *key* half.
+            #   "only" renders the checked-in demo tree under a PREVIEW banner.
+            #          That is a labelled lie in front of the public URL now
+            #          that real match statistics are what this tier exists to
+            #          serve.
+            #   "auto" is the same hazard one step removed: it falls back to
+            #          the fixtures whenever the agg root is missing or is not
+            #          explicitly configured, and the root arrives from the
+            #          shared ConfigMap, which another lane may move.
             #
-            # The switch, for whoever is clearing Phase 5 - change the value in
-            # place, do not delete the entry:
-            #
-            #   - name: LOLSTATS_AGG_FIXTURES
-            #     value: "off"     # render LOLSTATS_AGG_ROOT or a loud 503; no demo fallback
-            #
-            # Until then the live-rendering path is exercised on an instance
-            # that is NOT edge-reachable: a probe pod with the PVC mounted
-            # read-only and `off`, reached only through
-            # `kubectl -n lolstats port-forward pod/...`. That is the sanctioned
-            # way to test it; a Deployment edit is not, because the edge turns a
-            # Deployment into a public page.
-            #
-            # TestDeployedPostureDoesNotPublishRealData (internal/webtier)
-            # requires this entry to exist and to be "only", and fails if any
-            # active env in this directory sets "off" or "auto".
+            # TestDeployedPostureRendersRealData (internal/webtier) resolves
+            # this entry through the tier's own root selection and fails if the
+            # demo tree can be reached - including for a value the tier would
+            # silently normalise to "auto".
             # ------------------------------------------------------------------
             - name: LOLSTATS_AGG_FIXTURES
-              value: "only"
+              value: "off"
             - name: LOLSTATS_WEB_ADDR
               value: ":8080"
             # Where the demo tree is inside this image (the Dockerfile copies

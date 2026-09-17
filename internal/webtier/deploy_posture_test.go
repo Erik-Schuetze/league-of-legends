@@ -8,30 +8,42 @@ import (
 	"testing"
 )
 
-// TestDeployedPostureDoesNotPublishRealData is the guard that
-// deploy/base/web/go-deployment.yaml's comment block points at. The tier the
-// edge proxies is publicly reachable - plan.md counts the auth gate as public -
-// so its committed default has to be the labelled preview until Riot's
-// production key exists and section 15 question 6 is answered. The data posture
-// is one line and the edge cutover is a separate, later act, so a manifest that
-// defaults to real data turns that unrelated edit into a publication:
+// TestDeployedPostureRendersRealData is the guard that
+// deploy/base/web/go-deployment.yaml's env comment block points at.
 //
-//   - "off" renders LOLSTATS_AGG_ROOT, so the moment the edge points at this
-//     service the real crawled snapshot is public behind the gate password
-//     alone (section 12 risk R2, section 13 publication trigger).
-//   - "auto" is the same hazard one step removed: it serves the real snapshot
-//     silently as soon as one exists, which is the PVC's current state.
+// It was written as TestDeployedPostureDoesNotPublishRealData, and its premise
+// was "until Riot's production key exists and section 15 question 6 is
+// answered": the tier the edge proxies is publicly reachable, so its committed
+// default had to be the labelled preview, or the separate act of pointing the
+// edge at it would have published the crawled snapshot as a side effect.
 //
-// The preview value therefore has to be *declared here* rather than inherited
-// from the shared ConfigMap (owned by the data-plane lane), whose value is free
-// to move with the static tier's phase. Real data stays supportable - "off"
-// renders the aggregate tree and answers a loud 503 when it is missing - it just
-// must not be the default.
+// The owner has answered that question the other way and the answer is recorded
+// in docs/decisions (commit b262dcd): the site does serve real Riot-derived
+// aggregates, deliberately, behind the existing password gate. The premise is
+// gone; the purpose is not. What the guard protects now is the same honesty
+// requirement read from the other side - the shipped posture renders the
+// *published snapshot*, and the checked-in demo/fixture path must never stand
+// in for it in front of the public URL. A table of layout-exercise rows served
+// where match statistics are promised is the defect this project has already
+// shipped once, and it is worse than a brief outage.
 //
-// Commented lines are skipped, so the Phase 5 record of the value stays readable
-// next to the env block it belongs to.
-func TestDeployedPostureDoesNotPublishRealData(t *testing.T) {
-	t.Parallel()
+// The declared value is resolved through the tier's own root selection
+// (candidateRoots) rather than compared against a list of known values. The
+// mode enum is closed and OptionsFromEnv silently normalises anything it does
+// not recognise to "auto", so a string comparison would call a posture safe
+// that the process actually renders as a fixture fallback - the assertion has
+// to be about the data state that would be rendered, not the string setting it.
+//
+// The root is modelled as *not* explicitly configured, for the reason the
+// original guard gave: the deployed container inherits LOLSTATS_AGG_ROOT from
+// the shared ConfigMap, which is another lane's to move, and a posture whose
+// honesty depends on that shared value is not one this Deployment may ship.
+// Commented lines are skipped, so the record of the superseded value stays
+// readable next to the env block it belongs to.
+func TestDeployedPostureRendersRealData(t *testing.T) {
+	// Not parallel: t.Setenv has to hold for the whole test, and it is what
+	// pins the unresolved-root reading described above.
+	t.Setenv(EnvAggRoot, "")
 
 	dir := filepath.Join(discoverRepoRoot(), "deploy", "base", "web")
 	scanned := 0
@@ -41,11 +53,8 @@ func TestDeployedPostureDoesNotPublishRealData(t *testing.T) {
 		for number, value := range fixturesValues(t, path) {
 			where := path + ":" + strconv.Itoa(number+1)
 			postures[path] = append(postures[path], where+"="+value)
-			switch {
-			case strings.Contains(value, "off"), strings.Contains(value, "auto"):
-				t.Errorf("%s sets %q: publishing the real crawled snapshot is a Phase 5 step, gated on Riot's production key (plan.md item 1, risk R2, section 15 question 6). Keep it a commented line until then.", where, value)
-			case value != "only":
-				t.Errorf("%s sets %q, which is not the preview value: this Deployment has to default to the labelled preview", where, value)
+			if state := renderedDataState(value); state != StateLive {
+				t.Errorf("%s sets %q, which renders data-state=%q: the deployed tier reads the published snapshot and never substitutes the checked-in demo tree. Real data is the posture of record since the owner's 2026-09-17 decision (docs/decisions, commit b262dcd); a snapshot that is missing is a loud 503, not a preview.", where, value, state)
 			}
 		}
 	}
@@ -55,8 +64,32 @@ func TestDeployedPostureDoesNotPublishRealData(t *testing.T) {
 
 	tier := filepath.Join(dir, "go-deployment.yaml")
 	if len(postures[tier]) == 0 {
-		t.Errorf("%s does not set LOLSTATS_AGG_FIXTURES at all: the preview posture has to be declared on the container rather than inherited from the shared ConfigMap, or the shared switch moving silently republishes real data", tier)
+		t.Errorf("%s does not set LOLSTATS_AGG_FIXTURES at all: the posture has to be declared on the container rather than inherited from the shared ConfigMap, or the shared switch moving silently changes what the public tier serves", tier)
 	}
+}
+
+// renderedDataState reports the data state a declared LOLSTATS_AGG_FIXTURES
+// value would render, resolved the way the tier resolves it at start-up.
+//
+// StateDemo means the checked-in demo tree is reachable - either because the
+// value names it, or because the value is one the tier does not recognise and
+// therefore normalises to "auto". StateLive means the aggregate root is the
+// only root read: a published snapshot renders as live, and a root that holds
+// no manifest answers a loud 503 rather than substituting fixtures, which is
+// the outcome the posture is chosen for.
+func renderedDataState(value string) DataState {
+	root := discoverRepoRoot()
+	opts := Options{
+		AggRoot:      filepath.Join(root, "agg"),
+		FixturesDir:  filepath.Join(root, "web", "src", "fixtures"),
+		FixturesMode: FixturesMode(strings.ToLower(strings.TrimSpace(value))),
+	}
+	for _, candidate := range candidateRoots(opts) {
+		if candidate.Dir == opts.FixturesDir {
+			return StateDemo
+		}
+	}
+	return StateLive
 }
 
 // yamlEntries lists the manifests in a directory.
