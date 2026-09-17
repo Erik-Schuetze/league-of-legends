@@ -30,9 +30,17 @@
 
   /* Focus. The ring is the token value from the contract; the offset ring is
      used where the element already owns its box-shadow (cards, tables) so the
-     focus state does not delete the frame. */
+     focus state does not delete the frame. --focus-ring is a box-shadow value
+     and only means anything in a `box-shadow`; `outline` takes the width,
+     style and colour form below. */
   --focus-ring: 0 0 0 2px var(--accent-color);
   --focus-ring-offset: 2px;
+
+  /* Motion. Short and mechanical, and named so no component invents its own
+     duration; the prefers-reduced-motion block at the foot of this file
+     neutralises every one of them. */
+  --ease-out: ease-out;
+  --dur-fast: 120ms;
 
   /* Clearance under the fixed navbar. The bar is 51px tall and `body` reserves
      4rem for it; 5rem leaves anything scrolled or focused below the bar with
@@ -162,7 +170,20 @@ body {
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: var(--grid-size) var(--grid-size);
   background-position: center center;
-  overflow-x: hidden;
+  /*
+   * No `overflow-x: hidden` here, deliberately, and it is the one place this
+   * port departs from the reference stylesheet's own body rule. The portfolio
+   * needs it to hide an off-canvas header line; copied here it would silently
+   * cut the right-hand columns off a wide stat table instead of letting them
+   * scroll. Nothing in this system overflows horizontally by construction: the
+   * offset shadow is a box-shadow, and box-shadow is ink, not layout, so it can
+   * never widen the page. Every wide block owns its own scroller
+   * (`.ds-table-scroll`, DataTable, TableIsland, HeatmapIsland), a fixed navbar
+   * does not enter the viewport's scroll region, and the one absolutely
+   * positioned glyph inside that navbar is a character wide. A horizontal
+   * scrollbar therefore means a real layout bug, which is what a page field
+   * should show.
+   */
 }
 
 h1,
@@ -261,6 +282,19 @@ time,
   outline-offset: var(--focus-ring-offset);
 }
 
+/*
+ * The accent ring is 5.42:1 on the page field, 6.13:1 on a surface and 6.06:1
+ * on the darkest deviation fill, so it is the default. On the navy masthead and
+ * footer it is only 2.47:1 - under the 3:1 that WCAG 2.2 SC 1.4.11 asks of a
+ * focus indicator - so a dark surface swaps in the light end of the palette,
+ * which is 8.58:1 there. `.ds-on-dark` is the opt-in for any surface a page
+ * paints in --primary-color itself; the footer already opts in by class.
+ */
+:where(.ds-footer, .ds-on-dark) :focus-visible,
+:where(.ds-footer, .ds-on-dark):focus-visible {
+  outline-color: var(--accent-on-dark);
+}
+
 /* Skip target for a page's own skip link, and the document scroller's padding
    for the same reason: the navbar is fixed over the top of the page, so anything
    the browser scrolls to on its own - a fragment, a `scrollIntoView`, the focus
@@ -347,6 +381,33 @@ html {
   max-width: var(--content-max);
   margin: 0 auto;
   padding: 0 var(--space-5) var(--space-8);
+}
+
+/*
+ * The shell's content column. This lived in src/layouts/fallback/base.css until
+ * it was moved here: that sheet is imported after tokens.css, so its `main` rule
+ * - a plain element selector, same specificity, later in the bundle - beat
+ * anything the design system declared and pinned every page to 72rem (1152px)
+ * instead of the frozen --content-max (1200px). The shell is a design-system
+ * concern; base.css now only styles the `fallback-*` classes it renders itself.
+ */
+main {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/*
+ * Opt-in for the pages agent: the raised panel with the wide (12px) hard
+ * offset, which is the hero idiom of the reference design - the surface and its
+ * offset are two layers of one object there, and one box-shadow carrying both
+ * is the same picture with one element. Card is the 8px version of this for
+ * repeated items; this is the single panel at the head of a page. Nothing in
+ * the current pages adopts it, so --shadow-offset-md has no other consumer.
+ */
+.ds-panel {
+  background-color: var(--bg-light);
+  box-shadow: var(--shadow-md);
 }
 
 /* Horizontal escape hatch for wide tables. Focusable so a keyboard user can

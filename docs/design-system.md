@@ -22,6 +22,38 @@ import '../styles/tokens.css';
 that single import pulls in the whole surface. Nothing else needs importing and
 no page needs to know that the system is split across three files.
 
+## Cascade: who owns what
+
+`BaseLayout.astro` imports `tokens.css` and then
+`src/layouts/fallback/base.css` (the last-resort renderers used when a
+component is unavailable). Astro emits both into one bundle in that order, so a
+plain selector in the second sheet beats an equal-specificity declaration in the
+design system *silently*. Two rules there did exactly that and flattened the look
+on every content route:
+
+| Inherited from `fallback/base.css` | What it cost |
+| --- | --- |
+| `body { background: …; padding: 0 0 3rem; line-height: 1.5 }` | the `background` shorthand erased the 27px graph-paper field, and the `padding` erased the 4rem clearance under the fixed navbar |
+| `body { color: … }` | the page field's ink |
+| `a:focus-visible { outline: 0; box-shadow: 0 0 0 2px … }` | replaced the design system's ring site-wide, including on the navy footer, where that blue is 2.47:1 |
+| `main { max-width: 72rem; padding: 0 1rem }` | capped every page at 1152px instead of the frozen `--content-max` (1200px) |
+
+All four are gone. The shell's content column now lives in `global.css` (`main`),
+`base.css` styles only the `fallback-*` classes it renders itself — which is what
+its own header comment always claimed — and the fallback table scrolls itself
+(`.fallback-data-table { display: block; overflow-x: auto }`), because the system
+deliberately carries no `overflow-x: hidden` on the page field to clip it. The
+same sheet now supplies the mono display face to that table's header and to its
+right-aligned (numeric) cells, mirroring what `DataTable.astro` does with `th`
+and `.num`: the 865 champion pages carry the only tables on the site, and they
+were the last surface setting a column header in the body face.
+
+The lesson for anyone editing these sheets: if a rule in a *later* stylesheet
+restates a *bare* element property the design system already sets, it wins. Scope
+it to a class, or put it in `global.css`. `npm run check:tokens` enforces this:
+any selector in `fallback/base.css` that names an element without a class, id or
+pseudo-class in the same compound selector fails the build.
+
 ## Why three files
 
 `docs/contracts.md` says `tokens.css` declares thirteen names at `:root` "and no
@@ -76,8 +108,18 @@ greyscale, and every value prints an explicit `+` or `-`. Not-published cells
 print the words `withheld` or `no sample` rather than a zero or a blank.
 
 All foreground/background pairs introduced by this system are listed with their
-measured contrast in `.agent-artifacts/contrast-report.txt`, checked against both
-`#efdbbf` and `#f1eae0`.
+measured contrast in `web/scripts/check-design-tokens.mjs`, which recomputes
+every pair from the token values on each `npm run build` and fails the build if
+one drops below its threshold. The pairs are measured against both `#efdbbf`
+(the page field) and `#f1eae0` (a raised surface).
+
+One pair in the reference design is deliberately *not* inherited. There the
+accent is the *hover* ink, so pointing at a link moves it from `--text-color`
+(12.20:1 on a surface) down to `--accent-color` (6.13:1): the state a pointer
+activates is the least legible one. Here it is inverted — a link is
+`--accent-color` at rest (5.42:1 on the page field, 6.13:1 on a surface, AA both)
+and `:hover` moves it to `--primary-color` (13.38:1), so no interactive state is
+worse than the default state.
 
 ## Density
 
@@ -109,13 +151,46 @@ Each face also carries a `unicode-range` limited to the Latin, Latin-1
 Supplement, Latin Extended-A, general punctuation, superscript, currency, arrow,
 mathematical operator and geometric shape blocks, so a face a page never uses is
 not downloaded. The woff2 files themselves and their OFL licence notices
-(`OFL-Inter.txt`, `OFL-JetBrainsMono.txt`, `OFL-Montserrat.txt`) are placed by
-the frontend workstream; all six are in place and served from `/fonts/` with
-`font/woff2` and http 200, which `.agent-artifacts/font-fetch.py` checks. A face
-whose file is missing, blocked or still in flight is not an error, because every
-frozen family stack ends in its system fallback and the page renders in that
-instead. No `local()` source precedes the self-hosted file, so rendering does
-not depend on what happens to be installed on the reader's machine.
+(`OFL-Inter.txt`, `OFL-JetBrainsMono.txt`, `OFL-Montserrat.txt`) were placed by
+`web/scripts/fetch-fonts.mjs`, which resolves the *latin* subset of each weight
+from the official source once, by hand, and writes it into `web/public/fonts/`
+with the family's OFL 1.1 notice beside it; a build never downloads a font. All
+six files and all three notices are in place, served from `/fonts/` with
+`font/woff2` and http 200, and `check:tokens` fails if a face loses its file, its
+`font-display: swap`, or its family's licence notice. A face whose file is
+missing, blocked or still in flight is not an error, because every frozen family
+stack ends in its system fallback and the page renders in that instead. No
+`local()` source precedes the self-hosted file, so rendering does not depend on
+what happens to be installed on the reader's machine.
+
+## Motion
+
+The reference design animates with `ease` over `0.3s`; this system keeps the
+mechanical feel but not the duration, because motion here only ever confirms a
+pointer. `--ease-out` (`ease-out`) and `--dur-fast` (120ms) are the only two
+motion values in the system, and components use them rather than inventing a
+duration. Under `prefers-reduced-motion: reduce` every transition and animation
+is forced to `0.001ms` with `!important`, so nothing moves and nothing is left
+half-way through a transition.
+
+## Utilities a page can adopt
+
+These are the classes `global.css` offers a page that wants to use the system
+without re-implementing it. Each is opt-in: nothing in the current pages depends
+on one, so adopting them is not a restructure.
+
+| Class | What it is for |
+| --- | --- |
+| `.ds-container` | the page's content column: `--content-max` (1200px), centred, `--space-5` side padding, `--space-8` below |
+| `.ds-panel` | one raised surface at the head of a page: `--bg-light` plus the wide `--shadow-md` (2px ring and a 12px solid offset). `Card` is the compact version at 8px, for repeated items |
+| `.ds-table-scroll` | horizontal scroller for a table wider than the column; focusable, so a keyboard user can scroll it |
+| `.ds-num` | a figure: `--font-mono` and `tabular-nums` |
+| `.ds-visually-hidden` | available to a screen reader, invisible on screen |
+| `.ds-navbar` | the fixed masthead's hit area; the bar's own box is taller than what it paints |
+| `.ds-footer`, `.ds-on-dark` | marks a surface painted in `--primary-color`, so the focus ring switches to the light `--accent-on-dark` |
+
+`main` itself already carries the content column, so a page needs
+`.ds-container` only when it wants the extra bottom space.
 
 ## Components
 
@@ -163,13 +238,30 @@ hidden until hydration and announced through `role="status"`; the matrix is
 keyboard operable with a roving tab stop, arrow keys, Home, End, Enter and Space;
 `prefers-reduced-motion` removes every transition.
 
+The five items the spec listed as *fix, do not inherit* are each asserted, so
+they cannot be lost again by a later edit:
+
+| Item | Where it lives | Asserted by |
+| --- | --- | --- |
+| `prefers-reduced-motion: reduce` neutralises motion | `global.css` | token check |
+| explicit `:focus-visible` ring | `global.css`, recoloured to `--accent-on-dark` inside a dark surface | token check |
+| ink and focus contrast, recomputed from the tokens | `global.css` | token check, 19 pairs |
+| `tabular-nums` on numeric and table cells | `global.css` | token check |
+| no `overflow-x: hidden` on the page field | `global.css` (deliberate absence, with the reasoning in a comment) | token check |
+| `fallback/base.css` may not restate a bare element | `fallback/base.css` (scoped to `fallback-*`) | token check |
+
 ## Reproducing the checks
 
 ```sh
-cd web && npm ci && npm run build          # must exit 0
-python3 .agent-artifacts/contrast-check.py # reads the tokens from the stylesheets
-python3 .agent-artifacts/nojs-check.py     # curl of the built HTML, no JS engine
+cd web && npm ci && npm run build   # must exit 0; runs the checks below around astro build
+cd web && npm run check:tokens      # palette, idioms, motion, contrast, fonts - source only
+cd web && npm run check:islands     # the two islands stay progressive enhancement
+cd web && npm run check:fixtures    # the pages and the aggregate artifacts agree
 ```
+
+`check:tokens` is wired into `build`, so a palette or idiom regression fails the
+build rather than the deployment. The ratios above are the output of
+`npm run check:tokens`, which recomputes them from the token literals.
 
 ## Gaps owned elsewhere
 

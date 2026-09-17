@@ -290,8 +290,18 @@ declares exactly these names and no others at `:root`:
 ```
 
 No border radius anywhere. The focus ring is `0 0 0 2px var(--accent-color)`.
+That is a `box-shadow` value: `outline: var(--focus-ring)` is silently dropped by
+CSS, so a component draws the ring as `outline: var(--border-width) solid
+var(--accent-color)` and only ever uses `--focus-ring` in a `box-shadow`. Inside
+a surface painted in `--primary-color` (the masthead, the footer) the ring
+recolours to `--accent-on-dark` (`#a6b2d7`, 8.58:1), because the accent is only
+2.47:1 there, below the 3:1 WCAG 2.2 SC 1.4.11 asks of a focus indicator. Both
+are declared in `global.css`; the thirteen names above are unchanged.
 Components read tokens and never hard-code a colour, so the whole surface can be
-re-themed in one file.
+re-themed in one file. The opt-in utility classes `global.css` adds on top of the
+frozen block (`.ds-container`, `.ds-panel`, `.ds-table-scroll`, `.ds-num`,
+`.ds-visually-hidden`, `.ds-navbar`, `.ds-on-dark`) are documented in
+`docs/design-system.md`; they widen no component's prop surface.
 
 ### `web/src/layouts/BaseLayout.astro`
 
