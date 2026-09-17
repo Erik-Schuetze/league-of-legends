@@ -327,7 +327,7 @@ func TestAboutCountsPublishedChampionsNotTheIndex(t *testing.T) {
 	})
 
 	page := get(t, live, "/about").text()
-	if !strings.Contains(page, "Aggregated cells published: 141 across 80champions") {
+	if !strings.Contains(page, "Aggregated cells published: 141 across 80 champions") {
 		t.Errorf("/about does not count the champions the cells cover: %s", excerpt(page, "Aggregated cells published"))
 	}
 	if strings.Contains(page, "across 173") {
@@ -467,7 +467,7 @@ func TestAboutFiguresFollowTheManifest(t *testing.T) {
 			t.Fatalf("/about is not the labelled preview: %s", excerpt(page, `data-state=`))
 		}
 		for _, want := range []string{
-			"Aggregated cells published: 141 across 80champions",
+			"Aggregated cells published: 141 across 80 champions",
 			"cells withheld for being below the sample threshold: 3",
 			"at least n = 500 games",
 			"2026-09-08 to 2026-09-14",
@@ -493,7 +493,7 @@ func TestAboutFiguresFollowTheManifest(t *testing.T) {
 			t.Fatalf("/about is not the live state: %s", excerpt(page, `data-state=`))
 		}
 		for _, want := range []string{
-			fmt.Sprintf("Aggregated cells published: %d across %dchampions", published, champions),
+			fmt.Sprintf("Aggregated cells published: %d across %d champions", published, champions),
 			fmt.Sprintf("cells withheld for being below the sample threshold: %d", suppressed),
 			fmt.Sprintf("at least n = %d games", floor),
 			"2031-01-02 to 2031-01-09",
