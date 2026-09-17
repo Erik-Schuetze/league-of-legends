@@ -1,0 +1,392 @@
+[
+  {
+    "file": "docs/evidence/lh-r1-about.json.gz",
+    "route": "/about/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1708.3803,
+      "cls": 0.0007494027762131973,
+      "tbtMs": 0,
+      "fcpMs": 1258.3803,
+      "speedIndexMs": 1258.3803,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 39435,
+      "htmlGzipBytes": 10350,
+      "firstLoadBytes": 204218,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 9,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r1-champions-ahri-mid.json.gz",
+    "route": "/champions/ahri/mid/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1693.9895999999999,
+      "cls": 0.0002306031112757339,
+      "tbtMs": 0,
+      "fcpMs": 1243.9895999999999,
+      "speedIndexMs": 1243.9895999999999,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 66966,
+      "htmlGzipBytes": 8752,
+      "firstLoadBytes": 439982,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 31,
+      "thirdPartyHosts": [
+        "ddragon.leagueoflegends.com"
+      ]
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "FAIL"
+    },
+    "overall": "FAIL"
+  },
+  {
+    "file": "docs/evidence/lh-r1-champions-ahri-top.json.gz",
+    "route": "/champions/ahri/top/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 69
+    },
+    "metrics": {
+      "lcpMs": 1218.7705,
+      "cls": 0.0004337138824578043,
+      "tbtMs": 0,
+      "fcpMs": 768.7705000000001,
+      "speedIndexMs": 768.7705000000001,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 27723,
+      "htmlGzipBytes": 5983,
+      "firstLoadBytes": 221017,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 10,
+      "thirdPartyHosts": [
+        "ddragon.leagueoflegends.com"
+      ]
+    },
+    "failingAudits": [
+      "is-crawlable"
+    ],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "FAIL",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "FAIL"
+  },
+  {
+    "file": "docs/evidence/lh-r1-champions-garen-top.json.gz",
+    "route": "/champions/garen/top/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1231.8641,
+      "cls": 0.0002346165915813782,
+      "tbtMs": 0,
+      "fcpMs": 781.8641,
+      "speedIndexMs": 781.8641,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 65861,
+      "htmlGzipBytes": 8713,
+      "firstLoadBytes": 458462,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 35,
+      "thirdPartyHosts": [
+        "ddragon.leagueoflegends.com"
+      ]
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "FAIL"
+    },
+    "overall": "FAIL"
+  },
+  {
+    "file": "docs/evidence/lh-r1-home.json.gz",
+    "route": "/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1672.3808999999999,
+      "cls": 0.0006236303371350691,
+      "tbtMs": 0,
+      "fcpMs": 1372.3808999999999,
+      "speedIndexMs": 1372.3808999999999,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 35514,
+      "htmlGzipBytes": 7779,
+      "firstLoadBytes": 200297,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 9,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r1-matchups-mid.json.gz",
+    "route": "/matchups/mid/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1238.1928,
+      "cls": 0.001841786112260169,
+      "tbtMs": 0,
+      "fcpMs": 788.1928,
+      "speedIndexMs": 788.1928,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 27000,
+      "htmlGzipBytes": 5963,
+      "firstLoadBytes": 191783,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 9,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r1-matchups-top.json.gz",
+    "route": "/matchups/top/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1224.7218,
+      "cls": 0.001841786112260169,
+      "tbtMs": 0,
+      "fcpMs": 774.7218,
+      "speedIndexMs": 774.7218,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 27000,
+      "htmlGzipBytes": 5962,
+      "firstLoadBytes": 191783,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 9,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r1-tier-list-mid.json.gz",
+    "route": "/tier-list/mid/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1367.9667,
+      "cls": 0.00175308819750543,
+      "tbtMs": 0,
+      "fcpMs": 997.4583749999999,
+      "speedIndexMs": 997.4583749999999,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 61020,
+      "htmlGzipBytes": 10037,
+      "firstLoadBytes": 961549,
+      "jsBytes": 1912,
+      "jsFiles": 2,
+      "requestCount": 37,
+      "thirdPartyHosts": [
+        "ddragon.leagueoflegends.com"
+      ]
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "FAIL"
+    },
+    "overall": "FAIL"
+  },
+  {
+    "file": "docs/evidence/lh-r1-tier-list-top.json.gz",
+    "route": "/tier-list/top/",
+    "scores": {
+      "performance": 100,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1369.304,
+      "cls": 0.00175308819750543,
+      "tbtMs": 0,
+      "fcpMs": 999.1300000000001,
+      "speedIndexMs": 999.1300000000001,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 64417,
+      "htmlGzipBytes": 10397,
+      "firstLoadBytes": 1037579,
+      "jsBytes": 1912,
+      "jsFiles": 2,
+      "requestCount": 40,
+      "thirdPartyHosts": [
+        "ddragon.leagueoflegends.com"
+      ]
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "FAIL"
+    },
+    "overall": "FAIL"
+  }
+]
