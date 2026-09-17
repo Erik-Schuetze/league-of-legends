@@ -30,8 +30,9 @@ resources:
   - ingest/service.yaml
 
   # The public route: the ClusterIP Service the shared Caddy in namespace `web`
-  # proxies to. Which tier answers on it is decided by this object's selector
-  # alone, which is what makes the cutover in the Go tier below a one-line edit.
+  # proxies to. Which tier answers on it is decided by this Service's own
+  # `component:` selector (see the file), which is what makes moving the public
+  # name onto the Go tier below a one-line edit; that line is not changed here.
   - web/service.yaml
 
   # ---- additions: Go web tier (server-rendered per request) ----
