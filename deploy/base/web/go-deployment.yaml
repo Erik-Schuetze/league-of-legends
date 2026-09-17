@@ -20,24 +20,23 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
-    # sha-9f23333: the revision CI published for the cutover, and the first build
-    # to reach `latest` afterwards. The `verify` job had been failing at
-    # `actions/setup-node` on the deleted web/package.json, so every commit from
-    # 1d670fe to 65f2983 published no image at all - which is why the pin that
-    # preceded this one (sha-6333038) was still in place. That digest predates
-    # 38996d4, so the live tier was serving copy that called the site "static
-    # pages" and said its pages were "rendered at build time"; this digest
-    # carries the corrected wording. The home page heading, its meta description,
-    # the privacy description and the no-data sentence all state what the site
-    # publishes rather than the mechanism that renders it (plan section 7.5), and
-    # internal/webtier sweeps its own pages for that claim in every data posture,
-    # so the pin is also the revision that makes the claim fail a test instead of
-    # shipping.
+    # sha-f69d654: the revision that makes the crawler-facing copy honest and the
+    # /about champion count legible, on top of the frozen-CSS strip.
+    #   - /robots.txt no longer asserts "static" and "live" in literals; it
+    #     derives its state word, source, window and preview sentence from the
+    #     manifest it is serving (5c49ab0).
+    #   - /about reads "235 across 173 champions" rather than "173champions"
+    #     (f69d654).
+    #   - the frozen inline layer is 6,777 B rather than 14 KB (5ba2bc5), which
+    #     is most of the page-size change between this pin and the last one.
+    # The digest before this one (sha-9f23333) served literal "static"/"live"
+    # words in robots.txt, which is a false statement on a server-rendered tier
+    # under any posture - the reader that cannot notice is the one reading it.
     #
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:265923bd8da10fd0c033fc348654a5740d92d7d881c278efdd36a083812d148e
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:31ed706ee2b846ad6e70ba222154cd60f4d24bed18fff073f4d29d53049ce4af
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
