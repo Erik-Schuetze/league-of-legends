@@ -38,16 +38,21 @@ ARG STORAGES_VERSION=v0.0.18
 ENV GOTOOLCHAIN=auto
 
 # --output is explicit because the default is the working directory, which is
-# not part of the image's contract with this file. The destination is /out, not
-# the /usr/bin/caddy this builder image already ships, and that is a correctness
-# requirement rather than a layout preference: the builder's own caddy carries
-# `cap_net_bind_service=ep` on the file, an in-place build keeps that xattr, and
-# the COPY below would then carry it into the runtime stage. See the COPY.
+# not part of the image's contract with this file.
+#
+# xcaddy tags its own output: every build logs `[INFO] Setting capabilities
+# (requires admin privileges): [setcap cap_net_bind_service=+ep <output>]` and
+# then does it. That is the one thing this image must not inherit, so a plain
+# `cp` follows the build. cp writes a new inode and does not copy extended
+# attributes, so the copy is the untagged one, and it is the copy - not the
+# output itself - that the runtime stage takes. Verified with getcap: the built
+# binary prints `cap_net_bind_service=ep`, the copy prints nothing.
 RUN mkdir -p /out \
  && xcaddy build \
       --output /out/caddy \
       --with github.com/caddyserver/cache-handler@${CACHE_HANDLER_VERSION} \
-      --with github.com/darkweak/storages/otter/caddy@${STORAGES_VERSION}
+      --with github.com/darkweak/storages/otter/caddy@${STORAGES_VERSION} \
+ && cp /out/caddy /out/caddy.nocap
 
 FROM caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
 
@@ -61,18 +66,28 @@ FROM caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a
 #
 # rather than ever running Caddy. The upstream caddy image tags its binary this
 # way so a root process can bind :80; this image never does - the Service maps
-# port 80 onto 8080 - so the tag is pure liability here. Taking the binary from
-# /out, which was created by xcaddy rather than by the base image, is what
-# leaves it off (verified: a COPY of a non-tagged source does not inherit the
-# destination's xattrs), and the assertion below fails the build if that ever
-# stops being true, because the alternative is discovering it as a crashloop.
-COPY --from=builder /out/caddy /usr/bin/caddy
+# port 80 onto 8080 - so the tag is pure liability here.
+#
+# The COPY source is the untagged copy made in the builder stage above, because
+# COPY takes extended attributes from its source: copying the tagged output
+# reproduces the tag, while copying the copy leaves the destination with none
+# even though the destination already carried one. The `setcap -r` below is
+# belt and braces for a future base image whose cp behaves differently; it needs
+# CAP_SETFCAP, so it is best-effort and the assertion after it is the guarantee.
+COPY --from=builder /out/caddy.nocap /usr/bin/caddy
 
-# getcap exits 0 and prints nothing for a file with no capabilities; this is a
-# read-only check, so unlike `setcap -r` it needs no capability in the build
-# sandbox (BuildKit's sandbox has no CAP_SETFCAP, so `setcap -r` cannot be used
-# here at all).
-RUN [ -z "$(getcap /usr/bin/caddy)" ]
+RUN setcap -r /usr/bin/caddy 2>/dev/null || true
+
+# getcap exits 0 and prints nothing for a file with no capabilities, so this is
+# a read-only check. It exists because the failure it catches is otherwise only
+# visible as a crashloop in the cluster, long after the build said it was fine -
+# CI run 35224029065 failed exactly here, on a binary the builder had tagged.
+RUN t="$(getcap /usr/bin/caddy)"; \
+    if [ -n "$t" ]; then \
+      echo "FATAL: /usr/bin/caddy still carries file capabilities: $t" >&2; \
+      echo "A container that drops all capabilities cannot execve this file (EPERM)." >&2; \
+      exit 1; \
+    fi
 
 # The upstream image runs as root and owns /data and /config. The namespace
 # enforces the restricted Pod Security profile, which forbids that, so the
