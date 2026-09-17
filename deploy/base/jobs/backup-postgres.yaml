@@ -70,6 +70,57 @@ spec:
             fsGroup: 65532
             seccompProfile:
               type: RuntimeDefault
+          # Same cold-start dial race as `maintain` (see that file for the
+          # measurement), and the same reason it cannot be left to a retry:
+          # this container's first pg_dump connect is fail-fast, and
+          # restartPolicy: Never means a retry is a fresh pod whose namespace is
+          # cold again. The gate reads the DSN out of the secret and only
+          # derives host:port from it - the dump itself keeps using the PG*
+          # variables below, because a hand-built connection string would have to
+          # re-encode a password that may contain connection-string punctuation.
+          initContainers:
+            - name: wait-for-postgres
+              image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  if [ -z "${LOLSTATS_POSTGRES_DSN:-}" ]; then
+                      echo "wait-for-postgres: LOLSTATS_POSTGRES_DSN is empty" >&2
+                      exit 1
+                  fi
+                  authority=${LOLSTATS_POSTGRES_DSN##*@}
+                  authority=${authority%%/*}
+                  host=${authority%%:*}
+                  port=${authority##*:}
+                  deadline=$(( $(date +%s) + 120 ))
+                  until nc -z -w 2 "$host" "$port"; do
+                      if [ "$(date +%s)" -ge "$deadline" ]; then
+                          echo "wait-for-postgres: ${host}:${port} did not accept a connection" >&2
+                          exit 1
+                      fi
+                      echo "wait-for-postgres: retrying ${host}:${port}"
+                      sleep 1
+                  done
+                  echo "wait-for-postgres: ${host}:${port} is accepting connections"
+              env:
+                - name: LOLSTATS_POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: DSN
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
           containers:
             - name: backup-postgres
               image: postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1

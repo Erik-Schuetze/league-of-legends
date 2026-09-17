@@ -65,11 +65,18 @@ data:
   # pod with no explicit limit is a pod that believes it has the whole node and
   # gets OOM-killed against the 3 Gi limit in jobs/aggregate.yaml.
   #
-  # 1GiB is a third of that 3 Gi limit. The rest of the cgroup is the Go
-  # runtime (GOMEMLIMIT=2GiB), the page cache and DuckDB's non-buffer
-  # allocations - a limit equal to the pod limit is still a kill. Raising this
-  # is a decision about the pod's memory limit, not a tweak.
-  LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT: "1GiB"
+  # 2GiB is two thirds of that 3 Gi limit, and the split is measured rather than
+  # guessed. Over the live archive the extraction's heaviest statement - one
+  # batch's features COPY, whose projection carries the rune-style list - fails
+  # at a 1GiB limit with "Out of Memory Error: failed to allocate data of size
+  # 2.0 MiB (1023.7 MiB/1.0 GiB used)" and completes at 1.5GiB, and the whole
+  # 26-batch extraction completes at 1.5GiB and at 2GiB inside the Job's 3Gi
+  # limit. The remaining third is the Go runtime (GOMEMLIMIT), the page cache and
+  # DuckDB's non-buffer allocations - a limit equal to the pod limit is still a
+  # kill. Raising this further is a decision about the pod's memory limit, not a
+  # tweak; internal/aggregate asserts the pair
+  # (engine_bounds_test.go::TestDuckDBDefaultsFitInsideThePodLimit).
+  LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT: "2GiB"
   # Matches the Job's 2-CPU limit. Unset, DuckDB takes the node's core count
   # (10 on the measured node) and every extra thread carries its own state.
   LOLSTATS_AGG_DUCKDB_THREADS: "2"
