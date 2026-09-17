@@ -320,7 +320,7 @@ migrate:
 # ---- additions: gates lane (web reference build + fail-closed render parity) ----
 # Appended at the end, and declared on its own .PHONY line, so this addition
 # stays append-only like the blocks above it.
-.PHONY: web-deps web-dist test-parity verify-serving verify-serving-local compliance-negative-control compliance-gnu compliance-served capture-served-pages
+.PHONY: web-deps web-dist test-parity parity-mutation-control verify-serving verify-serving-local compliance-negative-control compliance-gnu compliance-served capture-served-pages
 
 # `web-install` runs `npm ci` unconditionally, which is right for a clean build
 # and wasteful for a second `make` in the same checkout. This target only
@@ -460,6 +460,16 @@ verify-serving-local: build
 # rejects each of them, with a page stripped of every <script> passing.
 compliance-negative-control:
 	sh scripts/compliance-negative-control.sh
+
+# The negative control for the parity gate: change one rendering input in the
+# reference page and require the gate to fail, so `test-parity` cannot rot into a
+# comparison that passes over anything. It rewrites web/dist/index.html in place
+# (internal/webtier/parity_test.go reads the reference tree from a fixed path and
+# has no override), so it runs last and alone - no other target may read the
+# reference tree while it is mutated. The restore is on a trap and is checked by
+# hash, and a backup left by an interrupted run is validated before it is used.
+parity-mutation-control:
+	@sh scripts/parity-mutation-control.sh
 
 # Capture the HTML a running tier serves into bin/served-pages. Point it at the
 # cluster through the same port-forward the serving contract uses:
