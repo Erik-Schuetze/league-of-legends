@@ -65,7 +65,7 @@ export function emptyReason(snap: Snapshot): string {
   if (!snap.partition) {
     return (
       'No aggregate snapshot has been published yet, so there are no match statistics to read. ' +
-      'This page reads the published artifacts at build time and will fill in as soon as one exists.'
+      'This page will fill in as soon as one exists.'
     );
   }
   return (
