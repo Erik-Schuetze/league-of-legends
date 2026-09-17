@@ -66,6 +66,20 @@ type GateConfig struct {
 	// role before the build stops. It defaults to zero: a rejected row lowers
 	// every rate it should have contributed to, and there is no way to tell a
 	// queue quirk from a parsing bug by looking at the total.
+	//
+	// A non-zero value is an allowance measured against the archive, not a
+	// relaxation of the rule. The live EUW/420 archive contains rows Riot
+	// itself reports as position-less - teamPosition "" together with
+	// individualPosition "Invalid", the literal sentinel, mostly in sub-four
+	// minute remakes that never assigned a lane - and a build that refuses
+	// them publishes nothing. Measured over the 2026-09-04..2026-09-17 window:
+	// 3 rejected rows out of 27,790 participant rows for the published patch
+	// 16.18, 7 for the whole two-patch window. The deployed allowance is 25,
+	// several times the measurement and still under a tenth of a percent of
+	// the window, so a real classification defect (which rejects a large
+	// fraction of the archive) still stops the build. The rows themselves are
+	// never guessed into a role: featureFilter drops them from every cell and
+	// CheckOutput's reconciliation counts them as unclassified.
 	MaxRejectedRows int
 }
 
