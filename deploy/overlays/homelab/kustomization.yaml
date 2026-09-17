@@ -45,8 +45,9 @@ replacements:
   # base describes *what* the tier is and only the pin is environment-specific.
   #
   # A replacement is used rather than a patch because the `images` transformer
-  # above matches every workload that names the shared repository, and one of
-  # them is another agent's pipeline: this must move the third binary alone. A
+  # above matches every workload that names the shared repository - the ingest
+  # Deployment, the Go tier and all four scheduled jobs - and this must move the
+  # Go tier's own container to a digest while leaving the tag on the rest. A
   # replacement runs after the image transformers, so the digest survives.
   #
   # sha-8739aa8 is the tier's first green CI run; bump the annotation when the
