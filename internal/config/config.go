@@ -136,14 +136,21 @@ type Aggregate struct {
 	// never published. See docs/contracts.md.
 	MinCellN int
 	// How many participant rows may lack a champion or a role before a build
-	// refuses to publish. Zero, the default, is "the archive must classify
-	// every row it contains": a rejected row lowers every rate it should have
-	// contributed to, so the build stops rather than publish a biased tier
-	// list. The deployed value is an allowance measured against the archive
-	// instead of zero, because Riot's own payloads contain a small number of
-	// rows it marks as position-less (see the MaxRejectedRows note in
-	// internal/aggregate/gate.go).
+	// refuses to publish, as an absolute floor. Zero, the default, is "the
+	// archive must classify every row it contains": a rejected row lowers
+	// every rate it should have contributed to, so the build stops rather than
+	// publish a biased tier list. The deployed value is an allowance measured
+	// against the archive instead of zero, because Riot's own payloads contain
+	// a small number of rows it marks as position-less (see the
+	// MaxRejectedRows note in internal/aggregate/gate.go).
 	MaxRejectedRows int
+	// The window-sized part of that allowance: the share of the window's
+	// participant rows a build may reject. The allowance applied is
+	// max(MaxRejectedRows, ceil(MaxRejectedRate x participant rows)), so it
+	// grows with the crawl. Zero, the default, means "no rate ceiling", which
+	// leaves MaxRejectedRows to decide alone and keeps an unconfigured build
+	// fail-closed. See the MaxRejectedRate note in internal/aggregate/gate.go.
+	MaxRejectedRate float64
 	// How many of the window's computable champion/role cells must survive
 	// suppression for the build to publish at all. The default is 0.5, and the
 	// value that is right depends on how deeply the patch the window ends on
@@ -240,6 +247,10 @@ const (
 	// A fail-closed archive gate: zero tolerant rows unless an operator has
 	// measured a reason to allow some. See Aggregate.MaxRejectedRows.
 	defaultMaxRejectedRows = 0
+	// The same fail-closed rule for the window-sized part of the allowance:
+	// unset means "no rate ceiling", not "some generous default rate". See
+	// Aggregate.MaxRejectedRate.
+	defaultMaxRejectedRate = 0.0
 	// The same value as GateConfig's own default, so that a build with no
 	// operator input behaves identically whether the gate set comes from here
 	// or from internal/aggregate. See Aggregate.MinConfidentShare.
@@ -295,6 +306,7 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			SchemaVersion:     r.integer(env("AGG_SCHEMA_VERSION"), defaultSchemaVersion),
 			MinCellN:          r.integer(env("AGG_MIN_CELL_N"), defaultMinCellN),
 			MaxRejectedRows:   r.nonNegativeInteger(env("AGG_MAX_REJECTED_ROWS"), defaultMaxRejectedRows),
+			MaxRejectedRate:   r.nonNegativeShare(env("AGG_MAX_REJECTED_RATE"), defaultMaxRejectedRate),
 			MinConfidentShare: r.share(env("AGG_MIN_CONFIDENT_SHARE"), defaultMinConfidentShare),
 			SourceWindowDays:  r.integer(env("AGG_SOURCE_WINDOW_DAYS"), defaultSourceWindow),
 			Bracket:           r.str(env("AGG_BRACKET"), defaultBracket),
@@ -423,6 +435,29 @@ func (r *reader) share(key string, def float64) float64 {
 		r.fail(key, "is not a number")
 	case f <= 0 || f > 1:
 		r.fail(key, "must be greater than 0 and at most 1")
+	default:
+		return f
+	}
+	return def
+}
+
+// nonNegativeShare is share's sibling for a rate whose zero is meaningful:
+// zero is "off", the fail-closed default of a gate that has a second, absolute
+// part (see Aggregate.MaxRejectedRate). Everything above zero is refused
+// outside (0,1] because a ceiling above the whole window is not a measured
+// allowance at all - it would permit every row to be rejected while looking
+// like a number an operator chose.
+func (r *reader) nonNegativeShare(key string, def float64) float64 {
+	v, ok := r.raw(key)
+	if !ok {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	switch {
+	case err != nil:
+		r.fail(key, "is not a number")
+	case f < 0 || f > 1:
+		r.fail(key, "must be at least 0 and at most 1")
 	default:
 		return f
 	}

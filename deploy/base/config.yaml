@@ -120,14 +120,32 @@ data:
   # should have contributed to. The live archive is not perfectly clean: Riot
   # reports one participant per remake with teamPosition "" and
   # individualPosition "Invalid" (its literal sentinel), and the build would
-  # otherwise refuse every night. Measured over 2026-09-04..2026-09-17 EUW/420:
-  # 3 rejected rows of 27,790 for patch 16.18, 7 for the whole two-patch window.
-  # 25 is several times that measurement and under a tenth of a percent of the
-  # window, so a genuine classification regression - which rejects a large
-  # fraction of the archive, not a handful of rows - still stops the build.
+  # otherwise refuse every night. This is the floor of the allowance; the
+  # rate below scales it with the window.
+  # Measured over 2026-09-04..2026-09-17 EUW/420, 30 rejected rows of 141,150
+  # participant rows (0.021%); earlier windows of the same window measured
+  # 0.018% (23/124,530), 0.018% (22/123,860) and 0.019% (20/105,980), so the
+  # count moves with the archive while the rate does not. The 25 sits above
+  # the smallest window the project has published so the floor alone covers a
+  # quiet night.
+  # A genuine classification regression rejects a large fraction of the
+  # archive, not a handful of rows, and still stops the build: the allowance
+  # is capped well under a tenth of a percent of the window.
   # The excluded rows are never assigned a guessed role; every run logs
   # rejected_rows and the effective allowance.
   LOLSTATS_AGG_MAX_REJECTED_ROWS: "25"
+  # The absolute floor above goes stale as the archive grows: the nightly
+  # window nearly tripled between 2026-09-04 (105,980 participant rows) and
+  # 2026-09-17 (141,150), and 30 rejected rows then tripped a 25-row allowance
+  # and quarantined build run 17. The allowance is therefore
+  # max(floor, ceil(rate * participant_rows)). 0.0008 is 3.8x the worst rate
+  # measured above (0.021%) and still under a tenth of a percent of any
+  # window, so it absorbs remakes - about 1% of matches - without absorbing a
+  # defect. At 141,150 rows it allows 113; at the 27,790-row two-patch window
+  # the rate ceiling is 23, so the floor still decides (25). Zero switches the
+  # rate off and leaves the floor exactly as it was, which is the fail-closed
+  # posture.
+  LOLSTATS_AGG_MAX_REJECTED_RATE: "0.0008"
 
   # The publish gate refuses to replace the live artifact when most of the
   # window's computable champion/role cells fall below min_cell_n. A real
