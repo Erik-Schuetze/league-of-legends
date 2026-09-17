@@ -323,6 +323,7 @@ migrate:
 # Appended at the end, and declared on its own .PHONY line, so this addition
 # stays append-only like the blocks above it.
 .PHONY: served-pages verify-serving verify-serving-local compliance-negative-control compliance-gnu capture-served-pages
+.PHONY: require-docker serving-static-control precondition-failclosed-control gate-controls
 
 # Captures what a running tier serves into bin/served-pages, by starting the tier
 # on loopback over the checked-in fixture artifact tree (no cluster, no PVC, no
@@ -372,6 +373,14 @@ verify-serving:
 # with a deliberately corrupt aggregate root, because a corrupt artifact must
 # produce a visible error page rather than a truncated 200. Nothing here touches
 # the cluster: it is an ephemeral process on 127.0.0.1.
+#
+# A third run covers the other state the served contract has to allow: the same
+# tree with `v1/static` removed, where the reserved Data Dragon prefix must
+# answer 404 with no-store and the gate must still pass by naming that state
+# (docs/contracts.md section 4, the static-projection amendment). Both states are
+# exercised here rather than described, because the check used to report the
+# absent state as a WARN and exit 0 - a frozen contract outliving the served
+# reality it described.
 verify-serving-local: build
 	@port=$${LOLSTATS_LOCAL_PORT:-18098}; pid=""; \
 	cleanup() { [ -n "$$pid" ] && kill "$$pid" 2>/dev/null; }; \
@@ -395,6 +404,10 @@ verify-serving-local: build
 	corrupt="$(CURDIR)/bin/verify-serving-corrupt-agg"; \
 	rm -rf "$$corrupt"; mkdir -p "$$corrupt/v1"; \
 	printf '{"schema": 1, "source": "broken-fixture"' > "$$corrupt/v1/manifest.json"; \
+	nostatic="$(CURDIR)/bin/verify-serving-no-static-agg"; \
+	rm -rf "$$nostatic"; mkdir -p "$$nostatic"; \
+	cp -R "$(CURDIR)/fixtures/site/v1" "$$nostatic/v1" || exit 1; \
+	rm -rf "$$nostatic/v1/static"; \
 	echo "== tier over the checked-in fixture artifact tree =="; \
 	start only "" || exit 1; \
 	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" sh scripts/verify-serving.sh || exit 1; \
@@ -403,7 +416,11 @@ verify-serving-local: build
 	start off "$$corrupt" || exit 1; \
 	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" LOLSTATS_EXPECT_NO_AGG=1 LOLSTATS_AGG_ROOT="$$corrupt" sh scripts/verify-serving.sh || exit 1; \
 	kill "$$pid" 2>/dev/null; wait "$$pid" 2>/dev/null; pid=""; \
-	echo "ok: the serving contract holds over the fixtures, and a missing agg/v1 is a visible 503"
+	echo "== tier over the fixture tree with the Data Dragon projection removed (the reserved prefix must answer 404 + no-store) =="; \
+	start off "$$nostatic" || exit 1; \
+	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" sh scripts/verify-serving.sh || exit 1; \
+	kill "$$pid" 2>/dev/null; wait "$$pid" 2>/dev/null; pid=""; \
+	echo "ok: the serving contract holds over the fixtures, a missing agg/v1 is a visible 503, and an unpublished Data Dragon projection is an honest 404 + no-store"
 
 # The negative control for the amended compliance gate (scripts/compliance-check.sh,
 # amendment of 2026-09-17, docs/compliance.md). Checks 3 and 4 were failing a
@@ -435,19 +452,54 @@ capture-served-pages:
 # script in debian:12-slim with a non-empty stdin. It is the local half of the
 # portability control; the half that runs everywhere, including CI, is check 12
 # inside the gate, which asserts the empty-list behaviour directly.
-# Silent skip with a reason when there is no usable container runtime, because
-# this is a verification aid and not a launch gate.
-compliance-gnu: served-pages
-	@if ! command -v docker >/dev/null 2>&1; then \
-		echo "skipped: docker is not installed, so the gate ran only under $(uname -s) grep"; \
-	elif ! docker info >/dev/null 2>&1; then \
-		echo "skipped: the container runtime is not answering, so the gate ran only under $(uname -s) grep"; \
-	else \
-		echo "== the compliance gate under GNU userland (debian:12-slim) =="; \
-		echo "     over the served corpus at bin/served-pages: $$(find bin/served-pages -name '*.html' | wc -l | tr -d ' ') page(s)"; \
-		cat scripts/compliance-check.sh | docker run --rm -i --user "$$(id -u):$$(id -g)" \
-			-v "$(CURDIR):/w" -w /w debian:12-slim \
-			sh -c 'grep --version | head -1; sh /w/scripts/compliance-check.sh' || exit 1; \
-	fi
+#
+# It used to print "skipped: docker is not installed" and exit 0 when it could
+# not run, which is a green light wired to nothing: the CI step that runs this
+# target would stay green if the container runtime disappeared, and the half of
+# the control this machine cannot run would go missing silently. The prerequisite
+# require-docker below fails closed instead, and
+# scripts/precondition-failclosed-control.sh proves that failure direction by
+# running this target with docker removed from PATH.
+compliance-gnu: require-docker served-pages
+	@echo "== the compliance gate under GNU userland (debian:12-slim) =="; \
+	echo "     over the served corpus at bin/served-pages: $$(find bin/served-pages -name '*.html' | wc -l | tr -d ' ') page(s)"; \
+	cat scripts/compliance-check.sh | docker run --rm -i --user "$$(id -u):$$(id -g)" \
+		-v "$(CURDIR):/w" -w /w debian:12-slim \
+		sh -c 'grep --version | head -1; sh /w/scripts/compliance-check.sh' || exit 1
+
+# The precondition guard for compliance-gnu, and the shape every gate in this
+# lane is expected to have: absent prerequisite is a failure with a reason, not a
+# notice that still exits 0.
+require-docker:
+	@command -v docker >/dev/null 2>&1 || { \
+		echo "FAIL: docker is not installed, so the GNU-userland half of the compliance gate cannot run." >&2; \
+		echo "      This is a failure and not a skip: the portability defect this target exists for is" >&2; \
+		echo "      invisible under $(uname -s) grep, and a green run would claim a check that did not happen." >&2; \
+		exit 1; \
+	}
+	@docker info >/dev/null 2>&1 || { \
+		echo "FAIL: the container runtime is not answering (docker info failed), so the GNU-userland half" >&2; \
+		echo "      of the compliance gate cannot run; start the runtime and re-run." >&2; \
+		exit 1; \
+	}
+	@echo "ok: docker is available: $$(docker --version)"
+
+# The negative control for the serving contract's Data Dragon check (check 5 of
+# scripts/verify-serving.sh, amended 2026-09-17): one bad origin at a time, each
+# of which the amended check has to fail on. It stands in its own origin rather
+# than stubbing the gate, and it fails closed when python3 is absent, because the
+# control is only worth its failure direction.
+serving-static-control:
+	sh scripts/serving-static-control.sh
+
+# The control for the class of defect that left CI green over a check that never
+# ran: a gate whose precondition is missing. It hides docker from PATH for real
+# and requires `make compliance-gnu` to fail and say which tool is missing, then
+# requires the same guard to succeed with docker present.
+precondition-failclosed-control:
+	sh scripts/precondition-failclosed-control.sh docker compliance-gnu require-docker
+
+# Both controls, in the order CI runs them.
+gate-controls: precondition-failclosed-control serving-static-control
 
 # ---- end additions: gates lane ----

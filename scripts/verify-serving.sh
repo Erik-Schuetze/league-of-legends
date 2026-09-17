@@ -614,11 +614,26 @@ else
 fi
 
 # The Data Dragon projection: v1/static/<ddragon_version>/{items,runes,
-# summoner-spells,patches,champions}.json (internal/aggmodel/paths.go). The tier
-# serves that prefix with public, max-age=3600 because it cannot change while
-# the version stands. The version is a property of the published tree, so it is
-# discovered by probing the candidates the served patch implies rather than
-# hardcoded.
+# summoner-spells,patches,champions}.json (internal/aggmodel/paths.go). The
+# published tree may or may not carry it, and both states are contract
+# (docs/contracts.md section 4, the static-projection amendment of 2026-09-17):
+#
+#   published    200 at exactly public, max-age=3600, because the bytes cannot
+#                change while the version stands, with an honest Content-Length
+#                and a JSON body;
+#   unpublished  the reserved prefix answers 404 with Cache-Control: no-store -
+#                never an invented 200 and never a cacheable 404 - and the pages
+#                are still complete, because the tier renders from the Data
+#                Dragon projection embedded in the binary
+#                (internal/webtier/data.go).
+#
+# Both states are asserted and anything else fails: a 404 a cache would keep, a
+# 200 with the wrong policy, a 5xx, or a candidate that could not be derived at
+# all. This used to be a WARN that still exited 0, which let a frozen contract
+# outlive the served reality it described, so the check now says which state it
+# observed and holds the gate on it. A mix is legal and expected - one published
+# Data Dragon version and 404s for the patch-version candidates - because the
+# path carries the Data Dragon version, not the game patch.
 if [ "$NO_AGG" = 1 ]; then
 	note 'no snapshot: the Data Dragon projection is not expected to be served in this run'
 else
@@ -626,7 +641,9 @@ else
 	if [ -n "$LATEST_PATCH" ]; then
 		ver_candidates="$ver_candidates $LATEST_PATCH.1 $LATEST_PATCH"
 	fi
-	static_ok=0
+	static_served=''
+	static_probed=0
+	static_failed=0
 	ver_tried=''
 	ver_status=''
 	for ver in $ver_candidates; do
@@ -637,39 +654,44 @@ else
 		ver_tried="$ver_tried $ver"
 		static_path="/agg/v1/static/$ver/champions.json"
 		do_fetch "$static_path" "$BASE_URL$static_path"
+		static_probed=$((static_probed + 1))
+		ver_status="$ver_status $ver:$FETCH_STATUS"
+		if [ "$FETCH_STATUS" = 404 ]; then
+			if [ "$FETCH_CC" != 'no-store' ]; then
+				fail "$static_path: HTTP 404 with Cache-Control '${FETCH_CC:-absent}'; an unpublished path under the reserved /agg/v1/static/ prefix is not expected to be served and must not be cacheable either, so it has to answer no-store (docs/contracts.md section 4)"
+				static_failed=1
+			fi
+			continue
+		fi
 		if [ "$FETCH_STATUS" != 200 ]; then
-			note "$static_path: HTTP $FETCH_STATUS"
-			ver_status="$ver_status $ver:$FETCH_STATUS"
+			fail "$static_path: HTTP $FETCH_STATUS; the reserved Data Dragon prefix answers either 200 at '$DDDRAGON_CACHE_CONTROL' or 404 with no-store, and this is neither (docs/contracts.md section 4)"
+			static_failed=1
 			continue
 		fi
 		if [ "$FETCH_CC" != "$DDDRAGON_CACHE_CONTROL" ]; then
 			fail "$static_path: Cache-Control is '${FETCH_CC:-absent}', expected '$DDDRAGON_CACHE_CONTROL' for the immutable Data Dragon projection"
-			static_ok=1
-			break
+			static_failed=1
+			continue
 		fi
 		if [ -n "$FETCH_DECLARED" ] && [ "$FETCH_DECLARED" != "$FETCH_BYTES" ]; then
 			fail "$static_path: Content-Length $FETCH_DECLARED but $FETCH_BYTES bytes were delivered"
-			static_ok=1
-			break
+			static_failed=1
+			continue
 		fi
 		if [ "$(head -c 1 "$FETCH_BODY")" != '{' ]; then
 			fail "$static_path: the body does not start with {, so it is not the projection JSON"
-			static_ok=1
-			break
+			static_failed=1
+			continue
 		fi
 		pass "$static_path: HTTP 200, $FETCH_BYTES bytes, Cache-Control $FETCH_CC"
-		static_ok=1
-		break
+		static_served="$static_served $ver"
 	done
-	if [ "$static_ok" != 1 ]; then
-		# A finding, not a failure: the tier serves the v1/static/ prefix at
-		# public, max-age=3600 whenever it is published, and falls back to its
-		# checked-in Data Dragon copy when it is not, so the pages stay correct.
-		# What is wrong here belongs to the publisher (the deploy's static-sync
-		# job), not to the serving tier, so the check reports it and stays green
-		# - but it reports the probed versions and their statuses so the gap is
-		# visible rather than silent.
-		warn "no Data Dragon projection is served under /agg/v1/static/ (probed:${ver_status:- none}); docs/contracts.md section 4 makes v1/static/<ddragon>/{champions,items,runes,summoner-spells,patches}.json part of the frozen tree and the tier serves that prefix at '$DDDRAGON_CACHE_CONTROL', but the served root has no such directory, so the tier is rendering from its checked-in Data Dragon copy instead"
+	if [ "$static_probed" = 0 ]; then
+		fail "no Data Dragon version could be derived from the served patch ('${LATEST_PATCH:-no manifest}'), so the reserved /agg/v1/static/ prefix was not probed at all and this check proved nothing"
+	elif [ -n "$static_served" ]; then
+		note "the Data Dragon projection is published: 200 and '$DDDRAGON_CACHE_CONTROL' for$static_served (probed:${ver_status:- none})"
+	elif [ "$static_failed" = 0 ]; then
+		pass "no Data Dragon projection is published under /agg/v1/static/ and the tier answers the reserved prefix honestly: 404 with Cache-Control: no-store for every probed version (probed:${ver_status:- none}), never an invented 200, and the pages are complete from the projection embedded in the binary (docs/contracts.md section 4, amended 2026-09-17)"
 	fi
 fi
 

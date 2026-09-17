@@ -120,11 +120,21 @@ jobs:
       - name: Compliance negative controls
         run: make compliance-negative-control
 
+      # The controls for the two gates that could not fail: an origin that serves
+      # the Data Dragon projection with no cache policy and a 404 under the
+      # reserved prefix that a cache would keep (the serving gate must reject
+      # both), and docker hidden from PATH for real (make compliance-gnu must
+      # fail and name the missing tool). Both fail closed when they cannot create
+      # their condition.
+      - name: Gate controls (fail closed)
+        run: make gate-controls
+
       # The gate's scans hand a NUL-delimited list of paths to grep, and GNU
       # grep answers an empty list from its own standard input. This runner has
       # GNU userland and the author's machine does not, so the portability half
       # of that control runs here: the same script under Debian, with a
-      # deliberately non-empty stdin.
+      # deliberately non-empty stdin. The target fails closed (require-docker)
+      # when no usable container runtime is present, which the step above proves.
       - name: Compliance gate under GNU userland
         run: make compliance-gnu
 
