@@ -49,7 +49,7 @@ func dataSourceSentence(site *Site) string {
 func stateDescription(site *Site) string {
 	switch {
 	case site.Live():
-		return "This build rendered a published snapshot of ingested Riot match data."
+		return "This build reads a published snapshot of ingested Riot match data."
 	case site.Demo():
 		if site.SourceRecognised() {
 			return PreviewText
@@ -64,18 +64,18 @@ func stateDescription(site *Site) string {
 func aboutIntroTail(site *Site) string {
 	switch {
 	case site.Live():
-		return "The pages are rendered at build time from aggregate artifacts that a separate ingestion and aggregation pipeline produces from Riot's MATCH-V5 match feed."
+		return "The pages read aggregate artifacts that a separate ingestion and aggregation pipeline produces from Riot's MATCH-V5 match feed."
 	case site.Demo():
-		return "The pages are rendered at build time from aggregate artifacts, in the same shape a real snapshot has, but these artifacts are illustrative " + demoSource + " data: no ingestion and aggregation pipeline has run for them, and nothing on this build is a measurement of a real game."
+		return "The pages read aggregate artifacts in the same shape a real snapshot has, but these artifacts are illustrative " + demoSource + " data: no ingestion and aggregation pipeline has run for them, and nothing on this build is a measurement of a real game."
 	default:
-		return "No aggregate snapshot exists yet, so this build read none and serves the layout of those pages in its empty state: the pages show no numbers from any game, and the aggregate artifacts they will one day be rendered from are the kind an ingestion and aggregation pipeline writes."
+		return "No aggregate snapshot exists yet, so this build read none and serves the layout of those pages in its empty state: the pages show no numbers from any game, and the aggregate artifacts they will one day read are the kind an ingestion and aggregation pipeline writes."
 	}
 }
 
 // pipelineLeadIn introduces the five pipeline steps.
 func pipelineLeadIn(site *Site) string {
 	if site.Live() {
-		return "Five steps, in order, produced the snapshot this build rendered. The pipeline is deliberately boring, because every interesting shortcut here would be a way to publish a wrong number."
+		return "Five steps, in order, produced the snapshot this build reads. The pipeline is deliberately boring, because every interesting shortcut here would be a way to publish a wrong number."
 	}
 	return fmt.Sprintf("Five steps, in order. No run of this pipeline has produced anything for this build - %s - so this is the method the numbers will come from, not a description of an ingestion that has happened. The pipeline is deliberately boring, because every interesting shortcut here would be a way to publish a wrong number.", declaredSourceClause(site))
 }
@@ -84,9 +84,9 @@ func pipelineLeadIn(site *Site) string {
 func pipelineStatusSentence(site *Site) string {
 	switch {
 	case site.Live():
-		return "Every step above ran for the snapshot this build rendered, and the build record printed on this page is its receipt."
+		return "Every step above ran for the snapshot this build reads, and the build record printed on this page is its receipt."
 	case site.Demo():
-		return fmt.Sprintf("None of the five steps has run for this build: %s, so these pages were rendered from illustrative fixtures rather than from pipeline output.", declaredSourceClause(site))
+		return fmt.Sprintf("None of the five steps has run for this build: %s, so these pages read illustrative fixtures rather than pipeline output.", declaredSourceClause(site))
 	default:
 		return "None of the five steps has run for this build, so there is no snapshot and no number anywhere on this site; the steps above are the method that will produce the first one."
 	}
@@ -195,8 +195,8 @@ func computedFromSentence(site *Site, minCellN int, hasMinCellN bool) string {
 
 	switch {
 	case site.Live():
-		return "The numbers come from Riot's MATCH-V5 match feed, aggregated per patch and per queue, and this page was " +
-			"rendered from the published aggregate artifact at build time. " + method
+		return "The numbers come from Riot's MATCH-V5 match feed, aggregated per patch and per queue, and this page reads " +
+			"the published aggregate artifact for that patch and queue. " + method
 	case site.Demo():
 		return "No Riot match data has been ingested for this build: " + declaredSourceClause(site) + ", so the numbers on this " +
 			"page are a preview of the layout rather than a measurement of anything. The arithmetic below is the real " +
