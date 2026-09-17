@@ -33,11 +33,10 @@ deploy/secret.yaml
 # Local planning notes, never shared/committed
 /backlog.local.md
 
-# Web
-/web/node_modules/
-/web/dist/
-/web/.astro/
-/web/.vercel/
+# The served corpus the compliance gate reads, captured from a running tier by
+# `make capture-served-pages`. It is a build artifact of a live process, in
+# /bin/ above, and is never committed.
+/bin/served-pages/
 
 # IDE / OS
 .idea/

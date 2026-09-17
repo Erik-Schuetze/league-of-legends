@@ -47,7 +47,7 @@ type VerifyOptions struct {
 
 	// SchemaPath is the schema document to check against. Empty means the
 	// schema internal/aggmodel emits, which is the same document
-	// cmd/gen-types writes to web/src/types/agg.schema.json.
+	// cmd/gen-types writes to schema/agg.schema.json.
 	SchemaPath string
 
 	Log *slog.Logger

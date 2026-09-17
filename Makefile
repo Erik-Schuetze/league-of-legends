@@ -65,7 +65,7 @@ vuln:
 # The generated output is checked in, so a schema change that was not
 # regenerated is caught by `git diff --exit-code` in CI.
 types:
-	go run ./cmd/gen-types -out web/src/types
+	go run ./cmd/gen-types -out schema
 
 # The ingest binary is one binary with subcommands; `run` starts the worker
 # because that is the long-running mode, and the cron subcommands are run
@@ -89,7 +89,7 @@ docker-build:
 	docker build -t $(IMAGE) .
 
 clean:
-	rm -rf bin/ dist/ web/dist/ web/node_modules/
+	rm -rf bin/ dist/
 
 # ---- additions: operations workstream (backups) ----
 # Declared on separate .PHONY lines rather than by editing the one above, so

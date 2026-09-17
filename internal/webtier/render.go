@@ -16,8 +16,8 @@ import (
 // Rendering is a port of the published Astro build, and the published build
 // emits its markup with no whitespace between tags. Templates here therefore
 // carry their whitespace literally: a newline in a template file is a newline in
-// the response, which is what makes byte-level comparison against web/dist
-// meaningful instead of approximate. Keep the markup on one line.
+// the response, which is what made byte-level comparison against the retired
+// Astro build meaningful instead of approximate. Keep the markup on one line.
 //
 //go:embed templates
 var templateFS embed.FS

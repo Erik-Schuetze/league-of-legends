@@ -81,7 +81,7 @@ func renderedDataState(value string) DataState {
 	root := discoverRepoRoot()
 	opts := Options{
 		AggRoot:      filepath.Join(root, "agg"),
-		FixturesDir:  filepath.Join(root, "web", "src", "fixtures"),
+		FixturesDir:  filepath.Join(root, "fixtures", "site"),
 		FixturesMode: FixturesMode(strings.ToLower(strings.TrimSpace(value))),
 	}
 	for _, candidate := range candidateRoots(opts) {

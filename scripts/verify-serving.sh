@@ -83,8 +83,8 @@ AGG_ROOT=${LOLSTATS_AGG_ROOT:-}
 # Only used to build a probe URL when the served patch cannot imply one (a fault
 # run has no readable manifest): the version of the checked-in fixture tree.
 DDDRAGON_VERSION=${LOLSTATS_DDDRAGON_VERSION:-}
-if [ -z "$DDDRAGON_VERSION" ] && [ -d "$ROOT/web/src/fixtures/v1/static" ]; then
-	DDDRAGON_VERSION=$(cd "$ROOT/web/src/fixtures/v1/static" 2>/dev/null && ls -d */ 2>/dev/null | head -1 | sed 's|/$||')
+if [ -z "$DDDRAGON_VERSION" ] && [ -d "$ROOT/fixtures/site/v1/static" ]; then
+	DDDRAGON_VERSION=$(cd "$ROOT/fixtures/site/v1/static" 2>/dev/null && ls -d */ 2>/dev/null | head -1 | sed 's|/$||')
 fi
 
 HTML_CACHE_CONTROL='private, max-age=60, stale-while-revalidate=300'

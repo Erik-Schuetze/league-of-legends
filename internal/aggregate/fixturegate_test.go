@@ -1332,7 +1332,7 @@ func TestDemoIsDeterministicAndLabelled(t *testing.T) {
 
 	// Valid: the tree passes verification against the schema cmd/gen-types
 	// writes, which is the same document the frontend types are generated from.
-	schema := filepath.Join("..", "..", "web", "src", "types", "agg.schema.json")
+	schema := filepath.Join("..", "..", "schema", "agg.schema.json")
 	if _, err := os.Stat(schema); err != nil {
 		t.Fatalf("the schema cmd/gen-types writes is missing: %v", err)
 	}
