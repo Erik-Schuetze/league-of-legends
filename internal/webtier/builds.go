@@ -15,7 +15,7 @@ import (
 //
 // A `Build` in the aggregate model is ids and numbers: `key: [3078, 3111]` is a
 // build, and nothing in the artifact says what those ids are called. This file
-// is the tier's answer to that, ported from web/src/lib/build-lookup.ts, and it
+// is the tier's answer to that, ported from the retired web/ tree's build-lookup.ts, and it
 // is the only reason a build row can render an icon instead of a number.
 //
 // Two sources, in this order:

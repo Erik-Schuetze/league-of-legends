@@ -11,8 +11,8 @@ import (
 // The row model for every published table, and the ordering rules that go with
 // it.
 //
-// This is a port of web/src/lib/rows.ts and of the sorting half of
-// web/src/components/TableIsland.astro. It is a port rather than a rewrite on
+// This is a port of the retired web/ tree's rows.ts and of the sorting half of
+// its TableIsland.astro. It is a port rather than a rewrite on
 // purpose: the tier list is sorted twice - once here, on the server, and again
 // in the browser by the island - and the two orderings have to agree, because
 // the island only ever reorders rows it did not create. A tie-break that exists

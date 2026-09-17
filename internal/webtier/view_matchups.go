@@ -243,7 +243,7 @@ func matchupTail(label string, minCellN int, snap snapshotView) string {
 }
 
 // matchupDescription is the page's meta description, transcribed from
-// web/src/pages/matchups/[role].astro.
+// the retired web/ tree's matchups/[role].astro.
 func matchupDescription(label string, snap snapshotView) string {
 	if snap.Partition == nil {
 		return "The " + strings.ToLower(label) + " champion matchup matrix is not published yet: no aggregate " +
