@@ -55,6 +55,7 @@ const (
 	xmlContentType  = "application/xml; charset=utf-8"
 	textContentType = "text/plain; charset=utf-8"
 	jsContentType   = "text/javascript; charset=utf-8"
+	cssContentType  = "text/css; charset=utf-8"
 
 	htmlCacheControl      = "private, max-age=60, stale-while-revalidate=300"
 	feedCacheControl      = "public, max-age=300"
@@ -218,6 +219,11 @@ type response struct {
 	fault string
 	// allow is the Allow header a 405 carries.
 	allow string
+	// assetAlias is the canonical path an aliased /_astro request was served
+	// from, set only when the request's content hash was not this build's. It
+	// is reported in a response header so a cutover can see, without guessing,
+	// that a page got its stylesheet from a name this build never published.
+	assetAlias string
 }
 
 // dispatch maps a request to a reply. It never writes; every failure - a bad
@@ -244,6 +250,15 @@ func (s *Server) dispatch(r *http.Request) *response {
 	// collide with a page.
 	if body, contentType, found := staticAsset(path); found {
 		return assetResponse(path, body, contentType)
+	}
+
+	// A browser holding HTML from the tier this one replaced asks for that
+	// build's content-hashed asset names. Only the hash differs between builds,
+	// so an unknown hash is answered with the current asset of the same name and
+	// extension; a name this tier does not have is still a 404. See
+	// astroAssetAlias for why the per-family cutover depends on this.
+	if canonical, body, contentType, found := astroAssetAlias(path); found {
+		return aliasAssetResponse(path, canonical, body, contentType)
 	}
 
 	switch path {
@@ -661,6 +676,12 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, resp *response)
 	if resp.allow != "" {
 		header.Set("Allow", resp.allow)
 	}
+	if resp.assetAlias != "" {
+		// Not a standard header: it names the canonical file an older hash was
+		// answered from, which is the one fact a reader of the response cannot
+		// derive from the URL.
+		header.Set("X-Asset-Alias", resp.assetAlias)
+	}
 	header.Set("X-Content-Type-Options", "nosniff")
 
 	compressible := isCompressible(resp.contentType)
@@ -885,6 +906,28 @@ func assetResponse(path string, body []byte, contentType string) *response {
 		contentType:  contentType,
 		cacheControl: cacheControl,
 		route:        "asset",
+	}
+}
+
+// aliasAssetResponse serves the current asset of a name whose hash this build
+// does not know. It is deliberately not covered by the immutable directive: the
+// URL names the bytes of an older build and this reply is not those bytes, so
+// promising a year of immutability would be a false promise that outlives the
+// next three deploys. It gets the ordinary static TTL instead, and the entity
+// tag still revalidates it, so a client that kept the URL converges on the
+// current asset within an hour of the next build.
+//
+// The alias is named in a response header rather than hidden: a reader who is
+// puzzled by a 200 for a hash this build never published can see which canonical
+// file answered, and route="asset-alias" in the request metrics counts them.
+func aliasAssetResponse(path, canonical string, body []byte, contentType string) *response {
+	return &response{
+		status:       http.StatusOK,
+		body:         body,
+		contentType:  contentType,
+		cacheControl: staticCacheControl,
+		route:        "asset-alias",
+		assetAlias:   canonical,
 	}
 }
 

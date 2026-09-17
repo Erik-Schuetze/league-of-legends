@@ -15,6 +15,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"strings"
 )
 
 // ScopedCIDs are the `data-astro-cid-*` tokens the Astro compiler assigned to
@@ -89,17 +90,116 @@ var islandChunks = map[string]string{
 	"/_astro/TableIsland.astro_astro_type_script_index_0_lang.UqXLqAt9.js":   "astro/TableIsland.astro_astro_type_script_index_0_lang.UqXLqAt9.js",
 }
 
+// astroAssetID splits a content-hashed /_astro path into the parts a later
+// build of the static site can and cannot change: the asset's name, the content
+// hash, and the extension. Both the canonical paths this tier serves and an
+// incoming request are read through this one function, so the two sides can only
+// agree by construction.
+//
+// Astro's names are `<name>.<hash>.<ext>`, and <name> may itself contain dots:
+// `table-island.client.6YN-J6Z7.js` and
+// `TableIsland.astro_astro_type_script_index_0_lang.UqXLqAt9.js` are both real
+// ones from the build this tier replaced. The hash is therefore the segment
+// before the extension, not the first dotted segment, and the name is
+// everything before that.
+//
+// ok=false means the path is not an Astro asset URL at all: no /_astro prefix,
+// no extension, no hash segment to stand for the asset's content, an empty
+// name, or a hash segment that is not the base64url-ish token the bundler emits.
+// A path like that is reported as missing rather than guessed at, which is the
+// difference between tolerating a stale hash and turning every typo into a 200.
+func astroAssetID(path string) (name, hash, ext string, ok bool) {
+	rest, found := strings.CutPrefix(path, "/_astro/")
+	if !found || rest == "" {
+		return "", "", "", false
+	}
+	stem, ext, found := cutLast(rest, ".")
+	if !found || stem == "" || ext == "" {
+		return "", "", "", false
+	}
+	name, hash, found = cutLast(stem, ".")
+	if !found || name == "" || hash == "" {
+		return "", "", "", false
+	}
+	if len(hash) > maxAstroHashBytes {
+		return "", "", "", false
+	}
+	for _, r := range hash {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return "", "", "", false
+		}
+	}
+	return name, hash, ext, true
+}
+
+// maxAstroHashBytes caps the hash segment this tier will treat as one. Real
+// Astro hashes are eight characters; the cap only exists so that a long
+// attacker-supplied segment is rejected by its length instead of being scanned
+// and compared as if it were a name.
+const maxAstroHashBytes = 64
+
+// cutLast splits s at its last occurrence of sep.
+func cutLast(s, sep string) (before, after string, found bool) {
+	index := strings.LastIndex(s, sep)
+	if index < 0 {
+		return s, "", false
+	}
+	return s[:index], s[index+len(sep):], true
+}
+
+// astroAssetAlias resolves a request for an /_astro asset whose content hash
+// this build does not know to the current asset of the same name and extension.
+//
+// This is what makes a per-route-family edge cutover possible. The two tiers
+// hash their asset maps independently, so their /_astro paths are disjoint:
+// HTML rendered by one tier asks for names the other tier has never heard of.
+// Without this, moving one route family to this tier while /_astro stays on the
+// other serves that family's pages without their stylesheet, and moving /_astro
+// here breaks every family still on the other tier - so a mixed state, which is
+// exactly what the cutover plan requires for its rollback drill, cannot be
+// reached at all.
+//
+// Only the hash segment is tolerated. The name and the extension have to match a
+// canonical asset exactly, and the caller has already tried the exact path, so
+// this handles precisely the one thing that moves between builds. A request for
+// an asset this tier does not have is still a 404.
+func astroAssetAlias(path string) (canonical string, body []byte, contentType string, found bool) {
+	requestName, _, requestExt, ok := astroAssetID(path)
+	if !ok {
+		return "", nil, "", false
+	}
+	switch requestExt {
+	case "css":
+		if name, _, _, ok := astroAssetID(baseCSSPath); ok && name == requestName {
+			return baseCSSPath, baseCSS(), cssContentType, true
+		}
+	case "js":
+		// The map is walked rather than indexed by name because the index would
+		// have to be derived from the same function on every call anyway, and
+		// there are five entries.
+		for canonical, embedded := range islandChunks {
+			name, _, ext, ok := astroAssetID(canonical)
+			if ok && ext == requestExt && name == requestName {
+				return canonical, asset(embedded), jsContentType, true
+			}
+		}
+	}
+	return "", nil, "", false
+}
+
 // staticAsset returns the body and content type of a path served without
 // rendering, or found=false for anything this tier does not serve directly.
 func staticAsset(path string) (body []byte, contentType string, found bool) {
 	switch path {
 	case baseCSSPath:
-		return baseCSS(), "text/css; charset=utf-8", true
+		return baseCSS(), cssContentType, true
 	case "/favicon.svg":
 		return asset("favicon.svg"), "image/svg+xml", true
 	}
 	if name, ok := islandChunks[path]; ok {
-		return asset(name), "text/javascript; charset=utf-8", true
+		return asset(name), jsContentType, true
 	}
 	if len(path) > len("/fonts/") && path[:7] == "/fonts/" {
 		switch path {
