@@ -11,7 +11,7 @@
 # Digests, not tags: a tag is a mutable ref, so a rebuild of this file months
 # from now must produce the same binary or the diff is invisible.
 
-FROM caddy:2.10-builder-alpine@sha256:4cff3ae272ea05842adb4546e35961e4947aeea65f80fa1eb62a35b960e84971 AS builder
+FROM caddy:2.11-builder-alpine@sha256:1a1689db91cfb390b2d856a1b3774e796852822cd723fa54c475b272f82bb4b7 AS builder
 
 # Pinned to the module version, not to latest, for the same reason as the base
 # images. cache-handler and storages are separate modules with separate release
@@ -54,7 +54,7 @@ RUN mkdir -p /out \
       --with github.com/darkweak/storages/otter/caddy@${STORAGES_VERSION} \
  && cp /out/caddy /out/caddy.nocap
 
-FROM caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+FROM caddy:2.11-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
 
 # The binary must arrive without file capabilities. Linux refuses to execve a
 # capability-tagged file when the caller's capability bounding set cannot carry
