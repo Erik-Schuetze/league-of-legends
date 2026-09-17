@@ -917,7 +917,12 @@ a compliance change, not a copy change.
   absent: exit 1, a failure and not a skip), `bin/cgnu-before.log` vs
   `bin/cgnu-after.log`,
   `bin/bv-noseed-before.log` vs `bin/bv-noseed-after.log`, and
-  `bin/bv-seeded-after.log`.
+  `bin/bv-seeded-after.log`. Both controls run in CI as the `Gate controls (fail
+  closed)` step in `gates.yml` and `docker-build.yml`; the first green run that
+  executes them is
+  [35288990220](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35288990220)
+  (`3199527`), where the log shows `make compliance-gnu` exiting `2` with docker
+  hidden from `PATH` and `serving-static-control: 5 control(s) held, 0 broken`.
 - **Checks 3 and 4 were amended on 2026-09-17** for the server-rendered tier,
   and `scripts/compliance-negative-control.sh` / `make
   compliance-negative-control` were added as the standing proof that the
