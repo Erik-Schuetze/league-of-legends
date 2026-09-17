@@ -5,8 +5,8 @@
 #   sh scripts/capture-served-pages.sh
 #
 # Why this is the gate's corpus: the compiled Astro reference tree used to be the
-# input (web/dist), and it was removed on 2026-09-17 when the Go SSR tier became
-# the only published site. The tier's own output was already the corpus the
+# input (web/dist). It stopped being built on 2026-09-17, when the Go SSR tier
+# became the only published site, and it was deleted on 2026-09-18. The tier's own output was already the corpus the
 # amended checks 3 and 4 were written for - against a pre-rendered tree both were
 # vacuous in one direction, because that tree's filter bar was a client island
 # and so carried no <form> at all, and a rule about forms that no page can

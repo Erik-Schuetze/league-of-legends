@@ -40,13 +40,14 @@ set -u
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # The corpus is what a running tier served, captured by
 # scripts/capture-served-pages.sh. It replaced the compiled Astro reference tree
-# (web/dist) on 2026-09-17, when the Go SSR tier became the only published site
-# and the retired tree stopped being built. The capture is the stronger corpus and
-# it is the only one now: it is the deployment's own output, it covers the whole
-# site rather than a sample, and it carries the no-JS <form> the pre-rendered tree
-# never had - which is the markup checks 3 and 4 are about. A reviewer who has to
-# verify a specific data state can point the scans at a capture of that state
-# instead of the shared one, which a concurrent capture replaces wholesale:
+# (web/dist): that tree stopped being built on 2026-09-17, when the Go SSR tier
+# became the only published site, and it was deleted on 2026-09-18. The capture is
+# the stronger corpus and it is the only one now: it is the deployment's own
+# output, it covers the whole site rather than a sample, and it carries the no-JS
+# <form> the pre-rendered tree never had - which is the markup checks 3 and 4 are
+# about. A reviewer who has to verify a specific data state can point the scans at
+# a capture of that state instead of the shared one, which a concurrent capture
+# replaces wholesale:
 #   LOLSTATS_DIST=.agent-artifacts/capture-final-demo sh scripts/compliance-check.sh
 DIST="${LOLSTATS_DIST:-$ROOT/bin/served-pages}"
 if [ "${LOLSTATS_DIST:-}" != "" ] && [ "${DIST#/}" = "$DIST" ]; then DIST="$ROOT/$DIST"; fi
