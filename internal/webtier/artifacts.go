@@ -18,7 +18,7 @@ import (
 
 // The aggregate tree reader.
 //
-// This is a port of web/src/lib/artifacts.ts, which was the Astro build's only
+// This is a port of the retired web/ tree's artifacts.ts, which was its only
 // door into the data. The behaviours it exists to preserve are:
 //
 //   - an explicitly configured LOLSTATS_AGG_ROOT is honoured as-is, so an empty

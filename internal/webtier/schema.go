@@ -12,7 +12,7 @@ import (
 )
 
 // Schema enforcement, with the same semantics as the frontend's
-// `assertArtifact` (web/src/lib/artifacts.ts + web/src/lib/schema-check.ts).
+// `assertArtifact` (the retired web/ tree's artifacts.ts + schema-check.ts).
 //
 // The one behaviour worth stating up front is that an artifact this tier cannot
 // understand is a fault, not an empty page: an unknown `schema` version fails

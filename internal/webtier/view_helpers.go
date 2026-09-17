@@ -205,7 +205,7 @@ func tierListEmpty(snap snapshotView, label string, minCellN int) emptyView {
 }
 
 // tierListDescription is the page's meta description, transcribed from
-// web/src/pages/tier-list/[role].astro and its archived twin. The newest route
+// the retired web/ tree's tier-list/[role].astro and its archived twin. The newest route
 // describes the sample-size policy; the archived route names the source window
 // it measured instead.
 func tierListDescription(label string, patch string, archived bool, snap snapshotView) string {

@@ -4,7 +4,7 @@ import (
 	"github.com/Erik-Schuetze/league-of-legends/internal/aggmodel"
 )
 
-// HomePage renders /, a port of web/src/pages/index.astro.
+// HomePage renders /, a port of the retired web/ tree's index.astro.
 func (r *Renderer) HomePage() (*Page, error) {
 	site, err := r.Site()
 	if err != nil {

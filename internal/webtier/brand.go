@@ -5,13 +5,16 @@ import (
 	"net/url"
 )
 
-// The compliance surface, ported verbatim from web/src/lib/legal.ts.
+// The compliance surface: the approved wording, and its only copy.
 //
-// These strings are read from the published reference build rather than
-// paraphrased: the non-endorsement notice, the trademark sentence and the
-// verified-site note appear on every page, and a second weaker copy of any of
-// them would be exactly the drift web/src/lib/legal.ts exists to prevent. They
-// are constants, not templates, so nothing on the request path can alter them.
+// It was ported verbatim from web/src/lib/legal.ts, which the retirement of the
+// Astro tree on 2026-09-17 deleted; this file is now the source of truth, and
+// scripts/compliance-check.sh reads these constants rather than a built page.
+// These strings are the published wording rather than a paraphrase of it: the
+// non-endorsement notice, the trademark sentence and the verified-site note
+// appear on every page, and a second weaker copy of any of them is exactly the
+// drift this file exists to prevent. They are constants, not templates, so
+// nothing on the request path can alter them.
 
 const (
 	SiteName = "LoL Stats"
