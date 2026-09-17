@@ -10,6 +10,20 @@
 # for a single task, not part of the project's history.
 /.agent-artifacts/
 
+# Scratch written by parallel lanes while they work. The `.zz-` prefix is the
+# convention; every path using it is scratch and none of it belongs to the
+# project. Excluded by pattern rather than by name because the names change per
+# lane. This matters: a lane that keeps a nested `git worktree` under the repo
+# (`.zz-laneC-wt`) would otherwise be staged by a `git add -A` as a gitlink to a
+# commit that nothing references, which is a broken submodule entry rather than
+# a recoverable mistake.
+# Evidence written by a lane. The convention is the gitignored
+# `.agent-artifacts/`; this catches a lane that writes a `files/` tree instead,
+# which is what happened once and left an untracked evidence directory in the
+# repository root.
+/files/
+/.zz-*
+
 # Local data / secrets
 .env
 deploy/secret.yaml
@@ -30,6 +44,13 @@ deploy/secret.yaml
 .vscode/
 .DS_Store
 *.iml
+
+# `make build` writes to `/bin/`. `build/` is different: it holds the Docker
+# image *contexts* (`build/caddy`, `build/site`), so a binary dropped there is
+# worse than untidy - it sits inside a context that gets sent to the builder and
+# can be baked into an image. A hand-rolled `go build -o build/lolstats-web`
+# did exactly that once.
+/build/lolstats-*
 
 # Go
 *.test
