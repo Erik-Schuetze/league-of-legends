@@ -31,9 +31,13 @@ type windowStatsRow struct {
 	BanRows         int `json:"ban_rows"`
 }
 
-// patchRow is one row of patchListSQL.
+// patchRow is one row of patchListSQL or of envelopePatchListSQL.
+//
+// Both statements produce the same list from the same archive by two different
+// routes, and checkPatchEvidence compares them column by column on every run.
 type patchRow struct {
 	Patch           string `json:"patch"`
+	Matches         int    `json:"matches"`
 	ParticipantRows int    `json:"participant_rows"`
 }
 
@@ -101,7 +105,7 @@ func planArchive(opts BuildOptions) ([]ArchivePart, aggmodel.Window, error) {
 func (s *buildState) path(name string) string { return filepath.Join(s.scratch, name) }
 
 // run drives the phases of one build.
-func (s *buildState) run(ctx context.Context, result *BuildResult) error {
+func (s *buildState) run(ctx context.Context, result *BuildResult) (err error) {
 	engine := s.opts.Engine
 	if engine == nil {
 		cli, err := OpenCLIEngine(ctx, s.opts.DuckDBBin, s.opts.AllowVersionMismatch, s.opts.DuckDB, s.opts.Log)
@@ -115,10 +119,25 @@ func (s *buildState) run(ctx context.Context, result *BuildResult) error {
 	s.seg = aggmodel.Seg{
 		Patch: s.opts.Patch, Region: s.opts.Region, Queue: s.opts.Queue, Bracket: s.opts.Bracket,
 	}
+	// The row is closed by whichever way this function returns, including the
+	// paths that fail before it is opened at all. finishAudit does nothing when
+	// no row was written.
+	defer func() { s.finishAudit(err) }()
 
 	// The macro filter is patch-free: it selects the region, the queue and the
 	// window, which is what the extraction sees before the patch is chosen.
 	filters := filterSQL(s.opts.Region, s.opts.Platform, s.opts.Queue, s.window, "")
+
+	// The patch is resolved from the envelope before the row is opened, because
+	// the row records the partition the build publishes and the store will not
+	// open one whose patch is empty. The payloads are unfolded afterwards, so the
+	// row is still open across all of the expensive work.
+	if err := s.spillEnvelope(ctx); err != nil {
+		return err
+	}
+	s.resolvePatch(ctx)
+	s.openAudit(result)
+
 	if err := s.extract(ctx, filters); err != nil {
 		return err
 	}
@@ -140,9 +159,58 @@ func (s *buildState) run(ctx context.Context, result *BuildResult) error {
 	return s.publishLive(result)
 }
 
+// spillEnvelope writes the archive's per-match keys, which is the first of the
+// two spill halves and the only one that runs before the patch is chosen.
+//
+// It is patch-free on purpose. It is the statement the patch is chosen from, so
+// it has to describe every patch the window holds; the choice is then applied by
+// the reductions over the smaller feature rows, not by the spill.
+func (s *buildState) spillEnvelope(ctx context.Context) error {
+	return s.engine.Exec(ctx, copyParquet(envelopeSQL(s.stagedPaths), s.envelopePath))
+}
+
+// resolvePatch chooses the patch the build publishes from the envelope the spill
+// just wrote, so that the audit row can name the partition before any payload is
+// unfolded.
+//
+// It is best effort, and deliberately so. The authority on which patch is
+// published is the feature spill - extract re-derives the choice from the rows
+// the extraction actually produced and refuses the build if the two disagree -
+// and every refusal choosePatch can make is a refusal the extraction reports, in
+// the order it has always reported it, with the archive statistics and the row
+// counts that make the reason legible. A failure here is therefore reported as a
+// warning and not returned: what it costs is the row's patch, never a different
+// verdict on the archive.
+func (s *buildState) resolvePatch(ctx context.Context) {
+	if err := s.engine.Exec(ctx, copyJSON(envelopePatchListSQL(s.envelopePath, envelopeFilterSQL(
+		s.opts.Region, s.opts.Platform, s.opts.Queue, s.window)), s.path("patches_envelope.json"))); err != nil {
+		s.opts.Log.Warn("the window's patches could not be listed before the audit row", "error", err)
+		return
+	}
+	rows, err := readJSONArray[patchRow](s.path("patches_envelope.json"))
+	if err != nil {
+		s.opts.Log.Warn("the window's patches could not be read before the audit row", "error", err)
+		return
+	}
+	chosen, err := choosePatch(rows, s.opts.Patch)
+	if err != nil {
+		s.opts.Log.Warn("the window holds no patch to choose before the audit row", "error", err)
+		return
+	}
+	s.envelopePatches = rows
+	s.envelopeResolved = true
+	s.patch = chosen.Patch
+	s.seg.Patch = chosen.Patch
+	s.opts.Log.Info("patch selected", "patch", chosen.Patch, "source", "envelope",
+		"patches_in_window", len(rows), "matches", chosen.Matches, "participant_rows", chosen.ParticipantRows,
+		"pinned", s.opts.Patch != "")
+}
+
 // extract is phase one: read the archive, spill it, and derive the feature rows
-// and the patch list. It runs as a single script (extractScript) so that a probe
-// can run exactly what the build runs.
+// and the patch list. It runs the payload half as a single script
+// (extractScript) so that a probe can run exactly what the build runs: the
+// envelope half is a statement of its own (spillEnvelope) because the patch is
+// chosen from it before this phase starts.
 //
 // Everything here that touches a payload is batched by parts, because every
 // statement that reads a payload holds its whole input in memory while it runs.
@@ -173,7 +241,7 @@ func (s *buildState) run(ctx context.Context, result *BuildResult) error {
 // directories. Every later statement reads those directories through a glob, so
 // the batch boundary is invisible past this phase.
 func (s *buildState) extractScript(filters string) string {
-	statements := []string{copyParquet(envelopeSQL(s.stagedPaths), s.envelopePath)}
+	var statements []string
 	for i := 0; i*extractBatchParts < len(s.stagedPaths); i++ {
 		parts := s.stagedPaths[i*extractBatchParts:]
 		if len(parts) > extractBatchParts {
@@ -220,49 +288,104 @@ func (s *buildState) extract(ctx context.Context, filters string) error {
 		return err
 	}
 
+	// The patch chosen from the envelope is re-derived here, from the rows the
+	// extraction actually produced. Two statements that are meant to list the
+	// same matches are worth comparing on every run: a drift between them would
+	// publish a partition the chooser never saw, and the difference is exactly
+	// the kind a tally hides.
 	patchRows, err := readJSONArray[patchRow](s.path("patches.json"))
 	if err != nil {
 		return err
 	}
-	s.patch, err = choosePatch(patchRows, s.opts.Patch)
+	spilled, err := choosePatch(patchRows, s.opts.Patch)
 	if err != nil {
 		return err
 	}
+	if s.envelopeResolved {
+		if err := checkPatchEvidence(s.envelopePatches, patchRows); err != nil {
+			return err
+		}
+	} else {
+		// The envelope could not be read, so this is where the patch was chosen.
+		s.opts.Log.Info("patch selected", "patch", spilled.Patch, "source", "features",
+			"matches", spilled.Matches, "participant_rows", spilled.ParticipantRows,
+			"pinned", s.opts.Patch != "")
+	}
+	s.patch = spilled.Patch
 	s.seg.Patch = s.patch
-	s.opts.Log.Info("patch selected", "patch", s.patch,
-		"in_window", len(patchRows), "pinned", s.opts.Patch != "")
 	return nil
 }
 
-// choosePatch picks the patch the build publishes.
+// checkPatchEvidence compares the patch list the envelope produced with the one
+// the feature spill produced.
+//
+// The two lists are the same window of the same archive: one counted from the
+// envelope before the payloads were unfolded, one counted from the rows that
+// unnesting produced. Comparing the patch sets alone would not notice a match
+// going missing between them, so every column is compared, and a disagreement is
+// a failure rather than a warning: the build would otherwise publish a partition
+// whose boundary was chosen from rows it did not publish.
+func checkPatchEvidence(envelope, features []patchRow) error {
+	counted := make(map[string]patchRow, len(envelope))
+	for _, row := range envelope {
+		counted[row.Patch] = row
+	}
+	for _, row := range features {
+		other, ok := counted[row.Patch]
+		if !ok {
+			return fmt.Errorf("patch %s carries matches in the extracted features but none in the envelope", row.Patch)
+		}
+		if other.Matches != row.Matches || other.ParticipantRows != row.ParticipantRows {
+			return fmt.Errorf("patch %s is %d matches and %d participant rows in the envelope, but %d and %d in the extracted features",
+				row.Patch, other.Matches, other.ParticipantRows, row.Matches, row.ParticipantRows)
+		}
+	}
+	if len(features) != len(envelope) {
+		return fmt.Errorf("the envelope holds %d patches in the window and the extracted features hold %d",
+			len(envelope), len(features))
+	}
+	return nil
+}
+
+// choosePatch picks the patch the build publishes, and reports the row it was
+// picked from so that the audit trail and the log carry the patch's match and
+// participant counts.
 //
 // Every patch the window contains is validated, not just the chosen one: a
 // malformed patch anywhere in the window means the extraction produced a game
 // version that cannot be attributed, and attributing the other rows anyway would
 // publish a partition whose boundary is not understood.
-func choosePatch(rows []patchRow, pinned string) (string, error) {
+func choosePatch(rows []patchRow, pinned string) (patchRow, error) {
 	found := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		if _, _, ok := splitPatch(row.Patch); !ok {
-			return "", fmt.Errorf("%w: patch %q derived from gameVersion is not major.minor",
+			return patchRow{}, fmt.Errorf("%w: patch %q derived from gameVersion is not major.minor",
 				ErrMalformedArchive, row.Patch)
 		}
 		found[row.Patch] = struct{}{}
 	}
 	if len(found) == 0 {
-		return "", fmt.Errorf("%w: no match in the window carries a patch", ErrEmptyWindow)
+		return patchRow{}, fmt.Errorf("%w: no match in the window carries a patch", ErrEmptyWindow)
 	}
 	if pinned != "" {
 		if _, ok := found[pinned]; !ok {
-			return "", fmt.Errorf("%w: patch %s has no match in the window", ErrEmptyWindow, pinned)
+			return patchRow{}, fmt.Errorf("%w: patch %s has no match in the window", ErrEmptyWindow, pinned)
 		}
-		return pinned, nil
 	}
 	patches := make([]string, 0, len(found))
 	for patch := range found {
 		patches = append(patches, patch)
 	}
-	return newestPatch(patches), nil
+	chosen := pinned
+	if chosen == "" {
+		chosen = newestPatch(patches)
+	}
+	for _, row := range rows {
+		if row.Patch == chosen {
+			return row, nil
+		}
+	}
+	return patchRow{}, fmt.Errorf("%w: patch %s has no match in the window", ErrEmptyWindow, chosen)
 }
 
 // reduce is phase two: every tally the artifacts are assembled from, scoped to

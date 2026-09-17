@@ -114,6 +114,14 @@ ARG VERSION=dev
 ARG REVISION=unknown
 ARG CREATED=1970-01-01T00:00:00Z
 
+# The revision has to reach the process, not just the image metadata. The
+# aggregate binary records the revision it was built from in the manifest and the
+# build_runs row, and it reads it from GIT_SHA - the same build arg CI already
+# passes for the label. Without this line every published number carries
+# "unknown" behind it, which is the one value the field is not allowed to
+# silently degrade to when a real commit is available.
+ENV GIT_SHA=${REVISION}
+
 LABEL org.opencontainers.image.title="league-of-legends stats pipeline" \
       org.opencontainers.image.description="Riot API ingestion and DuckDB aggregation for a self-hosted League of Legends statistics site" \
       org.opencontainers.image.source="https://github.com/Erik-Schuetze/league-of-legends" \
