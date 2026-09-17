@@ -219,6 +219,18 @@ func scopedCSSChunk(withFallbackBuildList bool) string {
 	return string(scopedCSS(withFallbackBuildList))
 }
 
+// frozenCSS is the frozen token layer followed by the frozen component layer.
+// It is the single declaration site for the served design language, and it is
+// inlined last so a rule in it wins a specificity tie against the served
+// baseline. See assets/css/design-tokens.css for the divergence register and
+// assets/css/components.css for why each component rule exists.
+func frozenCSS() string {
+	return string(asset("css/design-tokens.css")) + string(asset("css/components.css"))
+}
+
+// frozenCSSChunk is the frozenCSS value the shell template inlines.
+func frozenCSSChunk() string { return frozenCSS() }
+
 // hasScopedCID reports whether a component's scoped suffix appears in the
 // champion stylesheet, which is the one that carries every chunk.
 func hasScopedCID(cid string) bool {
