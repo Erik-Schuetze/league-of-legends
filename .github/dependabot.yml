@@ -18,20 +18,11 @@ updates:
         patterns:
           - "*"
 
-  # The Astro site. Separate from the Go modules because a frontend major
-  # upgrade and a Go patch bump have nothing in common as review tasks.
-  - package-ecosystem: npm
-    directory: /web
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(web)"
-    groups:
-      web:
-        patterns:
-          - "*"
+  # There used to be an `npm` entry here, for the Astro site under /web. The tree
+  # was deleted on 2026-09-18 and the repository has no package.json left, so the
+  # entry is gone rather than pointing Dependabot at a directory that does not
+  # exist - a configured ecosystem whose manifest is missing reports an error on
+  # every scheduled run, which is a signal nobody can act on.
 
   # There used to be one `docker` entry per published context here - /build/caddy
   # and /build/site - because Dependabot reads one Dockerfile per directory and
