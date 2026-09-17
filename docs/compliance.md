@@ -19,41 +19,43 @@ Last reviewed: **2026-09-17**. Next review due: **2026-12-17**.
 
 ```
 make compliance          # or: sh scripts/compliance-check.sh
-make compliance-served   # the same gate over the HTML the tier actually served
+make compliance-served   # an alias: there is one corpus now, not two
 make compliance-negative-control   # one planted violation at a time
 make capture-served-pages          # refresh the served corpus from a running tier
 make compliance-gnu      # the same gate in a GNU userland, when docker is present
-make parity-mutation-control       # change one rendering input, require the gate to fail
 ```
 
 `scripts/compliance-check.sh` is a POSIX `sh` script with no network access and
-no package manager. It reads the source tree, the shared wording in
-`web/src/lib/legal.ts` and the **built** site in `web/dist`, so build the site
-first: several checks are about what the deployment actually serves rather than
-about what the source intends. It prints `PASS` or `FAIL` per check together with
-the number of files each scan read, and exits non-zero if any launch-blocking
-check fails.
+no package manager. **Its corpus is the HTML a running tier served**: `make
+compliance` builds `bin/lolstats-web`, starts it on loopback over the checked-in
+fixture artifact tree, captures every route its own `/sitemap.xml` names into
+`bin/served-pages` with `scripts/capture-served-pages.sh`, and scans that. There
+is no build output to produce first, and no Node toolchain involved: the site is
+rendered by the Go tier at request time, so what a check has to judge is a
+response, not a file on disk. It reads the source tree, and the approved wording
+from `internal/webtier/brand.go` and `internal/webtier/site.go` - the constants
+themselves, which is why a paraphrase of the notice fails check 6. It prints
+`PASS` or `FAIL` per check together with the number of files each scan read, and
+exits non-zero if any launch-blocking check fails.
 
-It reads a **second** corpus of HTML when `LOLSTATS_SERVED_DIST` points at one:
-the pages a running `lolstats-web` returned, byte for byte, captured by
-`scripts/capture-served-pages.sh`. `web/dist` is what the tier renders *from*;
-the served responses are what a reader *receives*, and some invariants only exist
-in the second (the no-JS filter bar is rendered by the tier and is in no built
-file at all). Checks 3 and 4 assert over both, and say which corpus each line is
-about. `make compliance-served` starts the tier on loopback with the checked-in
-fixture artifact tree - no cluster, no PVC, no network - captures its pages and
-runs the gate over them, so this half runs in CI too.
+Until 2026-09-18 there were **two** corpora: `web/dist`, the pre-rendered Astro
+tree, and `LOLSTATS_SERVED_DIST`, the responses the tier returned. The Astro tree
+was deleted - production has served the Go tier since the cutover, and the tree
+was dead weight the gate still dragged along - so checks 3, 4, 6, 8 and 11 now
+assert over the served responses only. That is the stricter direction, not a
+relaxation: `web/dist` carried **no** `<form>` at all, so the half of check 4
+about the no-JS path could only have passed vacuously against it.
 
 A build is published in three data states (`demo`, no data, live `riot-match-v5`),
-so the gate has to hold in all three. `LOLSTATS_DIST` points the scans at one
-snapshot instead of the shared `web/dist`, which concurrent builds overwrite:
+so the gate has to hold in all three. `LOLSTATS_DIST` points the scans at a
+different capture instead of the one `make served-pages` just wrote:
 
 ```
-LOLSTATS_DIST=web/dist-demo sh scripts/compliance-check.sh
+LOLSTATS_DIST=bin/served-pages-live sh scripts/compliance-check.sh
 ```
 
 It changes only which files are read, never a rule. Verify every state a release
-serves, not just the last build in the checkout.
+serves, not just the capture in the checkout.
 
 The file count is not decoration. A check that passes because it scanned nothing
 is worse than no check at all, so every scan asserts a floor on how much it read,
@@ -68,18 +70,18 @@ The thirteen checks, in the order the gate runs them:
 
 | # | Check | Fails when |
 | --- | --- | --- |
-| 0 | The built site is present and whole | `web/dist` is missing or holds implausibly few pages, so the later scans would read nothing. It also refuses to run at all (exit 2, not a FAIL) when a page it is about to judge is empty or has no closing `</html>`: another `npm run build` replaces `web/dist` wholesale, and a run that lands mid-rebuild used to report five content violations that were really one race. A torn tree is diagnosed, not scored |
-| 1 | No MMR, ELO or rating-like value anywhere | A rating-like identifier, key or column appears in Go, SQL, TS/JS, Astro, JSON, HTML or CSS |
+| 0 | The served corpus is present and whole | `bin/served-pages` is missing or holds implausibly few pages, so the later scans would read nothing. It also refuses to run at all (exit 2, not a FAIL) when a page it is about to judge is empty or has no closing `</html>`: a capture that landed while the tier was still being restarted would otherwise report content violations that were really one race. A torn corpus is diagnosed, not scored |
+| 1 | No MMR, ELO or rating-like value anywhere | A rating-like identifier, key or column appears in Go, SQL, TS/JS, JSON, HTML or CSS |
 | 2 | Only permitted Riot assets | An image reference has an absolute origin other than the Data Dragon CDN |
 | 3 | No third-party scripts, embeds or tracking | An executable resource in a built page is not same-origin, or names a tracking service. Amended 2026-09-17: the old "at least one `<script>` per page" floor is gone - a server-rendered page is legitimately script-free. See the amendment below. The served corpus is asserted the same way, and its script-free page count is reported |
 | 4 | The free tier is free and ungated | A credential field, auth route, pricing route or paywall appears; or a form is not a no-JS server-side path (`method="get"` with an on-origin `action`); or a named control sits outside a form. Amended 2026-09-17: the old "any `<form>`" rule is gone - the filter bar *is* the no-JS path. See the amendment below. The served corpus is asserted the same way, and every served form must be a GET form on this origin |
 | 5 | Verified-site claims are only made when satisfied | A page claims Riot reviewed or endorsed the site, or a `/riot.txt` is published without the token (or vice versa) |
-| 6 | The non-endorsement notice is visible, and its wording has not drifted | The frozen sentence is not on `/disclaimer` word for word; a built page states the notice in wording other than `NON_ENDORSEMENT_TEXT`; a built page carries no notice; an editable footer stops rendering `NON_ENDORSEMENT_TEXT`; or a built page stops linking to `/disclaimer` |
+| 6 | The non-endorsement notice is visible, and its wording has not drifted | The frozen sentence is not on `/disclaimer` word for word; a served page states the notice in wording other than the approved constant in `internal/webtier/brand.go`; a served page carries no notice; the renderer stops composing `TrademarkText + " " + NonEndorsementText` into the footer, or the template stops emitting it; or a served page stops linking to `/disclaimer` |
 | 7 | The legal pages publish a contact route | Any of the four compliance pages renders with no contact address |
-| 8 | The served address is the deployed one | A built page, the sitemap or `robots.txt` carries a reserved placeholder hostname, with or without `LOLSTATS_SITE_URL` set; or the published addresses name more than one origin, or an origin other than `LOLSTATS_SITE_URL`. `astro.config.mjs` publishes a stated default instead of a placeholder and refuses a reserved hostname outright, so a missing variable fails the build rather than the deployment |
-| 9 | Nothing per-player is published | The artifact schema or a served JSON file carries a PUUID, summoner id, account id, Riot id or profile icon id, or the dist holds a raw-archive path |
+| 8 | The served address is the deployed one | A served page, the sitemap or `robots.txt` carries a reserved placeholder hostname, with or without `LOLSTATS_SITE_URL` set; or the published addresses name more than one origin, or an origin other than `LOLSTATS_SITE_URL`. The tier publishes a stated default instead of a placeholder and refuses a reserved hostname outright, so a misconfigured origin fails a request rather than the deployment |
+| 9 | Nothing per-player is published | The artifact schema (`schema/agg.*`) or a served JSON file carries a PUUID, summoner id, account id, Riot id or profile icon id, or the served tree holds a raw-archive path |
 | 10 | Committed payloads carry no real player identifier | A fixture identifier is neither the reserved `fixture-` prefix nor the generator's reserved `FIXT` tagline, or the fixtures are deleted |
-| 11 | Every built page is a whole document | A built page is truncated, or loses the demo labelling that discloses its data state |
+| 11 | Every served page is a whole document | A served page is truncated, or loses the labelling that discloses its data state |
 | 12 | The scan harness cannot mistake its own standard input for a page | A scan that is handed an empty list of paths finds something anyway (grep answering from the runner's stdin), or a scan that is handed a real list finds nothing (a guard that has quietly stopped feeding grep). Both are harness faults that make every scan above report a result it did not earn |
 
 Each `PASS`/`FAIL` line names the number of files or pages the scan read, so a
@@ -102,9 +104,10 @@ rather than cosmetic: every scan that reads a list file goes through
 of that behaviour. Because a green local run cannot show this class of defect,
 `make compliance-gnu` re-runs the same script in a GNU userland
 (`debian:12-slim`) when a container runtime is available, and says so when it
-skips; it also carries the captured served corpus into the container
-(`-e LOLSTATS_SERVED_DIST`) when one is present, so the new scans are exercised
-under GNU grep as well. It runs in CI next to the gate, where the runner's own
+skips; it mounts the checkout into the container, so the scans run over the same
+served corpus (`bin/served-pages`) under GNU grep as well. There is no second
+corpus to carry in: `LOLSTATS_SERVED_DIST` went with the Astro tree, and the
+capture path is the gate's default. It runs in CI next to the gate, where the runner's own
 GNU userland and the container's non-empty stdin are two different harnesses for
 the same script. The half of the control that runs everywhere, including a
 checkout with no container runtime, is check 12.
@@ -182,16 +185,17 @@ fire.
 ### Evidence that the amendment is not a weakening
 
 `make compliance-negative-control` (`scripts/compliance-negative-control.sh`)
-copies `web/dist` to a scratch tree, asserts the unmodified copy **passes**, then
-plants one violation at a time and asserts the gate exits non-zero with the
-expected FAIL text. Last run, on the same tree the gate is run against in CI:
+copies the served capture (`bin/served-pages`) to a scratch tree, asserts the
+unmodified copy **passes**, then plants one violation at a time and asserts the
+gate exits non-zero with the expected FAIL text. Last run, on the same corpus the
+gate is run against in CI:
 
 ```
 control 0  PASS  the unmodified scratch copy passes the gate (exit 0) ...
 control 1  PASS  googletagmanager                        # third-party script   (check 3)
 control 2  PASS  form(s) are not a no-JS server-side path # off-origin POST    (check 4 R2)
 control 3  PASS  named control(s) sit outside a form      # dead control       (check 4 R3)
-control 4  PASS  gating element(s) found in the built pages # password field   (check 4 R1)
+control 4  PASS  gating element(s) found in the served pages # password field  (check 4 R1)
 control 5  PASS  a page stripped of every <script> passes
 control 6  PASS  live page(s) carry no live banner        # the scan the GNU bug hid (check 11)
 control 7  PASS  external resource reference(s) or tracker name(s) found
@@ -720,7 +724,7 @@ Gate check 6 reads the sentence back out of `web/src/lib/legal.ts` and requires 
 to appear word for word on the built `/disclaimer` page. Changing this wording is
 a compliance change, not a copy change.
 
-## Compliance changes made on 2026-09-17
+## Compliance changes made on 2026-09-17 and 2026-09-18
 
 - The four compliance pages were written: `/about`, `/legal/terms`,
   `/legal/privacy` and `/disclaimer`, all importing the shared strings from
@@ -777,6 +781,16 @@ a compliance change, not a copy change.
 - Three decisions were recorded: `docs/decisions/ADR-008-no-third-party-ingestion.md`,
   `ADR-009-operator-identity-and-governing-law.md` and
   `ADR-010-public-preview-posture.md`.
+- **The gate's second corpus became its only corpus when the Astro tree in `web/`
+  was deleted on 2026-09-18.** Production has served the Go tier since the
+  cutover, and a gate whose reference corpus is a tree no deployment renders from
+  is worse than one with no second corpus, because it looks like coverage. The
+  halves of checks 3, 4, 6, 8 and 11 that read `web/dist` are gone, the served
+  corpus is captured by `make served-pages` (which `make compliance` depends on),
+  and checks 6 and 11 now read the Go sources and the served responses. Nothing
+  was relaxed: `web/dist` carried zero `<form>` elements, so check 4's form rule
+  could only ever have passed vacuously against it. The record of the original
+  two-corpus amendment is kept [[#Amendment 2]] below.
 - **The gate gained a second corpus, on 2026-09-17.** `web/dist` holds zero
   `<form>` elements - the tier renders the filter bar - so check 4's form rule
   was vacuous against the only corpus it read, and check 3's script-free count
@@ -784,8 +798,11 @@ a compliance change, not a copy change.
   captures the HTML a running tier returns (routes discovered from the tier's own
   `/sitemap.xml`, every response asserted `200` with an honest `Content-Length`
   and an HTML `Content-Type`) into `LOLSTATS_SERVED_DIST`, and checks 3 and 4
-  assert over both corpora. `make compliance-served` runs the whole thing on
-  loopback with the fixture artifact tree, so CI runs it too. The invariant that
+  asserted over both corpora. `make compliance-served` ran the whole thing on
+  loopback with the fixture artifact tree, so CI ran it too. (`web/dist` and the
+  second corpus are both gone as of the entry above; the capture path is now
+  `bin/served-pages` and the variable that points a scan at it is
+  `LOLSTATS_DIST`.) The invariant that
   replaced "a page contains a form" is that every control the page offers changes
   the document **without JavaScript**, asserted dynamically by
   `scripts/verify-serving.sh` check 4 against the live tier. See "Amendment 2"
@@ -800,7 +817,8 @@ a compliance change, not a copy change.
 - **The launch gates moved into their own workflow, on 2026-09-17.**
   `.github/workflows/gates.yml` (`Launch gates`) runs `make verify-serving-local`,
   `make compliance`, `make compliance-negative-control`, `make compliance-served`
-  and `make compliance-gnu` as a job of its own. The reason is attribution, not
+  (then an alias of `compliance`; it is still listed, which costs nothing) and
+  `make compliance-gnu` as a job of its own. The reason is attribution, not
   convenience: in `docker-build.yml` these steps run after the Go test step, and a
   red `Test` step - which is what happened on 2026-09-17, for a design-layer
   parity mismatch owned by another lane - stops the job before any compliance

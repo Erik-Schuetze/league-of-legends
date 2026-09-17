@@ -2,8 +2,8 @@
 
 A self-hosted League of Legends statistics site: win rates, pick rates, ban rates,
 builds and matchups by champion, role and patch. Everything is pre-computed
-nightly and served as static files, so a page view never touches a database and
-never calls the Riot API.
+nightly into a published artifact tree and served from it by a Go tier, so a page
+view never touches a database and never calls the Riot API.
 
 Not endorsed by Riot Games.
 
@@ -25,7 +25,6 @@ implemented yet.
 | `internal/config` | Environment-driven configuration |
 | `internal/obs` | Structured logging and the Prometheus metrics registry |
 | `sql/migrations` | Versioned, forward-only Postgres migrations |
-| `web/` | The Astro site |
 | `fixtures/` | Small hand-authored sample payloads for tests, with their provenance |
 | `docs/` | Architecture, data sources, compliance, frozen contracts and ADRs |
 
@@ -35,7 +34,6 @@ boundary. It is normative.
 ## Requirements
 
 - Go 1.27 or newer
-- Node 22 or newer, for `web/`
 - Postgres 16 or newer, for the control plane. Not needed to build or test.
 - No Docker daemon is needed to build or test; `make docker-build` needs one.
 
@@ -111,17 +109,22 @@ their configuration, report that they are unimplemented and exit 3 - deliberatel
 not 0, so an unimplemented CronJob cannot look healthy.
 
 ```sh
-make types        # regenerate web/src/types from the Go structs
+make types        # regenerate schema/agg.{d.ts,schema.json} from the Go structs
 make run          # start the ingest worker
-make web-build    # build the Astro site
+make served-pages # capture what a running tier serves into bin/served-pages
 ```
 
 ## Verify
 
 ```sh
 make fmt vet test test-race lint vuln build
-cd web && npm ci && npm run build
+make compliance compliance-negative-control
 ```
+
+`make compliance` builds the tier, captures the pages it serves over the
+checked-in fixture tree into `bin/served-pages`, and scans that corpus. There is
+no Node toolchain in the repository: the frontend is the Go tier
+(`internal/webtier`).
 
 `make vuln` runs `govulncheck` over the module graph. Run it on any dependency
 change.
