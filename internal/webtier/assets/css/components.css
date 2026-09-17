@@ -1,31 +1,10 @@
-/* components.css — the frozen component layer of the served Go tier.
- *
- * Load order is part of the contract: the shell inlines the Astro-scoped chunks
- * first and this sheet last, so a rule here wins a specificity tie against the
- * served baseline, and no selector has to out-specify it.
- *
- * Every rule is (a) an application of one of the four idioms in
- * design-tokens.md §2, (b) one of the eight mandatory accessibility fixes in
- * §3, or (c) a unification of a value the served markup hard-codes in two
- * places (§4). Each rule below says which. A rule that cannot name one of the
- * three does not belong in a freeze.
- *
- * Nothing here changes page copy or the information a route carries: it
- * changes how already-emitted markup renders, which is what makes the preview a
- * preview rather than a rewrite. The reasons in full are in DESIGN-FREEZE.md.
- */
 
-/* (c) The motion literals the served markup hard-codes: `a.ds-card:hover` and
- * `.ds-card:hover` both write `6px 6px 0 0` and `translate(2px,2px)` inline. */
 :root {
     --offset-badge: 2px 2px 0 var(--accent-color);
     --offset-press: 6px 6px 0 var(--accent-color);
     --press-shift: 2px;
 }
 
-/* (b) A11y 1. The baseline's reduced-motion block caps transition and animation
- * *duration* only, so .ds-card's transition is already covered; smooth scrolling
- * and the press transform are not, and are stated here rather than assumed. */
 @media (prefers-reduced-motion: reduce) {
     html {
         scroll-behavior: auto;
@@ -36,25 +15,19 @@
     }
 }
 
-/* (b) A11y 2. The baseline answers .fallback-skip on plain :focus with no
- * outline at all, so the first tab stop on every page is the one control that
- * does not use the shared ring. */
 .fallback-skip:focus,
 .fallback-skip:focus-visible {
     outline: var(--bw-rule) solid var(--ring-color);
     outline-offset: var(--focus-ring-offset);
 }
 
-/* (b) A11y 6. The shell renders the landmarks; what it lacks is room above the
- * fixed navbar, so the literal 4rem is replaced by the token that names it. */
 body {
     padding-top: var(--nav-height);
     line-height: var(--lh-body);
 }
 
-/* (b) A11y 3. The served styles answer aria-current with a colour change only,
- * which is a hue-only signal; the underline makes it readable without colour. */
-.link[aria-current=page] {
+.link[aria-current=page],
+.menu .panel .link[aria-current=page] {
     border-bottom-color: var(--accent-color);
 }
 
@@ -62,24 +35,17 @@ body {
     font-weight: var(--fw-nav);
 }
 
-/* (c) The press geometry the scoped sheets write inline, restated from tokens:
- * same specificity, later in the cascade, identical pixels. */
 .ds-card:hover {
     box-shadow: var(--edge), var(--offset-press);
     transform: translate(var(--press-shift), var(--press-shift));
 }
 
-/* (a) Item 1. Square corners are the absence of a declaration (§4's trap), so
- * every corner that has a border is zeroed explicitly. */
 main img,
 .fallback-data-table img,
 .fallback-tier-badge img {
     border-radius: var(--radius-card);
 }
 
-/* (a) Item 1. The scoped card/badge layer reaches the tier-list routes; the
- * fallback layer every other route renders through is a plain 2px border with
- * no offset. These rules give it the same identity with no markup change. */
 .fallback-tier-badge {
     border: var(--bw-rule) solid var(--primary-color);
     box-shadow: var(--offset-badge);
@@ -89,9 +55,6 @@ main img,
     text-align: center;
 }
 
-/* Two spellings reach this element: the Go tierBadge component emits
- * `grade-splus` and fallbackTierBadge emits `fallback-tier-badge--s-plus`. Both
- * are kept so the split cannot silently drop the S+ tint again. */
 .fallback-tier-badge--splus,
 .fallback-tier-badge--s-plus,
 .grade-splus {
@@ -99,8 +62,6 @@ main img,
     color: var(--tier-ink);
 }
 
-/* Without a per-grade rule every badge renders identically, and the grade is
- * what the whole tier list is about. */
 .fallback-tier-badge--s,
 .grade-s {
     background-color: var(--tier-s-bg);
@@ -131,8 +92,6 @@ main img,
     color: var(--tier-ink);
 }
 
-/* On `/` these link lists are the entire body, and they are emitted as
- * <ul><li><a>, so the tile is drawn on the <a> without touching the markup. */
 .fallback-champion-links {
     gap: var(--space-1) var(--space-3);
 }
@@ -153,8 +112,6 @@ main img,
     transform: translate(calc(-1 * var(--press-shift)), calc(-1 * var(--press-shift)));
 }
 
-/* (b) A11y 7. overflow-x: auto on the scroll container is the answer to wide
- * stat tables: the table scrolls, the body never clips. */
 .fallback-scroll,
 .fallback-data-table {
     overflow-x: auto;
@@ -182,9 +139,6 @@ main img,
     line-height: var(--lh-tight);
 }
 
-/* (a) Item 2. The baseline sets the monospace family on the fallback table's
- * th/td but leaves caption inheriting the body face and the numeric cells with
- * the markup's own alignment. tabular-nums is §3 item 4. */
 .fallback-data-table caption,
 .fallback-data-table th,
 .fallback-stat__label {
@@ -208,9 +162,6 @@ main img,
     font-weight: var(--fw-subhead);
 }
 
-/* (a) Item 3. The matrix states availability in a bare cell; the value carrier
- * is the hatch, so the hatch is the token and the tint is the reinforcement.
- * Meaning is never left to hue alone. */
 .fallback-matrix__unavailable {
     color: var(--text-muted-alt);
 }
@@ -220,11 +171,6 @@ main img,
     background-image: var(--dev-empty-hatch);
 }
 
-/* (c) Prose. /about, the legal pages and /disclaimer carry no component hooks at all:
- * <article> with <h1>/<h2>/<p>/<ul>/<ol>/<code>. A measured line length and the
- * shared code treatment are the whole layer they need. The measure goes on the
- * text elements, not on <article>, because every data route wraps its table in
- * the same <article>: constraining the article shrinks the heatmap instead. */
 main article > p,
 main article > ul,
 main article > ol,

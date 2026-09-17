@@ -13,7 +13,7 @@ import (
 
 // This file is the executable form of the design freeze. The freeze is not a
 // document that says the tokens are settled; it is these assertions, which fail
-// when the settled state changes. Three properties are checked:
+// when the settled state changes. Seven properties are checked:
 //
 //  1. Every token the served sheets declare is either consumed by a rule or
 //     listed below with a reason. A token cannot be added, deleted, or silently
@@ -23,6 +23,22 @@ import (
 //     2.x floor. This includes the pair that motivated the freeze: the accent on
 //     the surface is AA (6.13:1), not AAA, so §3.8 requires it never be used as
 //     small text.
+//  4. The frozen layer is inlined last (TestFrozenLayerIsInlinedLast), so it
+//     wins a specificity tie against the serviced baseline.
+//  5. The frozen layer carries no prose and stays under its byte ceiling
+//     (TestFrozenLayerStaysLean), and re-declares no token an earlier sheet
+//     already provides with the same value
+//     (TestFrozenLayerDeclaresNoRedundantToken).
+//  6. A rule in the frozen layer that exists only to win a specificity tie
+//     actually wins it (TestFrozenLayerWinsTheAriaCurrentTie). A rule that is
+//     present in the file and still loses is the defect that motivated the
+//     check: nothing in the served markup changes, so only computed style or
+//     arbitration arithmetic can see it.
+//  7. The standalone fault document inlines the frozen layer too
+//     (TestStandaloneFaultFormInlinesFrozenLayer). It is the one document the
+//     shell does not wrap, so its stylesheets are its own problem -- and it is
+//     the document a reader sees when the snapshot is unreadable, which is
+//     exactly when an unstyled page costs the most.
 //
 // The drift assertions are the other half: the porting traps in design-tokens.md
 // §4 are that --bg-light is a surface (not a theme), that square corners are
@@ -51,12 +67,22 @@ var servedSheets = []string{
 }
 
 var (
-	reTokenDecl = regexp.MustCompile(`(--[a-z0-9-]+)\s*:`)
-	reVarRef    = regexp.MustCompile(`var\(\s*(--[a-z0-9-]+)`)
-	reDecl      = regexp.MustCompile(`--[a-z0-9-]+\s*:[^;]*;`)
-	reComment   = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	reTokenVal  = regexp.MustCompile(`(--[a-z0-9-]+)\s*:\s*([^;}]+)`)
+	reTokenDecl  = regexp.MustCompile(`(--[a-z0-9-]+)\s*:`)
+	reVarRef     = regexp.MustCompile(`var\(\s*(--[a-z0-9-]+)`)
+	reDecl       = regexp.MustCompile(`--[a-z0-9-]+\s*:[^;]*;`)
+	reComment    = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	reTokenVal   = regexp.MustCompile(`(--[a-z0-9-]+)\s*:\s*([^;}]+)`)
+	reStyleBlock = regexp.MustCompile(`(?s)<style[^>]*>(.*?)</style>`)
 )
+
+// declNames is the set of custom property names a stylesheet declares.
+func declNames(css string) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range reTokenVal.FindAllStringSubmatch(css, -1) {
+		out[m[1]] = true
+	}
+	return out
+}
 
 func readSheet(t *testing.T, name string) string {
 	t.Helper()
@@ -460,17 +486,24 @@ func TestFrozenLayerIsInlinedLast(t *testing.T) {
 	}
 }
 
-// TestFrozenLayerStaysLean pins the one thing about this layer that is a
-// product cost rather than a correctness claim: it is inlined into every
-// document, so its bytes are paid on every page view and are not cacheable.
+// TestFrozenLayerStaysLean pins the two things about this layer that are costs
+// rather than correctness claims: it is inlined into every document, so its
+// bytes are paid on every page view and are not cacheable, and the prose in it
+// is paid for by a browser that discards every byte of it.
 //
 // The layer first shipped at 19,646 B, of which 11,884 B (60%) was block
 // comments explaining rules to a browser that discards them, and prose naming
 // tokens (`--bg-color`) sat between `:root{` and `}`, which broke
-// comment-unaware token parsing. The reasons moved to DESIGN-FREEZE.md. This
-// test is what stops them drifting back in one helpful edit at a time.
+// comment-unaware token parsing. The reasons moved to DESIGN-FREEZE.md, and
+// this test was written to stop them drifting back -- but its gate was
+// "comments are less than half the block", so the prose grew back to 45.6%
+// (6,612 B of 14,178 B) without ever failing it. A gate that cannot fail is the
+// reason the figure the doc quotes is now the figure this test computes.
 func TestFrozenLayerStaysLean(t *testing.T) {
-	const budget = 16000
+	// Finding 1's acceptance criterion: the inlined frozen block drops from
+	// 14,158 B to <= 7,800 B. The strip landed at 6,777 B, so the ceiling leaves
+	// about a kilobyte of headroom for a rule that earns its place.
+	const budget = 7800
 
 	layer := frozenCSS()
 	if len(layer) > budget {
@@ -478,31 +511,38 @@ func TestFrozenLayerStaysLean(t *testing.T) {
 			len(layer), budget)
 	}
 
+	// A ban rather than a budget, and not only because the budget failed before:
+	// a comment is the one thing in the block that cannot change what any
+	// property computes to, so its correct budget is zero. The ban subsumes the
+	// opener/terminator balance check that used to be here -- with no opener
+	// there is no comment to leave unterminated.
 	comments := reCSSComment.FindAllString(layer, -1)
 	commentBytes := 0
 	for _, c := range comments {
 		commentBytes += len(c)
 	}
-	// A comment budget rather than a ban: a rule whose reason cannot be
-	// recovered from its own selectors earns one line, and the one-line
-	// per-value notes in the token sheet are cheap.
-	if share := 100 * commentBytes / len(layer); share > 50 {
-		t.Errorf("comments are %d%% of the frozen layer (%d of %d bytes); a browser discards all of them, so shrink them or move them to DESIGN-FREEZE.md",
-			share, commentBytes, len(layer))
+	if len(comments) > 0 {
+		t.Errorf("the frozen layer carries %d comment(s), %d of %d bytes, every one of which a browser discards: the reason belongs in DESIGN-FREEZE.md",
+			len(comments), commentBytes, len(layer))
+	}
+	// Positive control: the predicate has to reject the prose that was actually
+	// removed, or "no comments" is a claim about a checker that cannot fail.
+	if got := reCSSComment.FindAllString("/* body text, in-card links */\n.link{font-weight:var(--fw-nav)}", -1); len(got) != 1 {
+		t.Errorf("positive control failed: the comment predicate found %d comments in prose it has to reject", len(got))
 	}
 
-	// A nested comment opener makes a comment unterminated for any parser that
-	// only looks for the first terminator, and `/legal/*` in prose is an easy
-	// way to write one by accident.
-	if strings.Count(layer, "/*") != strings.Count(layer, "*/") {
-		t.Errorf("the frozen layer has %d comment openers and %d terminators",
-			strings.Count(layer, "/*"), strings.Count(layer, "*/"))
+	// The doc's cost table is a claim about these bytes, and a stale figure is a
+	// false claim -- a defect class this project has already shipped once. So the
+	// raw size is pinned here: a change to the layer that does not restate the
+	// figure in the same commit fails.
+	doc := string(asset(designFreezeDoc))
+	if size := thousands(len(layer)); !strings.Contains(doc, size) {
+		t.Errorf("DESIGN-FREEZE.md does not state the frozen layer's current size (%s B), so its cost table is a claim about a layer that no longer exists", size)
 	}
 
 	// The register has to live in the doc and has to name the divergence it
 	// justifies. Pointers such as "see DIVERGENCE REGISTER" may stay in the
 	// sheet -- they are one clause, not prose -- but the register itself may not.
-	doc := string(asset(designFreezeDoc))
 	for _, want := range []string{"Divergence register", "--text-muted", "#615f57", "#666"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("DESIGN-FREEZE.md does not mention %q, so the divergence register is no longer recorded", want)
@@ -511,6 +551,389 @@ func TestFrozenLayerStaysLean(t *testing.T) {
 	if strings.Contains(layer, "Adopted the served value") {
 		t.Error("the divergence register's entries are back in the inlined sheet")
 	}
+}
+
+// cssRule is one selector list and its declaration block, as they appear in a
+// served sheet.
+type cssRule struct {
+	sel  string
+	body string
+}
+
+// reCSSRule splits a stylesheet into rules. Nested at-rules fall out of the
+// exclusive character classes: an @media header cannot reach a `}` without
+// crossing the `{` of the rule inside it, so the rules inside it are what match.
+var reCSSRule = regexp.MustCompile(`(?s)([^{}]+)\{([^{}]*)\}`)
+
+func cssRules(css string) []cssRule {
+	var out []cssRule
+	for _, m := range reCSSRule.FindAllStringSubmatch(css, -1) {
+		out = append(out, cssRule{sel: strings.TrimSpace(m[1]), body: m[2]})
+	}
+	return out
+}
+
+// declValue returns the value a declaration block sets for one property, with
+// the shorthand-expanded `border-bottom` form deliberately not counted: the two
+// are different properties as far as this arbitration is concerned.
+func declValue(body, prop string) string {
+	m := regexp.MustCompile(`(?:^|;)\s*` + regexp.QuoteMeta(prop) + `\s*:\s*([^;}]+)`).FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(m[1]), " ")
+}
+
+// specOf is the (id, class, type) weight the cascade gives a selector. It is
+// computed from the bytes rather than written down, because the whole of
+// finding 2 is that a rule can be present in the served CSS and still lose:
+// attribute selectors and pseudo-classes weigh as classes, so a scoped rule's
+// two cid attributes are what beat the mandated fix.
+func specOf(sel string) [3]int {
+	ids, classes, types := 0, 0, 0
+	for i := 0; i < len(sel); {
+		switch c := sel[i]; {
+		case c == '[' || c == '(':
+			close := byte(']')
+			if c == '(' {
+				close = ')'
+			}
+			if c == '[' {
+				classes++
+			}
+			for i < len(sel) && sel[i] != close {
+				i++
+			}
+			i++
+		case c == '#':
+			ids++
+			i = identEnd(sel, i+1)
+		case c == '.':
+			classes++
+			i = identEnd(sel, i+1)
+		case c == ':':
+			if i+1 < len(sel) && sel[i+1] == ':' {
+				i++ // pseudo-element
+			} else {
+				classes++
+			}
+			i = identEnd(sel, i+1)
+		case identStart(c):
+			types++
+			i = identEnd(sel, i)
+		default:
+			i++ // combinator, comma, universal, whitespace
+		}
+	}
+	return [3]int{ids, classes, types}
+}
+
+func identStart(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '-' || c >= 0x80
+}
+
+func identEnd(s string, i int) int {
+	for i < len(s) {
+		c := s[i]
+		if !identStart(c) && (c < '0' || c > '9') {
+			break
+		}
+		i++
+	}
+	return i
+}
+
+// specGE reports whether a wins or ties against b. In the single-selector case
+// a tie is broken by document order, so a tie is a win for the later layer.
+func specGE(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] > b[i]
+		}
+	}
+	return true
+}
+
+// cssCandidate is a rule in the served path that sets one property, kept with
+// the sheet it came from so load order stays visible in a failure message.
+type cssCandidate struct {
+	sheet string
+	sel   string
+	body  string
+}
+
+// winner is the cascade's answer for one property on one element: the highest
+// specificity wins, and equal specificities are broken by document order. Only
+// normal declarations are modelled, because only normal declarations exist
+// among this property's candidates.
+func winner(cands []cssCandidate) (cssCandidate, bool) {
+	var best cssCandidate
+	found := false
+	for _, c := range cands {
+		if !found || specGE(specOf(c.sel), specOf(best.sel)) {
+			best, found = c, true
+		}
+	}
+	return best, found
+}
+
+// TestFrozenLayerWinsTheAriaCurrentTie is finding 2's regression guard.
+//
+// The matchups panel's current-page link is a.link[aria-current=page] inside
+// ul.panel inside details.menu. The scoped sheets set its border-bottom-color
+// twice: once with the accent, which is what the freeze mandates, and once to
+// transparent on any .link inside a .panel. The second selector carries both cid
+// attributes, so it weighs (0,4,0) against the mandated rule's (0,3,0): the
+// accessibility fix is in the served CSS and loses anyway.
+//
+// Nothing about the markup changes when it regresses, so this cannot be checked
+// by looking for the rule. The assertions below derive the arbitration from the
+// served bytes; the computed value itself is a browser measurement and is
+// recorded in DESIGN-FREEZE.md.
+func TestFrozenLayerWinsTheAriaCurrentTie(t *testing.T) {
+	const prop = "border-bottom-color"
+
+	scoped := cssOf(t, "css/scoped-common.css") + cssOf(t, "css/scoped-champion.css")
+	frozen := frozenCSS()
+
+	var ariaScoped, panelScoped, ariaFrozen string
+	for _, r := range cssRules(scoped) {
+		if declValue(r.body, prop) == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(r.sel, "aria-current"):
+			ariaScoped = r.sel
+		case strings.Contains(r.sel, ".panel") && strings.Contains(r.sel, ".link"):
+			panelScoped = r.sel
+		}
+	}
+	for _, r := range cssRules(frozen) {
+		if declValue(r.body, prop) == "" || !strings.Contains(r.sel, "aria-current") {
+			continue
+		}
+		if ariaFrozen == "" || specGE(specOf(r.sel), specOf(ariaFrozen)) {
+			ariaFrozen = r.sel
+		}
+	}
+	if ariaScoped == "" || panelScoped == "" || ariaFrozen == "" {
+		t.Fatalf("the competing rules are not all in the served CSS: scoped aria-current=%q scoped panel=%q frozen=%q",
+			ariaScoped, panelScoped, ariaFrozen)
+	}
+
+	// The defect itself, derived rather than assumed. If the scoped panel rule
+	// ever stops outranking the scoped aria-current rule, the frozen override has
+	// become redundant rather than wrong, and that is a decision to re-measure
+	// and take deliberately.
+	if !specGE(specOf(panelScoped), specOf(ariaScoped)) || panelScoped == ariaScoped {
+		t.Errorf("the scoped panel rule (%s, %v) no longer outranks the scoped aria-current rule (%s, %v): the frozen override is now redundant, so re-measure the computed border-bottom-color and delete whichever half is unnecessary",
+			panelScoped, specOf(panelScoped), ariaScoped, specOf(ariaScoped))
+	}
+	if !specGE(specOf(ariaFrozen), specOf(panelScoped)) {
+		t.Errorf("the frozen rule (%s, %v) loses to the scoped panel rule (%s, %v), so aria-current is defeated again",
+			ariaFrozen, specOf(ariaFrozen), panelScoped, specOf(panelScoped))
+	}
+
+	// The arbitration end to end, in load order over every sheet: the answer has
+	// to be the frozen accent rule. The positive control below is the same
+	// computation with the frozen layer removed, which is the pre-fix served path.
+	var cands []cssCandidate
+	for _, name := range servedSheets {
+		for _, r := range cssRules(cssOf(t, name)) {
+			if declValue(r.body, prop) == "" || !strings.Contains(r.sel, ".link") {
+				continue
+			}
+			cands = append(cands, cssCandidate{sheet: name, sel: r.sel, body: r.body})
+		}
+	}
+	win, ok := winner(cands)
+	if !ok {
+		t.Fatal("no rule in the served path sets border-bottom-color on a .link")
+	}
+	if got := declValue(win.body, prop); win.sheet != componentsCSS || got != "var(--accent-color)" {
+		t.Errorf("the served winner for %s on the matchups nav link is %q from %s (%s); it has to be the frozen layer's var(--accent-color)",
+			prop, got, win.sheet, win.sel)
+	}
+
+	var withoutFrozen []cssCandidate
+	for _, c := range cands {
+		if c.sheet == designTokensCSS || c.sheet == componentsCSS {
+			continue
+		}
+		withoutFrozen = append(withoutFrozen, c)
+	}
+	ctrl, ok := winner(withoutFrozen)
+	if !ok || !strings.Contains(declValue(ctrl.body, prop), "#0000") {
+		t.Errorf("positive control failed: without the frozen layer the winner would be %q from %s, not the transparent scoped rule, so this test cannot detect the defect it exists for",
+			declValue(ctrl.body, prop), ctrl.sel)
+	}
+}
+
+// redundantByDesign is finding 5's exception register. Each entry is a token the
+// frozen layer re-declares with a value an earlier sheet in the load order
+// already provides, which cannot change what any property computes to, and which
+// no rule inside the frozen layer reads.
+//
+// Finding 5 lists 32 such names and deletes 29 of them, keeping
+// --print-ink/-paper/-rule; the register below is that same exception plus
+// --text-muted. It is deliberately near-empty: an entry is a
+// claim that the bytes are worth keeping, so it has to name the consumer the
+// predicate cannot see or the check the removal would make vacuous.
+var redundantByDesign = map[string]string{
+	"--print-ink":   "read by L1's five @media print blocks, which the layer-local predicate cannot see. The base sheet does declare the identical #000, so this is a byte decision rather than a behaviour one: Finding 5 keeps these three explicitly, and making the print colour of the scoped chunk depend on a sheet this package does not own is the wrong direction to save 15 B.",
+	"--print-paper": "read by L1's five @media print blocks, which the layer-local predicate cannot see. The base sheet does declare the identical #fff, so this is a byte decision rather than a behaviour one: Finding 5 keeps these three explicitly, and making the print colour of the scoped chunk depend on a sheet this package does not own is the wrong direction to save 16 B.",
+	"--print-rule":  "read by L1's five @media print blocks, which the layer-local predicate cannot see. The base sheet does declare the identical #767676, so this is a byte decision rather than a behaviour one: Finding 5 keeps these three explicitly, and making the print colour of the scoped chunk depend on a sheet this package does not own is the wrong direction to save 20 B.",
+	"--text-muted":  "the base sheet already declares #615f57, so this costs 27 inlined bytes and cannot change the served colour. It stays because a11y_contract_test.go §3.8 is a positive control that rewrites exactly this literal (`--text-muted: #615f57`) to prove the contrast check can fail, and the base sheet's spelling of the same value is `--text-muted:#615f57` with no space, which that mutation does not match. Removing the declaration does not break the check, it makes the control vacuous -- a live check that proves more is worth 27 bytes. Re-pointing the mutation at the base sheet's spelling would let the declaration go, but that file is not this finding's to edit.",
+}
+
+// redundantTokens returns the tokens a layer re-declares at a value an earlier
+// sheet already provides and that nothing in the layer reads. "Reads" is any
+// var() reference in the layer, including one inside another declaration: a
+// layer whose own --nav-gradient names --bg-color is using it even when the rule
+// that consumes --nav-gradient lives in the scoped chunk.
+//
+// Comparing the text after whitespace normalisation keeps the predicate on
+// identical spellings: `.75rem` and `0.75rem` are the same size to a browser but
+// different strings here, and for a deletion claim the conservative direction is
+// to keep what the predicate cannot prove identical.
+func redundantTokens(layer, earlier string) []string {
+	earlierValues := map[string]string{}
+	for _, m := range reTokenVal.FindAllStringSubmatch(earlier, -1) {
+		earlierValues[m[1]] = strings.Join(strings.Fields(m[2]), " ")
+	}
+	read := map[string]bool{}
+	for _, m := range reVarRef.FindAllStringSubmatch(layer, -1) {
+		read[m[1]] = true
+	}
+	var out []string
+	for _, m := range reTokenVal.FindAllStringSubmatch(layer, -1) {
+		name, value := m[1], strings.Join(strings.Fields(m[2]), " ")
+		if read[name] {
+			continue
+		}
+		if prev, ok := earlierValues[name]; ok && prev == value {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestFrozenLayerDeclaresNoRedundantToken pins finding 5. A declaration that
+// repeats an identical value from an earlier sheet, and that nothing in the
+// layer reads, is bytes in the one block no visitor can cache and no browser can
+// act on. Twenty-eight of them were removed (1,114 B of declaration text); the
+// register above is why the twenty-ninth stays.
+//
+// The predicate reproduces the measured finding exactly: run against the layer
+// as it stood before the strip it returns the 32 names Finding 5 lists, so a
+// disagreement here is a real change in the layer rather than a disagreement
+// about the arithmetic.
+func TestFrozenLayerDeclaresNoRedundantToken(t *testing.T) {
+	earlier := ""
+	for _, name := range []string{"astro/JsonLd.BEq7AnVK.css", "css/scoped-common.css", "css/scoped-champion.css"} {
+		earlier += cssOf(t, name)
+	}
+	layer := cssOf(t, designTokensCSS) + cssOf(t, componentsCSS)
+	if len(reTokenDecl.FindAllString(layer, -1)) == 0 {
+		t.Fatal("the frozen layer declares no tokens: the sheets were not read")
+	}
+	got := redundantTokens(layer, earlier)
+
+	want := make([]string, 0, len(redundantByDesign))
+	for name := range redundantByDesign {
+		want = append(want, name)
+	}
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("the frozen layer re-declares tokens an earlier sheet already provides at the same value and nothing in the layer reads:\n  found: %v\n  registered: %v\nEither remove the declaration or add it to redundantByDesign with a reason.",
+			got, want)
+	}
+
+	// Positive control: the predicate has to report a re-declaration of an
+	// earlier identical value.
+	if ctrl := redundantTokens(":root{--fs-md: 0.9375rem;}", ":root{--fs-md:0.9375rem;}"); len(ctrl) != 1 {
+		t.Errorf("positive control failed: the redundancy predicate reported %v for a re-declaration it has to detect", ctrl)
+	}
+	// Negative controls, one per half of the predicate: a different value, and a
+	// value the layer itself reads, are both allowed to be re-declared.
+	if ctrl := redundantTokens(":root{--fs-md: 0.9rem;}", ":root{--fs-md:0.9375rem;}"); len(ctrl) != 0 {
+		t.Errorf("negative control failed: the redundancy predicate reported %v for a different value", ctrl)
+	}
+	if ctrl := redundantTokens(":root{--fs-md: 0.9375rem;}p{font-size:var(--fs-md)}", ":root{--fs-md:0.9375rem;}"); len(ctrl) != 0 {
+		t.Errorf("negative control failed: the redundancy predicate reported %v for a token the layer reads", ctrl)
+	}
+}
+
+// TestStandaloneFaultFormInlinesFrozenLayer pins finding 7. The standalone
+// document is what a reader gets when the shell itself cannot be rendered, so it
+// carries its own stylesheets -- and before this lane it carried two of the
+// three: the base sheet by link and the scoped chunk, with no frozen layer.
+// Every token only the frozen layer declares therefore resolved to nothing on
+// that page, and every token the base sheet spells differently resolved to the
+// baseline's value, on the one document whose whole job is to be legible when
+// the rest of the tier is not.
+//
+// The shelled fault page is not asserted here: it is wrapped by shell.tmpl, so
+// it inherits the load order TestFrozenLayerIsInlinedLast already pins.
+func TestStandaloneFaultFormInlinesFrozenLayer(t *testing.T) {
+	renderer := newFixtureRenderer(t)
+	doc, err := renderer.RenderStandaloneError("/tier-list/top", 503, FaultArtifact, "")
+	if err != nil {
+		t.Fatalf("RenderStandaloneError: %v", err)
+	}
+	html := string(doc)
+
+	blocks := reStyleBlock.FindAllStringSubmatch(html, -1)
+	if len(blocks) != 2 {
+		t.Fatalf("the standalone document inlines %d style blocks, want 2 (scoped chunk, then frozen layer)", len(blocks))
+	}
+	scoped, frozen := blocks[0][1], blocks[1][1]
+
+	// The block has to be the frozen layer itself, not a copy of it that can
+	// drift: the shell and the standalone document have to be serving the same
+	// bytes or the freeze has two definitions.
+	if want := frozenCSSChunk(); frozen != want {
+		t.Errorf("the standalone document's last style block is not the frozen layer (%d bytes, want %d)", len(frozen), len(want))
+	}
+	if strings.Contains(scoped, "--radius-card") {
+		t.Error("the scoped chunk is carrying frozen tokens, so this test cannot tell the two layers apart")
+	}
+
+	// Positive control: the block has to contribute something the other two
+	// sources in the document cannot. A token only the frozen layer declares,
+	// and that a rule in the frozen layer reads, is undefined without the block
+	// -- which is the defect in its most visible form.
+	base := cssOf(t, "astro/JsonLd.BEq7AnVK.css") + scoped
+	earlier := declNames(base)
+	layer := cssOf(t, designTokensCSS) + cssOf(t, componentsCSS)
+	read := map[string]bool{}
+	for _, m := range reVarRef.FindAllStringSubmatch(layer, -1) {
+		read[m[1]] = true
+	}
+	var frozenOnly []string
+	for name := range declNames(layer) {
+		if !earlier[name] && read[name] {
+			frozenOnly = append(frozenOnly, name)
+		}
+	}
+	if len(frozenOnly) == 0 {
+		t.Fatal("the frozen layer declares no consumed token the other two sources do not, so this test cannot detect its absence")
+	}
+	sort.Strings(frozenOnly)
+	t.Logf("frozen-only tokens consumed on the standalone document: %s", strings.Join(frozenOnly, " "))
+}
+
+// thousands formats a byte count the way DESIGN-FREEZE.md states it, so the
+// doc's figure can be checked instead of trusted.
+func thousands(n int) string {
+	s := strconv.Itoa(n)
+	var out []string
+	for len(s) > 3 {
+		out = append([]string{s[len(s)-3:]}, out...)
+		s = s[:len(s)-3]
+	}
+	return strings.Join(append([]string{s}, out...), ",")
 }
 
 var _ = fmt.Sprintf
