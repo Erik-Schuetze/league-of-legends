@@ -38,7 +38,7 @@ const (
 	// RiotTokenEnv names the variable carrying Riot's site-verification token.
 	// While it is unset, /riot.txt is not published and the site says so, which
 	// is what the reference build does.
-	RiotTokenEnv = "LOLSTATS_RIOT_VERIFICATION_TOKEN"
+	RiotTokenEnv = "LOLSTATS_RIOT_VERIFICATION_TOKEN" // #nosec G101 -- an environment variable name, not a credential value
 
 	EffectiveDate = "2026-09-17"
 	// VersionLine is the frozen "Effective ... Last updated ..." sentence.

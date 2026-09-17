@@ -129,7 +129,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		Title:       "Data unavailable - " + SiteName,
 		Explanation: "",
 		Stylesheet:  baseCSSPath,
-		ScopedCSS:   template.CSS(scopedCSS(false)),
+		ScopedCSS:   trustedCSS(string(scopedCSS(false))),
 		Source:      "fault",
 		State:       "no-data",
 	}
@@ -138,7 +138,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		view.Title = "Page not found - " + SiteName
 		view.Heading = "Page not found"
 		view.Lead = "There is no page at this address."
-		view.Explanation = template.HTML("This site serves a fixed set of routes and the one you asked for is not among " +
+		view.Explanation = trustedHTML("This site serves a fixed set of routes and the one you asked for is not among " +
 			"them. Nothing is missing from the published snapshot and no number was withheld: the page does not exist, " +
 			"which is a different thing from a page with no data.")
 		view.Remedy = "Every route this site serves is listed below. The newest patch's pages are the ones worth reading " +
@@ -149,7 +149,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		view.Title = "Published snapshot incomplete - " + SiteName
 		view.Heading = "The published snapshot is incomplete"
 		view.Lead = "The artifact this page is rendered from is missing or unreadable, so there is no table to show."
-		view.Explanation = template.HTML("The manifest at the root of the published tree advertises this artifact, and an " +
+		view.Explanation = trustedHTML("The manifest at the root of the published tree advertises this artifact, and an " +
 			"advertised artifact is a promise that it is there. This site does not keep quiet about a broken promise: a " +
 			"table with rows quietly missing cannot be told apart from a table with few rows, so the page is withheld " +
 			"whole. Nothing has been substituted, no older copy has been served in its place, and no rate has been " +
@@ -160,7 +160,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		view.Title = "Snapshot schema not supported - " + SiteName
 		view.Heading = "The published snapshot is not a version this tier reads"
 		view.Lead = "The snapshot declares a schema version this reader does not implement."
-		view.Explanation = template.HTML("Artifacts are read against a schema, and a version that is not the one this " +
+		view.Explanation = trustedHTML("Artifacts are read against a schema, and a version that is not the one this " +
 			"tier implements is refused whole rather than decoded on a guess: a field that moved or changed meaning " +
 			"would otherwise be published as a number with a different definition than the one the page claims for it.")
 		view.Remedy = "Either the tier is redeployed at a version that implements what was published, or the snapshot is " +
@@ -169,7 +169,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		view.Title = "No snapshot published yet - " + SiteName
 		view.Heading = "No snapshot has been published yet"
 		view.Lead = "This site is deployed, but nothing has been published for the tier to read."
-		view.Explanation = template.HTML("There is no manifest at the root of the aggregate tree, so there is no patch, no " +
+		view.Explanation = trustedHTML("There is no manifest at the root of the aggregate tree, so there is no patch, no " +
 			"sample window and no floor for a page to describe. The pages that describe the site itself are complete; " +
 			"the pages that describe the ranked ladder are not published.")
 		view.Remedy = "The pipeline publishes a tree per patch. These routes answer as soon as it has."
@@ -177,7 +177,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		view.Title = "Method not allowed - " + SiteName
 		view.Heading = "This route is read-only"
 		view.Lead = "This site has no forms to post to: every view of the data is a URL."
-		view.Explanation = template.HTML("Sorting, filtering, paging, patch switching and comparing are query parameters " +
+		view.Explanation = trustedHTML("Sorting, filtering, paging, patch switching and comparing are query parameters " +
 			"on a plain GET, which is what makes every view of the data shareable, bookmarkable and usable with " +
 			"JavaScript disabled. There is nothing here to accept a request body.")
 		view.Remedy = "Repeat the request with GET (or HEAD) to read the page."
@@ -185,7 +185,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		view.Title = "Page could not be rendered - " + SiteName
 		view.Heading = "This page could not be rendered"
 		view.Lead = "The server failed while building this page."
-		view.Explanation = template.HTML("This is a fault in the web tier rather than in the published data: the snapshot " +
+		view.Explanation = trustedHTML("This is a fault in the web tier rather than in the published data: the snapshot " +
 			"was readable enough to start from, and the page still could not be assembled. It is reported in the " +
 			"server's log. No partial page is served, and the status you were given is the status of the failure.")
 		view.Remedy = "Retrying may succeed. If it does not, the report below is what the process recorded."

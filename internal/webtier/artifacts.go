@@ -178,9 +178,6 @@ var ErrNoSnapshot = errors.New("no aggregate snapshot has been published")
 // the file is not there. Every one of these is answered with 503.
 var ErrArtifactMissing = errors.New("artifact is missing")
 
-// errNoManifest is internal: "this candidate root has no manifest".
-var errNoManifest = errors.New("no manifest")
-
 // fileCache keeps the bytes of the artifacts it has read, keyed by path, size
 // and modification time. The published tree is written by rename, so a size or
 // mtime change is what "the artifact was republished" looks like from here; a
@@ -218,8 +215,18 @@ func newFileCache() *fileCache {
 	return &fileCache{entries: map[string]cachedFile{}}
 }
 
+// read returns an artifact's bytes, reusing the cached copy while the file's
+// size and modification time are unchanged. The loader re-reads the same
+// manifest, partitions and static files on every request, and the root is a
+// read-only volume whose files only change when a producer publishes a
+// snapshot, so a stale hit is not a correctness problem: the schema check that
+// follows every read is what decides whether the bytes may be rendered.
+//
+// path is always the configured artifact root joined with a path this package
+// built from the manifest or an aggmodel.*Path builder, never a request value,
+// so the read is confined as well as untrusted-by-default.
 func (c *fileCache) read(path string) ([]byte, error) {
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) // #nosec G304 G703 -- path is built from the configured artifact root plus an aggmodel.*Path segment; no request value reaches it
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +238,7 @@ func (c *fileCache) read(path string) ([]byte, error) {
 	}
 	c.mu.Unlock()
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 G703 -- as above: the configured artifact root plus a package-built path, no request value
 	if err != nil {
 		return nil, err
 	}
