@@ -106,6 +106,20 @@ anything the tier does. The local variant starts the binary a second time over a
 deliberately corrupt aggregate root, because "503 rather than a truncated 200" is
 the kind of property that only a live probe can establish.
 
+It also asserts the property the tier exists for: **the page works with
+JavaScript disabled.** The filter bar is a `method="get"` form, and check 4 reads
+the option values out of the served `<select>` elements, requests each one, and
+requires at least two distinct documents back - so a control that only looks like
+a control fails the gate. The digests are printed, so the evidence names which
+two bodies differed (docs/compliance.md, amendment 2).
+
+Because that form exists only in the response and not in any built file,
+`scripts/capture-served-pages.sh` captures the HTML the tier actually serves
+(routes discovered from the tier's own `/sitemap.xml`) and the compliance gate
+asserts its checks 3 and 4 over that corpus as well as over `web/dist`:
+`make compliance-served` does both on loopback over the fixture tree, in CI as
+well as here.
+
 ## Boundaries
 
 **The Riot client is in-house.** The rate limiter is the component most likely
