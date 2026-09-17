@@ -35,6 +35,62 @@ spec:
             fsGroup: 65532
             seccompProfile:
               type: RuntimeDefault
+          # A pod that was just created cannot open its first TCP connection to
+          # postgres for up to a second: the dial is refused outright while the
+          # pod network namespace is still warming up (DNS answers in the same
+          # instant, and a second dial milliseconds later succeeds). The store
+          # connects fail-fast and never retries, so `maintain` - which needs the
+          # connection before it does anything else - died on that first dial,
+          # and a Job pod cannot recover the way the ingest Deployment does:
+          # restartPolicy: Never forbids restarting the container inside the
+          # already-warm pod namespace that the retry would have needed. This
+          # gate therefore tries the connection until postgres answers, so the
+          # app only starts once the refused-window is behind it. The 120s budget
+          # and a one-second retry are both far inside the Job's own
+          # activeDeadlineSeconds and backoffLimit, which stay unchanged.
+          initContainers:
+            - name: wait-for-postgres
+              image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  if [ -z "${LOLSTATS_POSTGRES_DSN:-}" ]; then
+                      echo "wait-for-postgres: LOLSTATS_POSTGRES_DSN is empty" >&2
+                      exit 1
+                  fi
+                  authority=${LOLSTATS_POSTGRES_DSN##*@}
+                  authority=${authority%%/*}
+                  host=${authority%%:*}
+                  port=${authority##*:}
+                  deadline=$(( $(date +%s) + 120 ))
+                  until nc -z -w 2 "$host" "$port"; do
+                      if [ "$(date +%s)" -ge "$deadline" ]; then
+                          echo "wait-for-postgres: ${host}:${port} did not accept a connection" >&2
+                          exit 1
+                      fi
+                      echo "wait-for-postgres: retrying ${host}:${port}"
+                      sleep 1
+                  done
+                  echo "wait-for-postgres: ${host}:${port} is accepting connections"
+              env:
+                - name: LOLSTATS_POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: DSN
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
           containers:
             - name: maintain
               # TODO(plan section 10, Phase 1): pin to a digest with the other
