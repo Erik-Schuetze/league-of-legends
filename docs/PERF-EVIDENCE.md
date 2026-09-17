@@ -100,7 +100,7 @@ because the namespace was shared with other agents' pods.
 | TBT ≤200 ms | 0 ms on every route and round | **PASS** |
 | INP ≤200 ms | not emitted by Lighthouse in navigation mode | **NOT MEASURED** |
 | HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** |
-| HTML ≤40 KB gzipped | worst audited 10.2 KiB (LH) / 8.2 KiB (curl); worst of all routes 7.9 KiB | **PASS** |
+| HTML ≤40 KB gzipped | worst as served on the wire 10.2 KiB (`/tier-list/top/`, Lighthouse); worst across all 1,058 routes 9.5 KiB (`/about/` = 9,731 B). The same page is 9.3 KiB when re-gzipped with zlib defaults, i.e. the origin's own gzip output runs ~8% larger than zlib — the audited on-wire figure is the conservative one | **PASS** |
 | islands ≤2/page, both deferred | max **1** island/page, on 10 of 1,058 pages; 0 blocking scripts | **PASS** |
 | total first-load ≤300 KB uncompressed | 187.3–199.4 KiB on 4 routes; **429.7 / 447.7 / 939.0 / 1013.3 KiB** on 5 routes | **FAIL** (4 routes) |
 | zero axe serious+critical | 0 on all 9 routes (axe 4.13.0, 63 rules evaluated) | **PASS** |
@@ -162,7 +162,7 @@ All 1,058 sitemap routes fetched over HTTP; `docs/evidence/tree-facts.json`.
 | Total HTML | 34,555,778 B |
 | Mean HTML | 32,661 B (31.9 KiB); mean gzipped 5,833 B (5.7 KiB) |
 | Largest HTML page | `/champions/yorick/top/` — **68,367 B (66.8 KiB)**, gzipped 8,129 B |
-| Largest audited route | `/champions/ahri/mid/` — 66,966 B (65.4 KiB), gzipped 8,446 B |
+| Largest audited route | `/champions/ahri/mid/` — 66,966 B (65.4 KiB); gzipped 8,446 B as served on the wire (Lighthouse), 8,001 B re-gzipped with zlib |
 | Total JS | 1,912 B in 2 files, and **only on 10 of 1,058 pages** (the 5 tier-list + 5 patch tier-list routes): `TableIsland...js` 157 B + `preload-helper.DJSjwBkS.js` 1,755 B |
 | Blocking scripts | 0 (the single island entry is `type="module"`) |
 | Pages missing `lang` | **0** (all 1,058 are `lang="en"`) |
@@ -216,6 +216,9 @@ gunzip -c docs/evidence/lh-r1-home.json.gz | jq '.categories.performance.score'
 node scripts/perf/extract-lh.mjs docs/evidence/lh-r1-*.json.gz
 node scripts/perf/extract-lh.mjs --json docs/evidence/lh-r1-*.json.gz > docs/evidence/lh-summary-r1.json
 
+# verify every number in this document against the raw evidence (146 checks; exit 1 on drift)
+node scripts/perf/verify-report.mjs
+
 # axe-core, WCAG 2.1 A/AA, 412x915
 node scripts/perf/axe-routes.mjs --base http://127.0.0.1:18921 --out docs/evidence \
   / /tier-list/mid/ /tier-list/top/ /champions/ahri/mid/ /champions/ahri/top/ \
@@ -238,6 +241,7 @@ node scripts/perf/island-runtime.mjs --base http://127.0.0.1:18921 --out docs/ev
 | `docs/evidence/island-runtime.json` | island boot evidence, console errors, script inventory |
 | `scripts/perf/lighthouse-routes.sh` | Lighthouse runner with the positive control |
 | `scripts/perf/extract-lh.mjs` | raw report → §7.4 budget verdicts |
+| `scripts/perf/verify-report.mjs` | re-derives every figure in this document from the raw evidence and exits non-zero on any disagreement |
 | `scripts/perf/axe-routes.mjs` | axe-core runner |
 | `scripts/perf/tree-facts.mjs` | browserless byte/structure crawler |
 | `scripts/perf/island-runtime.mjs` | island boot + console-error check |
