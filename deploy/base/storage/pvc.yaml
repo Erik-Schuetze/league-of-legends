@@ -3,10 +3,13 @@
 #   raw/   the immutable archive of every payload Riot returned - the primary
 #          copy, and the only data here that cannot be regenerated
 #   agg/   published aggregates, raw/ transformed into what the site reads
-#   site/  the rendered HTML the web tier serves
+#   site/  the rendered HTML the deleted static tier used to serve over
+#          file_server. Nothing writes it any more (plan.md D-9, 2026-09-17);
+#          the Go tier answers from agg/ per request. The tree, if one is still
+#          on the volume, is inert - it is not read, and nothing prunes it.
 #
-# ReadWriteMany because four writers and one reader mount it at the same time,
-# from different nodes: the ingest worker, the aggregate job, the site build,
+# ReadWriteMany because several writers and one reader mount it at the same time,
+# from different nodes: the ingest worker, the aggregate job, the backup jobs,
 # and both web replicas. The overlay sets the storage class; the base stays
 # cluster-agnostic.
 #

@@ -35,9 +35,11 @@
 # Secret. No manifest changes when that happens. docs/runbooks/restore-raw.md
 # records this in the same words and says what to do when media appears.
 #
-# 05:00 Europe/Berlin: after the nightly window (site-build ends 03:40) and after
-# the 04:30 postgres dump, so the two backups are not competing for the same NFS
-# client and neither is running while the aggregate job rewrites agg/.
+# 05:00 Europe/Berlin: after the nightly window and the 04:30 postgres dump, so the
+# two backups are not competing for the same NFS client and neither is running
+# while the aggregate job rewrites agg/. The window it waits out used to end at
+# 03:40 with site-build (deleted with the static tier, plan.md D-9); the time was
+# not moved, because a one-hour margin after the 04:30 dump is what it is for.
 #
 # The image is the official public one, pinned by digest. It runs as 65532 like
 # the rest of the namespace: the restricted profile would reject anything that

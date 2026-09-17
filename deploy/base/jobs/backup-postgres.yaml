@@ -2,10 +2,12 @@
 # the only thing here that is not reproducible from files, and it is a single
 # replica on a single node).
 #
-# 04:30 Europe/Berlin: after aggregate (01:00), discover-seeds (02:10),
-# static-sync (03:10), site-build (03:40) and the 04:20 maintain tick, so the
-# dump contains the result of the whole night; and off the hour, like every other
-# job here, so it does not contend with the ones that fire at :00.
+# 04:30 Europe/Berlin: after aggregate (01:00), discover-seeds (02:10) and the
+# 04:20 maintain tick, so the dump contains the result of the whole night; and off
+# the hour, like every other job here, so it does not contend with the ones that
+# fire at :00. (Until 2026-09-17 the night also held static-sync at 03:10 and
+# site-build at 03:40; both were deleted with the static tier, plan.md D-9, and
+# this slot was not moved for them - it was already after the window closed.)
 #
 # The dump is `pg_dump --format=custom` and not `pg_dumpall`: the custom format is
 # what makes a selective restore possible (`pg_restore --table=matches`), and the
