@@ -291,6 +291,17 @@ func (s *Server) dispatch(r *http.Request) *response {
 		return s.ready(r)
 	case "/metrics":
 		return s.metricsResponse(r)
+
+	// The data explorer and its two downloads. They are exact paths rather than
+	// rules on the segments below, because /explore is one page with two named
+	// exports and nothing else under it: a reader who invents a third name gets
+	// the 404 the route table promises rather than a guess.
+	case "/explore":
+		return s.explore(r, path)
+	case "/explore/export.csv":
+		return s.exploreExportCSV(r, path)
+	case "/explore/export.json":
+		return s.exploreExportJSON(r, path)
 	}
 
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
@@ -390,6 +401,81 @@ func (s *Server) tierList(r *http.Request, path string, role string, patch strin
 
 // matchups serves /matchups/<role>. The query's filter narrows the matrix's
 // lens; the island works on the same markup.
+// explore serves /explore, the data explorer: the published aggregate snapshot
+// rendered as one row per (champion, role) cell, with the sample size and the
+// interval behind every rate and the whole artifact downloadable beside it.
+//
+// Like the tier list, it refuses to render at all when nothing has been
+// published: the difference between "no cell reached the floor" and "nothing
+// was measured" is the difference this site does not blur, so the answer is the
+// fault page that says so rather than an empty table.
+func (s *Server) explore(r *http.Request, path string) *response {
+	const route = "explore"
+	if refusal := s.requireSnapshot(r, route, path); refusal != nil {
+		return refusal
+	}
+	page, err := s.renderer.ExplorePage(r.URL.Query(), true)
+	if err != nil {
+		return s.errResponse(r, route, path, err)
+	}
+	return s.pageResponse(r, route, path, page)
+}
+
+// exploreExportCSV serves /explore/export.csv: the published tier-list artifact
+// projected to one row per cell. The projection is the download's own shape, and
+// the page that links it says so.
+func (s *Server) exploreExportCSV(r *http.Request, path string) *response {
+	const route = "explore-export-csv"
+	if refusal := s.requireSnapshot(r, route, path); refusal != nil {
+		return refusal
+	}
+	body, err := s.renderer.ExploreExportCSV(r.URL.Query())
+	if err != nil {
+		return s.exploreExportFault(r, route, path, err)
+	}
+	return &response{
+		status:       http.StatusOK,
+		body:         body,
+		contentType:  exploreCSVContentType,
+		cacheControl: artifactCacheControl,
+		route:        route,
+	}
+}
+
+// exploreExportJSON serves /explore/export.json: the published tier-list
+// artifact byte for byte, read from the root the snapshot was resolved from. It
+// is a route of this tier and not a window onto the published tree - there is no
+// route under /agg here, and this handler reads one file the route table chose,
+// never a path the request chose.
+func (s *Server) exploreExportJSON(r *http.Request, path string) *response {
+	const route = "explore-export-json"
+	if refusal := s.requireSnapshot(r, route, path); refusal != nil {
+		return refusal
+	}
+	body, err := s.renderer.ExploreExportJSON(r.URL.Query())
+	if err != nil {
+		return s.exploreExportFault(r, route, path, err)
+	}
+	return &response{
+		status:       http.StatusOK,
+		body:         body,
+		contentType:  jsonContentType,
+		cacheControl: artifactCacheControl,
+		route:        route,
+	}
+}
+
+// exploreExportFault renders a refused download. An export this tier will not
+// serve is a fault with a reason, not an error page with a stack: the reader
+// asked for the artifact and the answer says which part of that promise failed.
+func (s *Server) exploreExportFault(r *http.Request, route string, path string, err error) *response {
+	var refused *exploreExportError
+	if errors.As(err, &refused) {
+		return s.faultPage(r, route, path, refused.Status, refused.Kind, refused.Detail)
+	}
+	return s.errResponse(r, route, path, err)
+}
+
 // requireSnapshot is the guard the number-bearing routes run before they
 // render. A tier list or a matchup table is a claim about matches that were
 // played; with nothing published there is nothing to claim, and the difference
