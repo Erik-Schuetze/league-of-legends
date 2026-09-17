@@ -19,6 +19,7 @@ Last reviewed: **2026-09-17**. Next review due: **2026-12-17**.
 
 ```
 make compliance          # or: sh scripts/compliance-check.sh
+make compliance-gnu      # the same gate in a GNU userland, when docker is present
 ```
 
 `scripts/compliance-check.sh` is a POSIX `sh` script with no network access and
@@ -49,7 +50,7 @@ proves its pattern by requiring it to match in `internal/contract/contract.go`,
 where `puuid` genuinely appears. Check 10 refuses to pass when the fixtures have
 been deleted to silence it.
 
-The twelve checks, in the order the gate runs them:
+The thirteen checks, in the order the gate runs them:
 
 | # | Check | Fails when |
 | --- | --- | --- |
@@ -65,9 +66,30 @@ The twelve checks, in the order the gate runs them:
 | 9 | Nothing per-player is published | The artifact schema or a served JSON file carries a PUUID, summoner id, account id, Riot id or profile icon id, or the dist holds a raw-archive path |
 | 10 | Committed payloads carry no real player identifier | A fixture identifier is neither the reserved `fixture-` prefix nor the generator's reserved `FIXT` tagline, or the fixtures are deleted |
 | 11 | Every built page is a whole document | A built page is truncated, or loses the demo labelling that discloses its data state |
+| 12 | The scan harness cannot mistake its own standard input for a page | A scan that is handed an empty list of paths finds something anyway (grep answering from the runner's stdin), or a scan that is handed a real list finds nothing (a guard that has quietly stopped feeding grep). Both are harness faults that make every scan above report a result it did not earn |
 
 Each `PASS`/`FAIL` line names the number of files or pages the scan read, so a
 check that passed vacuously is visible in its own output.
+
+Check 12 exists because the scans have a portable-looking failure mode that only
+appears on the CI runner. They hand a NUL-delimited list of paths to
+`grep`, and an empty list is treated differently by the two implementations: GNU
+`xargs` (Ubuntu, CI) still runs the command once, so `grep -L pattern` executes
+with no file operands and reads its own **standard input**; BSD `xargs`/`grep`
+(macOS, this machine) read an empty stdin and stay silent. The observed
+consequence was a red CI run on a tree that passes locally: two scans over the
+live and no-data page lists, both empty because every built page is in the demo
+state at build time, reported a phantom `(standard input)` page as "carries no
+live banner" and "does not carry 'No sample yet'", and the job exited 2. It is
+also the dangerous direction in principle - a pattern that matched the runner's
+stdin would have turned a real violation into a pass - so the fix is structural
+rather than cosmetic: every scan that reads a list file goes through
+`list_grep`, which short-circuits the empty list, and check 12 asserts both halves
+of that behaviour. Because a green local run cannot show this class of defect,
+`make compliance-gnu` re-runs the same script in a GNU userland
+(`debian:12-slim`) when a container runtime is available, and says so when it
+skips. That target is a local verification aid and is not part of CI; the half of
+the control that runs everywhere is check 12.
 
 ## Amendment: checks 3 and 4, the dynamic-serving amendment
 
@@ -555,6 +577,22 @@ a compliance change, not a copy change.
   the amended gate must still reject, plus a page stripped of every `<script>`,
   which must pass. See "Amendment: checks 3 and 4, the dynamic-serving
   amendment" above. Both the gate and its controls run in CI.
+- **Check 12 and the GNU/BSD divergence were added on 2026-09-17**, after CI
+  run
+  [35251786691](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35251786691)
+  failed the compliance step on a tree that passes locally. The cause was a
+  pre-existing defect in the gate, not in the site: `xargs -0 grep -L` over an
+  empty path list reads the runner's stdin on GNU and reports `(standard input)`
+  as a page that lost its banner. Ten scan call sites now go through `list_grep`,
+  which short-circuits an empty list, and check 12 fails the gate if either an
+  empty list or a real list stops behaving. `make compliance-gnu` reproduces the
+  CI userland locally. Evidence: `bin/gnu-BEFORE.txt` (the old script under GNU
+  grep: `RESULT: FAIL - 2 launch-blocking violation(s)`, both `(standard input)`),
+  `bin/gnu-AFTER.txt` (`RESULT: PASS - 0 launch-blocking violations`) and
+  `bin/gnu-MUT1.txt` / `bin/gnu-MUT2.txt` (the two harness mutants, each rejected
+  by check 12). `scripts/compliance-negative-control.sh` gained a seventh control,
+  a demo page re-declared live with no live banner, which proves the `-L` scan
+  still fails on a genuinely bad page now that the empty list is short-circuited.
 - Three decisions were recorded: `docs/decisions/ADR-008-no-third-party-ingestion.md`,
   `ADR-009-operator-identity-and-governing-law.md` and
   `ADR-010-public-preview-posture.md`.

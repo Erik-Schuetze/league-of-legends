@@ -179,6 +179,25 @@ fi
 restore_page
 
 # ---------------------------------------------------------------------------
+printf '\ncontrol 6: a live page with no live banner fails (check 11, the scan the CI bug hid)\n'
+# This is the control for the defect that made CI red: check 11 hands a list of
+# paths to grep -L, and grep answered an empty list from its own standard input,
+# reporting "(standard input)" as a live page with no banner. The built tree has
+# no live page at all - every page is demo - so the non-empty half of that scan
+# never ran in CI, and a guard that had silently disabled it would have looked
+# identical. Declaring one demo page live, with the banner it would need missing,
+# is the case the scan exists for.
+if sed 's|data-state="demo"|data-state="live"|g' "$DIST/$plant_page" > "$SCRATCH/$plant_page" &&
+	grep -qF 'data-state="live"' "$SCRATCH/$plant_page" &&
+	! grep -qF 'state-banner--live' "$SCRATCH/$plant_page"; then
+	run_gate
+	fail_line 'live page(s) carry no live banner'
+else
+	bad 'the page could not be made into a live page without a live banner, so the control proved nothing'
+fi
+restore_page
+
+# ---------------------------------------------------------------------------
 printf '\n--- summary ---\n'
 if [ "$broken" -eq 0 ]; then
 	printf 'RESULT: PASS - %s negative control(s) held and 0 broken\n' "$controls"
