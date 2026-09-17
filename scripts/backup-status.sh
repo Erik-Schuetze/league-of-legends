@@ -28,6 +28,10 @@
 #   sh scripts/backup-status.sh                 # check, exit non-zero if stale
 #   sh scripts/backup-status.sh --keep          # leave the Job for inspection
 #   sh scripts/backup-status.sh --max-age-hours 50   # tolerate a longer cycle
+#   sh scripts/backup-status.sh --all-snapshots # list every snapshot, not just the
+#                                               # newest: "1 snapshots" in the
+#                                               # default output is what `--latest 1`
+#                                               # printed, not what the repository holds
 #
 # Exit code 0 means every check passed. Non-zero means at least one thing above
 # is missing, unreadable or older than the cycle. Output goes to
@@ -41,10 +45,12 @@ NS=lolstats
 NAME=backup-status
 MAX_AGE_HOURS=26
 KEEP=0
+SNAP_ALL=no
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --keep) KEEP=1 ;;
+    --all-snapshots) SNAP_ALL=yes ;;
     --max-age-hours) shift; MAX_AGE_HOURS="${1:-}" ;;
     --max-age-hours=*) MAX_AGE_HOURS="${1#*=}" ;;
     -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -130,6 +136,7 @@ sed -e "s|@@NAME@@|$NAME|g" \
     -e "s|@@PG_IMAGE@@|$POSTGRES_IMAGE|g" \
     -e "s|@@RESTIC_IMAGE@@|$RESTIC_IMAGE|g" \
     -e "s|@@MAX_AGE_HOURS@@|$MAX_AGE_HOURS|g" \
+    -e "s|@@SNAP_ALL@@|$SNAP_ALL|g" \
     -e "s|@@CUTOFF@@|$cutoff|g" <<'MANIFEST' | kubectl -n "$NS" apply -f - >"$WORK/job.create.txt" 2>&1 || {
 apiVersion: batch/v1
 kind: Job
@@ -255,6 +262,15 @@ spec:
                 exit 1
               fi
               restic snapshots --host "$host" --latest 1
+              if [ "${SNAP_ALL:-no}" = "yes" ]; then
+                # `--latest 1` above is a freshness check. The count below is
+                # the separate question a retention policy lives or dies on:
+                # is the repository accumulating one snapshot per night, or one?
+                all="$(restic snapshots --host "$host" --json | tr -d ' \n')"
+                n="$(printf '%s' "$all" | grep -o '"short_id"' | wc -l | tr -d ' ')"
+                echo "OK   snapshots held for host $host: $n"
+                restic snapshots --host "$host"
+              fi
               case "$RESTIC_REPOSITORY" in
                 /*) echo "OK   repository size on the volume: $(du -sh "$RESTIC_REPOSITORY" | cut -f1)" ;;
               esac
@@ -290,6 +306,8 @@ spec:
               value: "@@MAX_AGE_HOURS@@"
             - name: CUTOFF
               value: "@@CUTOFF@@"
+            - name: SNAP_ALL
+              value: "@@SNAP_ALL@@"
       volumes:
         - name: data
           persistentVolumeClaim:
