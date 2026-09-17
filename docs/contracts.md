@@ -286,13 +286,19 @@ A plain CSS file of custom properties, imported once by `BaseLayout.astro`. It
 declares exactly these names and no others at `:root`:
 
 ```
---bg-color: #efdbbf;  --bg-light: #f1eae0;
+--bg-color: #efdbbf;  --surface: #f1eae0;
 --primary-color: #0b162a;  --accent-color: #1b4bc6;  --text-color: #242a2b;
 --font-heading; --font-body; --font-mono;
 --grid-line: rgba(27, 75, 202, 0.06);  --grid-size: 27px;
 --border-width: 2px;  --shadow-offset-sm: 8px;  --shadow-offset-md: 12px;
 --radius: 0;
 ```
+
+`--surface` was `--bg-light` upstream: the design freeze renamed it
+(`internal/webtier/assets/css/DESIGN-FREEZE.md`), because the token is the raised
+surface fill and the served Go sheet is now the design authority. The name above
+is the frozen one; `web/src/styles/tokens.css` still spells it `--bg-light`, and
+`--fallback-bg-light` in the frozen sheet aliases it for that reason.
 
 No border radius anywhere. The focus ring is `0 0 0 2px var(--accent-color)`.
 That is a `box-shadow` value: `outline: var(--focus-ring)` is silently dropped by
@@ -697,43 +703,9 @@ package reported `SKIP`. A skip is a failure in CI, not a pass. The same two
 commands - `make duckdb` and then `make test-build` - are how a contributor runs
 that gate locally.
 
-Two more gates run in the same job, both added because they were passing for the
-wrong reason:
+One more gate runs in the same job, added because it was passing for the wrong
+reason:
 
-- **Render parity must not skip.** `make test-parity` builds the reference tree
-  (`make web-dist`) and then requires `TestRenderParity`,
-  `TestInteractiveRenderParity` and `TestFeedParity` to report `PASS`. While the
-  reference tree was built *after* the test step, all three called `t.Skip` and
-  gated nothing; a `SKIP` is a failure here, and `make test-parity
-  WEB_DIST_SKIP=1` is the negative control that proves it.
-
-  `make parity-mutation-control` proves the other half: that the comparison is
-  live. It renames one attribute in the reference page (`lang="en"` becomes
-  `lang="zz"` in `web/dist/index.html`), requires `make test-parity` to exit
-  non-zero, and requires the failure to be *that* mutation - the comparison
-  prints the first differing offset with the bytes either side, so `lang="zz"`
-  has to appear on the reference side of the `home` excerpt. It then restores the
-  page and checks the hash. It rewrites the reference tree in place, because the
-  test reads `../../web/dist` and has no override, so it runs last and alone; and
-  it deliberately does **not** assert that the unmutated tree passes, because
-  that is what `Test` in the build workflow asserts, and a control that re-asserted
-  it would report an unrelated parity break as this control's failure.
-
-  CI shows the gate is now load-bearing. Run
-  [35269826778](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35269826778)
-  executes `TestRenderParity` and fails it on a design-token rename in the served
-  sheet - `parity_test.go:160: render mismatch for home (35481 reference bytes,
-  35570 rendered bytes)`, and the same for the other ten routes plus
-  `TestInteractiveRenderParity` - on a commit that the old ordering would have
-  passed with all three tests skipping.
-
-  Two consequences follow, and both are visible in the ownership map below
-  rather than being this document's to decide. The reference tree is `web/dist`:
-  (a) a change to the served design layer has to move the Astro side with it, or
-  the gate is red - correctly, because the two renderers are meant to be
-  byte-identical while the reference exists; and (b) removing `web/**` makes every
-  parity test skip, which `make test-parity` reports as a failure, so the
-  retirement commit has to land its replacement baseline in the same change.
 - **The serving contract and the compliance gate.** `make verify-serving-local`
   starts the tier over the checked-in fixture tree and again over a deliberately
   corrupt aggregate root, and `make compliance` plus `make
@@ -750,6 +722,18 @@ test failure stops the job before either produces a result - which is what
 happened on 2026-09-17, when a parity mismatch in a design layer that is not this
 lane's left the compliance result unwritten. One definition of each gate, two
 independent signals about it.
+
+The **render-parity gate was retired on 2026-09-17**, together with its live
+variant and its mutation control. It required the Go tier's rendered bytes to
+equal those of `web/dist` - the Astro build of the tree this tier replaced - and
+the served design layer had, deliberately and by recorded decision, diverged from
+that tree in three ways: the frozen CSS layer inlined into every document (14,178
+raw / 5,015 gzip bytes, `DESIGN-FREEZE.md` §"Selector budget"), the `--bg-light`
+-> `--surface` rename recorded in section 3 above, and one added nav entry. A
+byte comparison against a retired tree cannot be a pass/fail gate for the tree
+that superseded it, so the gate was deleted rather than mirrored. `web/dist` is
+still built, because the compliance gate above scans it; nothing compares the two
+renderers any more, and the Go tier is the design authority.
 
 ## 6. Ownership map
 

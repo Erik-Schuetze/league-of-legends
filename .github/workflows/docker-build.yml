@@ -61,13 +61,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # The reference tree has to exist before any test runs: the parity tests in
-      # internal/webtier compare the Go tier's HTML against web/dist and call
-      # t.Skip when it is absent. While this step sat after `make test-race`, the
-      # three tests that prove the redesign is faithful reported SKIP and gated
-      # nothing. Building here, and asserting the tests really ran in
-      # `make test-parity` below, is what closes that hole. `make web-dist` also
-      # installs web/node_modules with npm ci when it is missing.
+      # The compliance gate below scans the build the site publishes, so the
+      # reference tree has to exist before that step: scripts/compliance-check.sh
+      # reads web/dist by default and fails closed when it is missing, and its
+      # negative control copies the tree to plant violations in. `make web-dist`
+      # also installs web/node_modules with npm ci when it is missing.
       - name: Build the Astro reference tree (web/dist)
         run: make web-dist
 
@@ -79,12 +77,6 @@ jobs:
 
       - name: Test
         run: make test-race
-
-      # Render parity, fail-closed: the three parity tests must report PASS. A
-      # SKIP is a failure here, because a parity test that does not run proves
-      # nothing about the Go tier that replaced the pre-rendered site.
-      - name: Render parity (must not skip)
-        run: make test-parity
 
       # The end-to-end analytics tests in internal/aggregate need the pinned
       # DuckDB CLI, and they skip themselves rather than fail when it is absent.

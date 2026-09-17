@@ -317,10 +317,10 @@ migrate:
 
 # ---- end additions: deploy-time migration ----
 
-# ---- additions: gates lane (web reference build + fail-closed render parity) ----
+# ---- additions: gates lane (web reference build + serving and compliance gates) ----
 # Appended at the end, and declared on its own .PHONY line, so this addition
 # stays append-only like the blocks above it.
-.PHONY: web-deps web-dist test-parity parity-mutation-control verify-serving verify-serving-local compliance-negative-control compliance-gnu compliance-served capture-served-pages
+.PHONY: web-deps web-dist verify-serving verify-serving-local compliance-negative-control compliance-gnu compliance-served capture-served-pages
 
 # `web-install` runs `npm ci` unconditionally, which is right for a clean build
 # and wasteful for a second `make` in the same checkout. This target only
@@ -333,24 +333,18 @@ web-deps:
 		cd web && npm ci; \
 	fi
 
-# Builds the Astro reference tree in web/dist, which is what the parity tests
-# compare the Go tier's rendering against (internal/webtier/parity_test.go
-# reads ../../web/dist). Skips the rebuild when web/dist is newer than every
-# input, so `make test-parity` twice in a row does not rebuild twice; the stamp
-# lives inside the ignored web/dist.
+# Builds the Astro reference tree in web/dist. It is the input the launch-blocking
+# compliance gates scan: scripts/compliance-check.sh reads web/dist unless
+# LOLSTATS_DIST says otherwise and refuses to run at all without it, and
+# compliance-negative-control.sh copies it to plant its violations in. It used to
+# be the reference the retired byte-parity tests compared against as well - that
+# gate is gone (docs/contracts.md section 5), this build is not, because the
+# compliance gates still consume it.
 #
-# `make test-parity WEB_DIST_SKIP=1` is the negative control for the gate below:
-# it leaves the reference tree out, so the parity tests skip, and the gate has
-# to fail instead of reporting a pass over tests that never ran. With web/dist
-# moved aside it reproduces the CI ordering defect exactly.
-WEB_DIST_STAMP := web/dist/.make-web-dist.stamp
-
+# Skips the rebuild when web/dist is newer than every input; the stamp lives
+# inside the ignored web/dist.
 web-dist: web-deps
-	@if [ "$(WEB_DIST_SKIP)" = 1 ]; then \
-		echo "web-dist skipped on purpose (WEB_DIST_SKIP=1): the parity gate below must fail closed"; \
-		exit 0; \
-	fi; \
-	stamp="$(CURDIR)/$(WEB_DIST_STAMP)"; \
+	@stamp="$(CURDIR)/web/dist/.make-web-dist.stamp"; \
 	stale=yes; \
 	if [ -f "$$stamp" ] && [ -f web/dist/index.html ]; then \
 		if [ -z "$$(find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json -newer "$$stamp" -print -quit 2>/dev/null)" ]; then \
@@ -361,44 +355,10 @@ web-dist: web-deps
 		echo "web/dist is absent or older than web/ inputs: building (npm run build)"; \
 		( cd web && npm run build ) || exit 1; \
 		[ -f web/dist/index.html ] || { echo "npm run build produced no web/dist/index.html" >&2; exit 1; }; \
-		mkdir -p "$(dir $(WEB_DIST_STAMP))"; : > "$$stamp"; \
+		mkdir -p "$(dir web/dist/.make-web-dist.stamp)"; : > "$$stamp"; \
 	else \
-		echo "web/dist is up to date: $(WEB_DIST_STAMP)"; \
+		echo "web/dist is up to date: web/dist/.make-web-dist.stamp"; \
 	fi
-
-# The render-parity gate. internal/webtier/parity_test.go compares the Go tier's
-# HTML against the Astro reference tree and calls t.Skip when web/dist is not
-# present - which is exactly what happened in CI while the workflow ran
-# `make test-race` before `npm run build`, so three tests that prove the
-# redesign is faithful gated nothing at all. This target is the fix: it builds
-# the reference tree first, then requires that each named parity test reported
-# PASS and that nothing in the run skipped. Modelled on `test-build` above,
-# including carrying the exit status out of the pipeline in a file.
-test-parity: web-dist
-	@log="$(CURDIR)/bin/test-parity.log"; statusfile="$$log.status"; \
-	{ go test -race -count=1 -v \
-		-run 'TestRenderParity|TestInteractiveRenderParity|TestFeedParity' \
-		./internal/webtier/... 2>&1; echo $$? > "$$statusfile"; } | tee "$$log"; \
-	status=$$(cat "$$statusfile"); rm -f "$$statusfile"; \
-	if [ "$$status" -ne 0 ]; then \
-		echo "FAIL: go test exited $$status; full output in $$log" >&2; \
-		exit 1; \
-	fi; \
-	if grep -qE '(^|[[:space:]])--- SKIP:' "$$log"; then \
-		echo "FAIL: a parity test skipped; this gate does not accept a skip:" >&2; \
-		grep -E '(^|[[:space:]])--- SKIP:' "$$log" >&2; \
-		echo "      the reference tree in web/dist is what the tests compare against; build it" >&2; \
-		echo "      first (make web-dist), and never run this gate with the tree absent" >&2; \
-		exit 1; \
-	fi; \
-	for t in TestRenderParity TestInteractiveRenderParity TestFeedParity; do \
-		if ! grep -qE "^--- PASS: $$t( |$$)" "$$log"; then \
-			echo "FAIL: $$t did not report PASS." >&2; \
-			echo "      A parity test that does not run proves nothing; full output in $$log" >&2; \
-			exit 1; \
-		fi; \
-	done; \
-	echo "ok: TestRenderParity, TestInteractiveRenderParity and TestFeedParity PASSed against web/dist and nothing skipped"
 
 # The serving-contract gate for the deployed tier: /healthz, /metrics, the HTML
 # cache/ETag/304 policy, the Data Dragon static policy and the 503 + visible
@@ -460,16 +420,6 @@ verify-serving-local: build
 # rejects each of them, with a page stripped of every <script> passing.
 compliance-negative-control:
 	sh scripts/compliance-negative-control.sh
-
-# The negative control for the parity gate: change one rendering input in the
-# reference page and require the gate to fail, so `test-parity` cannot rot into a
-# comparison that passes over anything. It rewrites web/dist/index.html in place
-# (internal/webtier/parity_test.go reads the reference tree from a fixed path and
-# has no override), so it runs last and alone - no other target may read the
-# reference tree while it is mutated. The restore is on a trap and is checked by
-# hash, and a backup left by an interrupted run is validated before it is used.
-parity-mutation-control:
-	@sh scripts/parity-mutation-control.sh
 
 # Capture the HTML a running tier serves into bin/served-pages. Point it at the
 # cluster through the same port-forward the serving contract uses:
