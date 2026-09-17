@@ -1,6 +1,15 @@
 # ADR-010: A labelled public preview while the production key application is pending
 
-- Status: accepted
+> **SUPERSEDED 2026-09-17 by owner decisions D-1 and D-4.** The owner answered
+> plan question 6 and chose the opposite posture: real crawled Riot match data
+> from his **development** key is published and **the site serves it** (D-1),
+> deliberately, behind the existing password gate; and the compliance workstream
+> is **waived** (D-4). The decision text below is kept unchanged as the record of
+> what held until that date; it is no longer the posture the site deploys. The
+> value that now holds is in `deploy/base/web/go-deployment.yaml`. Register
+> entries: `docs/compliance.md`, checkpoint 1 next step and gap 6.
+
+- Status: Superseded (2026-09-17)
 - Date: 2026-09-17
 - Decision: new; interprets R2 and answers plan open question 6
 
