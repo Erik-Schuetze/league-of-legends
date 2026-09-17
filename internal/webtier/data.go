@@ -36,7 +36,7 @@ const regenerateHint = `Run "npm run data:champions" to regenerate it from Data 
 func (l *Loader) checkedInData(name string) ([]byte, string, error) {
 	if dir := l.opts.DataDir; dir != "" {
 		path := filepath.Join(dir, name)
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(path) // #nosec G304 -- dir is the operator's data directory, name is a fixed checked-in file name
 		if err == nil {
 			return raw, path, nil
 		}

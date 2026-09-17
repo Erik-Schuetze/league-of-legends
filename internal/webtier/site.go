@@ -84,11 +84,10 @@ type Site struct {
 
 	ddragonVersion string
 
-	checkedInChampions *aggmodel.StaticChampions
-	artifactChampions  []aggmodel.StaticChampion
-	champions          []aggmodel.StaticChampion
-	championByID       map[int]aggmodel.StaticChampion
-	championBySlug     map[string]aggmodel.StaticChampion
+	artifactChampions []aggmodel.StaticChampion
+	champions         []aggmodel.StaticChampion
+	championByID      map[int]aggmodel.StaticChampion
+	championBySlug    map[string]aggmodel.StaticChampion
 }
 
 // ---------------------------------------------------------------------------

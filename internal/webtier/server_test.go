@@ -1,6 +1,7 @@
 package webtier
 
 import (
+	"bytes"
 	"compress/gzip"
 	"io"
 	"io/fs"
@@ -59,24 +60,46 @@ func fixtureDir() string {
 	return filepath.Join(root, "web", "src", "fixtures")
 }
 
-// get performs a request and returns the response, closing it on cleanup.
-func get(t *testing.T, live *httptest.Server, path string) *http.Response {
-	t.Helper()
-	resp, err := live.Client().Get(live.URL + path)
-	if err != nil {
-		t.Fatalf("GET %s: %v", path, err)
-	}
-	t.Cleanup(func() { _ = resp.Body.Close() })
-	return resp
+// httpResult is a request's whole answer: the status, the headers and the bytes.
+// The helpers below read the body and release the connection before returning,
+// so a test cannot leak one, and a body is read exactly once - which is what
+// the assertions want anyway, since nothing here streams.
+type httpResult struct {
+	status int
+	header http.Header
+	body   []byte
 }
 
-func body(t *testing.T, resp *http.Response) string {
+func (r httpResult) text() string { return string(r.body) }
+
+// get issues a plain GET.
+func get(t *testing.T, live *httptest.Server, path string) httpResult {
 	t.Helper()
+	return request(t, live, http.MethodGet, path, nil)
+}
+
+// request issues one request with the given method and headers.
+func request(t *testing.T, live *httptest.Server, method, path string, header http.Header) httpResult {
+	t.Helper()
+	req, err := http.NewRequest(method, live.URL+path, nil)
+	if err != nil {
+		t.Fatalf("%s %s: new request: %v", method, path, err)
+	}
+	for name, values := range header {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
+	resp, err := live.Client().Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("read body: %v", err)
+		t.Fatalf("read the body of %s: %v", path, err)
 	}
-	return string(raw)
+	return httpResult{status: resp.StatusCode, header: resp.Header.Clone(), body: raw}
 }
 
 // TestRouteStatuses walks every route family the tier serves. The statuses are
@@ -129,8 +152,8 @@ func TestRouteStatuses(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.path, func(t *testing.T) {
 			resp := get(t, live, testCase.path)
-			if resp.StatusCode != testCase.status {
-				t.Fatalf("GET %s: status = %d, want %d", testCase.path, resp.StatusCode, testCase.status)
+			if resp.status != testCase.status {
+				t.Fatalf("GET %s: status = %d, want %d", testCase.path, resp.status, testCase.status)
 			}
 		})
 	}
@@ -143,7 +166,7 @@ func TestNotFoundIsAVisiblePage(t *testing.T) {
 	t.Parallel()
 	_, live := newTestServer(t, fixtureOptions())
 	resp := get(t, live, "/tier-list/notarole")
-	page := body(t, resp)
+	page := resp.text()
 
 	for _, want := range []string{
 		`data-fault="not-found"`,
@@ -159,10 +182,10 @@ func TestNotFoundIsAVisiblePage(t *testing.T) {
 	if strings.Contains(page, "404 page not found") {
 		t.Error("the 404 page is the runtime's default text, not the site's page")
 	}
-	if got := resp.Header.Get("Cache-Control"); got != noStoreCacheControl {
+	if got := resp.header.Get("Cache-Control"); got != noStoreCacheControl {
 		t.Errorf("Cache-Control on a 404 = %q, want %q", got, noStoreCacheControl)
 	}
-	if got := resp.Header.Get("ETag"); got != "" {
+	if got := resp.header.Get("ETag"); got != "" {
 		t.Errorf("a 404 carries an entity tag (%q); a fault must not be replayable from a cache", got)
 	}
 }
@@ -186,10 +209,10 @@ func TestMissingArtifactIs503WithAPage(t *testing.T) {
 	})
 
 	resp := get(t, live, "/tier-list/mid")
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	if resp.status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.status, http.StatusServiceUnavailable)
 	}
-	page := body(t, resp)
+	page := resp.text()
 	for _, want := range []string{
 		`data-fault="artifact"`,
 		`data-status="503"`,
@@ -200,15 +223,15 @@ func TestMissingArtifactIs503WithAPage(t *testing.T) {
 			t.Errorf("the 503 page does not contain %q", want)
 		}
 	}
-	if got := resp.Header.Get("Cache-Control"); got != noStoreCacheControl {
+	if got := resp.header.Get("Cache-Control"); got != noStoreCacheControl {
 		t.Errorf("Cache-Control on a 503 = %q, want %q", got, noStoreCacheControl)
 	}
-	if got := resp.Header.Get("Retry-After"); got != "60" {
+	if got := resp.header.Get("Retry-After"); got != "60" {
 		t.Errorf("Retry-After on a 503 = %q, want 60", got)
 	}
 
 	// /readyz reports the same fault, so a Deployment can act on it.
-	ready := body(t, get(t, live, "/readyz"))
+	ready := get(t, live, "/readyz").text()
 	if !strings.Contains(ready, `"ok":false`) || !strings.Contains(ready, FaultArtifact) {
 		t.Errorf("/readyz does not report the artifact fault: %s", ready)
 	}
@@ -241,10 +264,10 @@ func TestUnknownSchemaFailsClosed(t *testing.T) {
 	})
 
 	resp := get(t, live, "/tier-list/mid")
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	if resp.status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.status, http.StatusServiceUnavailable)
 	}
-	page := body(t, resp)
+	page := resp.text()
 	if !strings.Contains(page, `data-fault="schema"`) {
 		t.Errorf("the page does not name the schema fault: %s", firstLine(page))
 	}
@@ -266,21 +289,21 @@ func TestNoSnapshotIs503AndTheSiteStillRenders(t *testing.T) {
 	})
 
 	resp := get(t, live, "/tier-list/mid")
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("/tier-list/mid status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	if resp.status != http.StatusServiceUnavailable {
+		t.Fatalf("/tier-list/mid status = %d, want %d", resp.status, http.StatusServiceUnavailable)
 	}
-	if page := body(t, resp); !strings.Contains(page, `data-fault="no-snapshot"`) {
+	if page := resp.text(); !strings.Contains(page, `data-fault="no-snapshot"`) {
 		t.Errorf("the 503 page does not name the no-snapshot state: %s", firstLine(page))
 	}
 
 	// The pages that describe the site itself are not blocked by the absence
 	// of a snapshot: they have real content of their own.
 	for _, path := range []string{"/", "/about", "/disclaimer", "/legal/terms", "/legal/privacy"} {
-		if status := get(t, live, path).StatusCode; status != http.StatusOK {
+		if status := get(t, live, path).status; status != http.StatusOK {
 			t.Errorf("GET %s with no snapshot: status = %d, want 200", path, status)
 		}
 	}
-	if ready := body(t, get(t, live, "/readyz")); !strings.Contains(ready, `"ok":true`) {
+	if ready := get(t, live, "/readyz").text(); !strings.Contains(ready, `"ok":true`) {
 		t.Errorf("/readyz with no snapshot should be ready (the tier serves what it has): %s", ready)
 	}
 }
@@ -315,13 +338,13 @@ func TestCachePolicyPerRouteClass(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.path, func(t *testing.T) {
 			resp := get(t, live, testCase.path)
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("GET %s: status = %d, want 200", testCase.path, resp.StatusCode)
+			if resp.status != http.StatusOK {
+				t.Fatalf("GET %s: status = %d, want 200", testCase.path, resp.status)
 			}
-			if got := resp.Header.Get("Cache-Control"); got != testCase.want {
+			if got := resp.header.Get("Cache-Control"); got != testCase.want {
 				t.Errorf("Cache-Control = %q, want %q", got, testCase.want)
 			}
-			if strings.Contains(strings.ToLower(resp.Header.Get("Cache-Control")), "public") &&
+			if strings.Contains(strings.ToLower(resp.header.Get("Cache-Control")), "public") &&
 				strings.HasPrefix(testCase.path, "/tier-list") {
 				t.Error("gated HTML must not be publicly cacheable")
 			}
@@ -336,28 +359,19 @@ func TestGzipRoundTripAndVary(t *testing.T) {
 	_, live := newTestServer(t, fixtureOptions())
 
 	identity := get(t, live, "/tier-list/mid")
-	wantBody := body(t, identity)
-	if got := identity.Header.Get("Vary"); !strings.Contains(got, "Accept-Encoding") {
+	wantBody := string(identity.body)
+	if got := identity.header.Get("Vary"); !strings.Contains(got, "Accept-Encoding") {
 		t.Errorf("Vary = %q, want it to name Accept-Encoding", got)
 	}
-	if identity.Header.Get("Content-Encoding") != "" {
+	if identity.header.Get("Content-Encoding") != "" {
 		t.Error("a client that did not ask for gzip was served a compressed body")
 	}
 
-	request, err := http.NewRequest(http.MethodGet, live.URL+"/tier-list/mid", nil)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
+	compressed := request(t, live, http.MethodGet, "/tier-list/mid", http.Header{"Accept-Encoding": {"gzip"}})
+	if compressed.header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", compressed.header.Get("Content-Encoding"))
 	}
-	request.Header.Set("Accept-Encoding", "gzip")
-	resp, err := live.Client().Do(request)
-	if err != nil {
-		t.Fatalf("GET with gzip: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.Header.Get("Content-Encoding") != "gzip" {
-		t.Fatalf("Content-Encoding = %q, want gzip", resp.Header.Get("Content-Encoding"))
-	}
-	reader, err := gzip.NewReader(resp.Body)
+	reader, err := gzip.NewReader(bytes.NewReader(compressed.body))
 	if err != nil {
 		t.Fatalf("gzip reader: %v", err)
 	}
@@ -369,14 +383,21 @@ func TestGzipRoundTripAndVary(t *testing.T) {
 		t.Fatalf("the gzip body decompresses to %d bytes, want the identity body's %d",
 			len(decoded), len(wantBody))
 	}
-	if size := resp.Header.Get("Content-Length"); size != strconv.Itoa(len(decoded)) &&
-		size != strconv.Itoa(len(decoded)) && size == strconv.Itoa(len(wantBody)) {
-		t.Errorf("Content-Length = %s, which is the identity length, not the compressed one", size)
+	// The length has to describe the represented entity, which is the
+	// compressed one: a Content-Length equal to the identity length would make
+	// an intermediary read the body short.
+	if size := compressed.header.Get("Content-Length"); size != strconv.Itoa(len(compressed.body)) {
+		t.Errorf("Content-Length = %s, want the compressed length %d (identity is %d)",
+			size, len(compressed.body), len(wantBody))
+	}
+	if len(compressed.body) >= len(wantBody) {
+		t.Errorf("the compressed body is %d bytes and the identity one is %d, so this response was not compressed",
+			len(compressed.body), len(wantBody))
 	}
 
 	// The compressed representation is weaker than the identity one and the
 	// tag says so, which is what makes a 304 under either encoding correct.
-	if tag := resp.Header.Get("ETag"); !strings.HasPrefix(tag, `W/"`) {
+	if tag := compressed.header.Get("ETag"); !strings.HasPrefix(tag, `W/"`) {
 		t.Errorf("ETag under gzip = %q, want a weak tag", tag)
 	}
 }
@@ -390,32 +411,23 @@ func TestETagThen304(t *testing.T) {
 	for _, path := range []string{"/tier-list/mid", "/agg/v1/manifest.json", "/sitemap.xml"} {
 		t.Run(path, func(t *testing.T) {
 			first := get(t, live, path)
-			tag := first.Header.Get("ETag")
+			tag := first.header.Get("ETag")
 			if tag == "" {
 				t.Fatalf("GET %s carries no entity tag", path)
 			}
 
-			request, err := http.NewRequest(http.MethodGet, live.URL+path, nil)
-			if err != nil {
-				t.Fatalf("new request: %v", err)
+			second := request(t, live, http.MethodGet, path, http.Header{"If-None-Match": {tag}})
+			if second.status != http.StatusNotModified {
+				t.Fatalf("conditional GET of %s: status = %d, want 304", path, second.status)
 			}
-			request.Header.Set("If-None-Match", tag)
-			second, err := live.Client().Do(request)
-			if err != nil {
-				t.Fatalf("conditional GET: %v", err)
-			}
-			defer func() { _ = second.Body.Close() }()
-			if second.StatusCode != http.StatusNotModified {
-				t.Fatalf("conditional GET of %s: status = %d, want 304", path, second.StatusCode)
-			}
-			if payload := body(t, second); payload != "" {
+			if payload := second.text(); payload != "" {
 				t.Errorf("the 304 carried %d bytes of body", len(payload))
 			}
-			if got := second.Header.Get("ETag"); got != tag {
+			if got := second.header.Get("ETag"); got != tag {
 				t.Errorf("the 304's ETag = %q, want the original %q", got, tag)
 			}
-			if got := second.Header.Get("Cache-Control"); got != first.Header.Get("Cache-Control") {
-				t.Errorf("the 304's Cache-Control = %q, want %q", got, first.Header.Get("Cache-Control"))
+			if got := second.header.Get("Cache-Control"); got != first.header.Get("Cache-Control") {
+				t.Errorf("the 304's Cache-Control = %q, want %q", got, first.header.Get("Cache-Control"))
 			}
 		})
 	}
@@ -429,22 +441,14 @@ func TestMethodNotAllowed(t *testing.T) {
 
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		t.Run(method, func(t *testing.T) {
-			request, err := http.NewRequest(method, live.URL+"/tier-list/mid", nil)
-			if err != nil {
-				t.Fatalf("new request: %v", err)
+			resp := request(t, live, method, "/tier-list/mid", nil)
+			if resp.status != http.StatusMethodNotAllowed {
+				t.Fatalf("status = %d, want 405", resp.status)
 			}
-			resp, err := live.Client().Do(request)
-			if err != nil {
-				t.Fatalf("%s: %v", method, err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusMethodNotAllowed {
-				t.Fatalf("status = %d, want 405", resp.StatusCode)
-			}
-			if allow := resp.Header.Get("Allow"); allow != "GET, HEAD" {
+			if allow := resp.header.Get("Allow"); allow != "GET, HEAD" {
 				t.Errorf("Allow = %q, want GET, HEAD", allow)
 			}
-			if page := body(t, resp); !strings.Contains(page, `data-fault="method"`) {
+			if page := resp.text(); !strings.Contains(page, `data-fault="method"`) {
 				t.Errorf("the 405 is not a visible page: %s", firstLine(page))
 			}
 		})
@@ -462,14 +466,14 @@ func TestAggIsServedFromTheSnapshotRoot(t *testing.T) {
 		t.Fatalf("read the fixture manifest: %v", err)
 	}
 	resp := get(t, live, "/agg/v1/manifest.json")
-	if got := body(t, resp); got != string(raw) {
+	if got := resp.text(); got != string(raw) {
 		t.Errorf("/agg/v1/manifest.json is not the artifact byte for byte (%d bytes vs %d)", len(got), len(raw))
 	}
 
 	// A traversal is refused, and it is refused as a path rather than by
 	// accidentally landing on a missing file.
 	for _, path := range []string{"/agg/%2e%2e/%2e%2e/etc/passwd", "/agg/v1/..", "/agg//manifest.json"} {
-		if status := get(t, live, path).StatusCode; status != http.StatusNotFound {
+		if status := get(t, live, path).status; status != http.StatusNotFound {
 			t.Errorf("GET %s: status = %d, want 404", path, status)
 		}
 	}
@@ -481,18 +485,18 @@ func TestHealthMetricsAndReady(t *testing.T) {
 	t.Parallel()
 	_, live := newTestServer(t, fixtureOptions())
 
-	if got := body(t, get(t, live, "/healthz")); got != "ok" {
+	if got := get(t, live, "/healthz").text(); got != "ok" {
 		t.Errorf("/healthz = %q, want ok", got)
 	}
 	ready := get(t, live, "/readyz")
-	if ready.StatusCode != http.StatusOK {
-		t.Fatalf("/readyz status = %d, want 200", ready.StatusCode)
+	if ready.status != http.StatusOK {
+		t.Fatalf("/readyz status = %d, want 200", ready.status)
 	}
-	if !strings.Contains(body(t, ready), `"latest_patch":"16.18"`) {
+	if !strings.Contains(ready.text(), `"latest_patch":"16.18"`) {
 		t.Error("/readyz does not name the latest patch")
 	}
 
-	scrape := body(t, get(t, live, "/metrics"))
+	scrape := get(t, live, "/metrics").text()
 	for _, want := range []string{
 		"lolstats_web_requests_total",
 		"lolstats_web_render_seconds",
@@ -513,8 +517,8 @@ func TestNoJSInteractivity(t *testing.T) {
 	_, live := newTestServer(t, fixtureOptions())
 
 	t.Run("sort and direction", func(t *testing.T) {
-		ascending := body(t, get(t, live, "/tier-list/mid?sort=n&dir=asc&per=10"))
-		descending := body(t, get(t, live, "/tier-list/mid?sort=n&dir=desc&per=10"))
+		ascending := get(t, live, "/tier-list/mid?sort=n&dir=asc&per=10").text()
+		descending := get(t, live, "/tier-list/mid?sort=n&dir=desc&per=10").text()
 
 		until := func(page string) []string {
 			matches := regexp.MustCompile(`data-v-n="(\d+)"`).FindAllStringSubmatch(page, -1)
@@ -544,20 +548,20 @@ func TestNoJSInteractivity(t *testing.T) {
 	})
 
 	t.Run("filter", func(t *testing.T) {
-		filtered := body(t, get(t, live, "/tier-list/mid?q=zeri"))
+		filtered := get(t, live, "/tier-list/mid?q=zeri").text()
 		if count := strings.Count(filtered, "data-search="); count != 1 {
 			t.Fatalf("?q=zeri returned %d rows, want 1", count)
 		}
 		if !strings.Contains(filtered, `data-v-champion="Zeri"`) {
 			t.Error("?q=zeri did not return Zeri's row")
 		}
-		if none := body(t, get(t, live, "/tier-list/mid?q=zzzz")); strings.Count(none, "data-search=") != 0 {
+		if none := get(t, live, "/tier-list/mid?q=zzzz").text(); strings.Count(none, "data-search=") != 0 {
 			t.Error("a filter that matches nothing returned rows")
 		}
 	})
 
 	t.Run("pagination", func(t *testing.T) {
-		second := body(t, get(t, live, "/tier-list/mid?per=10&page=2&sort=n&dir=asc"))
+		second := get(t, live, "/tier-list/mid?per=10&page=2&sort=n&dir=asc").text()
 		if count := strings.Count(second, "data-search="); count != 10 {
 			t.Fatalf("page 2 with per=10 returned %d rows, want 10", count)
 		}
@@ -575,7 +579,7 @@ func TestNoJSInteractivity(t *testing.T) {
 	})
 
 	t.Run("filter bar is a plain GET form", func(t *testing.T) {
-		page := body(t, get(t, live, "/tier-list/mid"))
+		page := get(t, live, "/tier-list/mid").text()
 		if !strings.Contains(page, `action="/tier-list/mid"`) || !strings.Contains(page, `method="get"`) {
 			t.Error("the filter bar is not a GET form pointing at the current route")
 		}
@@ -588,7 +592,7 @@ func TestNoJSInteractivity(t *testing.T) {
 		// Both champions have a published cell in the mid fixture, so the
 		// panel has to show the same cell the table shows, twice over: once in
 		// its own row and once in the panel's.
-		page := body(t, get(t, live, "/tier-list/mid?compare=xerath&compare=zeri"))
+		page := get(t, live, "/tier-list/mid?compare=xerath&compare=zeri").text()
 		if !strings.Contains(page, `class="fallback-compare"`) {
 			t.Fatal("?compare= did not render the compare panel")
 		}
@@ -603,7 +607,7 @@ func TestNoJSInteractivity(t *testing.T) {
 
 		// A champion with no published cell is named rather than invented: the
 		// panel says what is missing instead of rendering a row of dashes.
-		missing := body(t, get(t, live, "/tier-list/mid?compare=xerath&compare=nosuchchampion"))
+		missing := get(t, live, "/tier-list/mid?compare=xerath&compare=nosuchchampion").text()
 		if !strings.Contains(missing, "Comparing Xerath, nosuchchampion") {
 			t.Error("the panel does not name the champion it could not resolve")
 		}
@@ -617,23 +621,23 @@ func TestNoJSInteractivity(t *testing.T) {
 		// Both spellings of a comparison - repeated parameters and a comma
 		// list - have to resolve to the same panel, because both are urls a
 		// reader can write by hand.
-		if comma := body(t, get(t, live, "/tier-list/mid?compare=xerath,zeri")); comma != body(t, get(t, live, "/tier-list/mid?compare=xerath&compare=zeri")) {
+		if comma := get(t, live, "/tier-list/mid?compare=xerath,zeri").text(); comma != get(t, live, "/tier-list/mid?compare=xerath&compare=zeri").text() {
 			t.Error("?compare=a,b and ?compare=a&compare=b do not render the same panel")
 		}
 	})
 
 	t.Run("patch switching", func(t *testing.T) {
 		// The switcher is a list of links, and each one is the archive route.
-		page := body(t, get(t, live, "/tier-list/mid"))
+		page := get(t, live, "/tier-list/mid").text()
 		if !strings.Contains(page, `href="/patch/16.17/tier-list/mid"`) {
 			t.Error("the patch switcher does not link to the archived patch's tier list")
 		}
-		archived := body(t, get(t, live, "/patch/16.17/tier-list/mid"))
+		archived := get(t, live, "/patch/16.17/tier-list/mid").text()
 		if !strings.Contains(archived, "16.17") {
 			t.Error("the archived page does not name its patch")
 		}
 		// Both spellings of the same view resolve to the same renderer.
-		viaQuery := body(t, get(t, live, "/tier-list/mid?patch=16.17"))
+		viaQuery := get(t, live, "/tier-list/mid?patch=16.17").text()
 		if strings.TrimSpace(viaQuery) != strings.TrimSpace(archived) {
 			t.Errorf("?patch=16.17 and /patch/16.17/tier-list/mid produced different pages (%d vs %d bytes)",
 				len(viaQuery), len(archived))
@@ -641,8 +645,8 @@ func TestNoJSInteractivity(t *testing.T) {
 	})
 
 	t.Run("query parameters do not change the default page", func(t *testing.T) {
-		def := body(t, get(t, live, "/tier-list/mid"))
-		explicit := body(t, get(t, live, "/tier-list/mid?sort=win_rate&dir=desc&page=1"))
+		def := get(t, live, "/tier-list/mid").text()
+		explicit := get(t, live, "/tier-list/mid?sort=win_rate&dir=desc&page=1").text()
 		if strings.TrimSpace(explicit) != strings.TrimSpace(def) {
 			t.Error("spelling out the default sort produced a different page, so the default view has two addresses")
 		}
@@ -655,11 +659,11 @@ func TestChampionPagesAreRenderedPerRole(t *testing.T) {
 	t.Parallel()
 	_, live := newTestServer(t, fixtureOptions())
 
-	overview := body(t, get(t, live, "/champions/azir"))
+	overview := get(t, live, "/champions/azir").text()
 	if !strings.Contains(overview, "Azir") {
 		t.Error("the overview does not name the champion")
 	}
-	role := body(t, get(t, live, "/champions/azir/mid"))
+	role := get(t, live, "/champions/azir/mid").text()
 	for _, want := range []string{"Azir", "mid"} {
 		if !strings.Contains(role, want) {
 			t.Errorf("the role page does not contain %q", want)
@@ -680,10 +684,10 @@ func TestUnpublishedSnapshotIs404ForArtifactsAnd503ForPages(t *testing.T) {
 		FixturesMode: FixturesOff,
 		DataDir:      fixtureDataDir(),
 	})
-	if status := get(t, live, "/agg/v1/manifest.json").StatusCode; status != http.StatusServiceUnavailable {
+	if status := get(t, live, "/agg/v1/manifest.json").status; status != http.StatusServiceUnavailable {
 		t.Errorf("/agg with no published tree: status = %d, want 503", status)
 	}
-	if kind := faultKindIn(body(t, get(t, live, "/agg/v1/manifest.json"))); kind != FaultNoSnapshot {
+	if kind := faultKindIn(get(t, live, "/agg/v1/manifest.json").text()); kind != FaultNoSnapshot {
 		t.Errorf("/agg with no published tree reports %q, want %q", kind, FaultNoSnapshot)
 	}
 }

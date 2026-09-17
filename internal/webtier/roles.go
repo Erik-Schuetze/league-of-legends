@@ -70,7 +70,10 @@ func RoleCrumb(slug string) string {
 }
 
 // tierRanks orders the tier letters best to worst for the interactive sorter.
-// A tier the sorter does not know ranks below every known tier.
+// A tier the sorter does not know ranks below every known tier. It is the only
+// copy of this ordering: the same number is what the island sorts by and what
+// `data-v-tier` publishes, so a server-side sort and a browser-side sort cannot
+// disagree.
 var tierRanks = map[aggmodel.Tier]int{
 	aggmodel.TierSPlus: 6,
 	aggmodel.TierS:     5,

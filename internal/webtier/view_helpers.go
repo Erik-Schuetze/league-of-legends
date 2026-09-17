@@ -249,7 +249,7 @@ func archiveSentence(site *Site, slug string, label string) (template.HTML, bool
 	if len(patches) == 1 {
 		word = ""
 	}
-	return template.HTML(`<p><a href="/tier-list/` + slug + `">Newest patch ` + strings.ToLower(label) +
+	return trustedHTML(`<p><a href="/tier-list/` + slug + `">Newest patch ` + strings.ToLower(label) +
 		` tier list</a> (` + IntegerAny(float64(len(patches))) + ` patch` + word + ` published: ` +
 		strings.Join(patches, ", ") + `)</p>`), true
 }
@@ -349,10 +349,4 @@ func comparePanel(query Query, rows []*tableRow, label string) (compareView, boo
 	}
 	view.Note = builder.String()
 	return view, len(view.Rows) > 0 || len(missing) > 0
-}
-
-// percentPair is the aria-label of a matchup cell: the rate and the sample,
-// never the rate alone.
-func percentPair(winRate float64, n int) string {
-	return Percent(winRate, 1) + " over " + IntegerAny(float64(n)) + " games"
 }

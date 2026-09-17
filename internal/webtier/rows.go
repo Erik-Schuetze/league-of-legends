@@ -19,18 +19,6 @@ import (
 // on one side and not the other would move a reader's rows under them the
 // moment the island boots.
 
-// tierRank is the ordering the tier letters sort by, best first. It is the same
-// map TableIsland carries, and it is also what `data-v-tier` publishes, so a
-// sort by tier in the browser and a sort by tier on the server cannot disagree.
-var tierRank = map[aggmodel.Tier]int{
-	aggmodel.TierSPlus: 6,
-	aggmodel.TierS:     5,
-	aggmodel.TierA:     4,
-	aggmodel.TierB:     3,
-	aggmodel.TierC:     2,
-	aggmodel.TierD:     1,
-}
-
 // bracketLabels are the words the caption uses for a partition's bracket.
 var bracketLabels = map[aggmodel.Bracket]string{
 	aggmodel.BracketAll:          "all ranks",
