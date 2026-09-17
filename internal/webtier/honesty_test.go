@@ -3,6 +3,7 @@ package webtier
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -374,4 +375,148 @@ func excerpt(text string, marker string) string {
 		end = len(text)
 	}
 	return text[index:end]
+}
+
+// republishedSnapshot copies the demo tree and rewrites its manifest into the
+// shape a real run has to be told about: different figures, a different window,
+// a different build and a different commit. It also prunes the newest
+// partition's tier list to a handful of cells, so the champions the page may
+// name come from the cells that exist rather than from the manifest's champion
+// index - the live snapshot's shape, where the index is much longer than the
+// published cells.
+//
+// The point is not the numbers. It is that every figure the /about page prints
+// about the snapshot has to come out of the manifest or out of the cells, so
+// changing the artifact changes the sentence. A figure that survives this
+// rewrite is hard-coded prose, which is the failure this test exists to catch.
+func republishedSnapshot(t *testing.T) (root string, published, champions, suppressed, floor, run int, commit string) {
+	t.Helper()
+	root = copyFixtureTree(t)
+	manifestPath := filepath.Join(root, "v1", "manifest.json")
+	manifest := readJSONDocument(t, manifestPath)
+	latest, ok := manifest["latest"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s carries no latest partition", manifestPath)
+	}
+
+	tierListPath := filepath.Join(root, "v1", "p", "16.18", "EUW", "420", "all", "tierlist.json")
+	tierList := readJSONDocument(t, tierListPath)
+	cells, ok := tierList["cells"].([]any)
+	if !ok {
+		t.Fatalf("%s carries no cells array", tierListPath)
+	}
+	kept := make([]any, 0, 7)
+	seen := map[string]bool{}
+	for _, entry := range cells {
+		cell, ok := entry.(map[string]any)
+		if !ok || cell["role"] != "MID" {
+			continue
+		}
+		kept = append(kept, cell)
+		seen[fmt.Sprint(cell["champion_id"])] = true
+		if len(kept) == 7 {
+			break
+		}
+	}
+	if len(kept) != 7 {
+		t.Fatalf("%s carries only %d mid cells, want at least 7", tierListPath, len(kept))
+	}
+	tierList["cells"] = kept
+	tierList["cells_published"] = json.Number("7")
+	tierList["suppressed_cells"] = json.Number("42")
+	tierList["min_cell_n"] = json.Number("250")
+	tierList["source_window"] = map[string]any{"from": "2031-01-02", "to": "2031-01-09"}
+	tierList["generated_at"] = "2031-01-09T01:02:03Z"
+	writeJSONDocument(t, tierListPath, tierList)
+
+	latest["cells_published"] = json.Number("7")
+	latest["suppressed_cells"] = json.Number("42")
+	latest["min_cell_n"] = json.Number("250")
+	latest["source_window"] = map[string]any{"from": "2031-01-02", "to": "2031-01-09"}
+	latest["generated_at"] = "2031-01-09T01:02:03Z"
+	latest["build_run_id"] = json.Number("9")
+	latest["git_sha"] = "abcdef1234567890abcdef1234567890abcdef12"
+	manifest["generated_at"] = "2031-01-09T01:02:03Z"
+	manifest["source"] = "riot-match-v5"
+	writeJSONDocument(t, manifestPath, manifest)
+
+	return root, 7, len(seen), 42, 250, 9, "abcdef123456"
+}
+
+// TestAboutFiguresFollowTheManifest renders /about from two artifacts that
+// disagree - the demo tree, which is the public posture's snapshot, and a
+// republished tree - and requires every figure to move with the artifact.
+//
+// It is deliberately about both states: the demo branch must derive from the
+// demo manifest for the same reason the live branch must derive from the live
+// one. A preview page whose numbers are typed into the template goes stale the
+// moment either artifact changes, and the sentence the page prints about its own
+// provenance is the one thing on it that must never be a literal.
+func TestAboutFiguresFollowTheManifest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("demo tree", func(t *testing.T) {
+		t.Parallel()
+		_, live := newTestServer(t, Options{
+			FixturesDir:  fixtureDir(),
+			FixturesMode: FixturesOnly,
+			DataDir:      fixtureDataDir(),
+		})
+		page := get(t, live, "/about").text()
+		if !strings.Contains(page, `data-state="demo"`) {
+			t.Fatalf("/about is not the labelled preview: %s", excerpt(page, `data-state=`))
+		}
+		for _, want := range []string{
+			"Aggregated cells published: 141 across 80champions",
+			"cells withheld for being below the sample threshold: 3",
+			"at least n = 500 games",
+			"2026-09-08 to 2026-09-14",
+			"Snapshot generated 2026-09-15 04:10 UTC",
+			"Build run 2 from commit 000000000000",
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("/about does not carry %q, which the demo manifest declares: %s", want, excerpt(page, "Aggregated cells published"))
+			}
+		}
+	})
+
+	t.Run("republished tree", func(t *testing.T) {
+		t.Parallel()
+		root, published, champions, suppressed, floor, run, commit := republishedSnapshot(t)
+		_, live := newTestServer(t, Options{
+			AggRoot:      root,
+			FixturesMode: FixturesOff,
+			DataDir:      fixtureDataDir(),
+		})
+		page := get(t, live, "/about").text()
+		if !strings.Contains(page, `data-state="live"`) {
+			t.Fatalf("/about is not the live state: %s", excerpt(page, `data-state=`))
+		}
+		for _, want := range []string{
+			fmt.Sprintf("Aggregated cells published: %d across %dchampions", published, champions),
+			fmt.Sprintf("cells withheld for being below the sample threshold: %d", suppressed),
+			fmt.Sprintf("at least n = %d games", floor),
+			"2031-01-02 to 2031-01-09",
+			"Snapshot generated 2031-01-09 01:02 UTC",
+			fmt.Sprintf("Build run %d from commit %s", run, commit),
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("/about does not carry %q, which the republished manifest declares: %s", want, excerpt(page, "Aggregated cells published"))
+			}
+		}
+		for _, stale := range []string{
+			"141 across",
+			"n = 500",
+			"2026-09-15",
+			"Build run 2",
+			"000000000000",
+			"2026-09-08 to 2026-09-14",
+			"This build publishes no Riot match data",
+			"No match data has been ingested yet",
+		} {
+			if strings.Contains(page, stale) {
+				t.Errorf("/about still prints %q, which belongs to the demo snapshot and not to this one: %s", stale, excerpt(page, stale))
+			}
+		}
+	})
 }
