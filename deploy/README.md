@@ -101,22 +101,22 @@ What "no Riot key" actually means, because the answer is not uniform:
   and `discover-seeds` failing nightly until the Secret exists. Nothing else
   depends on either of them, and installing the Secret - with no manifest change
   and no restart of anything - is the fix.
-- **And the public site serves a labelled preview, not real statistics.** With
-  no key the archive stays empty, so the serving tier renders the checked-in demo
-  fixtures and every page carries the preview banner; no crawled data is
-  published. That is what
-  `docs/decisions/ADR-010-public-preview-posture.md` and plan risk R2 require
-  while a production key application is pending. The posture is one env var,
-  `LOLSTATS_AGG_FIXTURES`, and it is declared twice: `base/config.yaml` carries
-  `LOLSTATS_AGG_FIXTURES: "only"` for the workloads that read the shared
-  ConfigMap, and `base/web/go-deployment.yaml` sets the same value on its own
-  container so the preview does not depend on a shared key that another lane is
-  free to move (`TestDeployedPostureDoesNotPublishRealData` in `internal/webtier`
-  fails if any active env in `base/web/` sets `"off"` or `"auto"`). When the key
-  is approved and the archive has produced a published snapshot, change the value
-  to `"off"` - "render `LOLSTATS_AGG_ROOT` and never substitute fixtures" - in
-  both places, and the tier serves real aggregate data. While it stays `"only"`,
-  a real snapshot on the volume is ignored.
+- **And the public site serves the published snapshot, not a preview.** The
+  owner's 2026-09-17 decisions (D-1/D-4, recorded in `docs/decisions` as commit
+  `b262dcd`) answered §15 question 6 in favour of publishing real Riot-derived
+  aggregates and waived the compliance workstream, superseding
+  `docs/decisions/ADR-010-public-preview-posture.md`. The posture is one env var,
+  `LOLSTATS_AGG_FIXTURES`: `base/config.yaml` still carries `"only"` for the
+  workloads that read the shared ConfigMap, and `base/web/go-deployment.yaml`
+  declares `"off"` on its own container so what the public tier serves does not
+  depend on a shared key another lane is free to move. `"off"` means "render
+  `LOLSTATS_AGG_ROOT` and never substitute fixtures" - a snapshot with no
+  manifest is a loud 503, not a table of demo rows.
+  `TestDeployedPostureRendersRealData` in `internal/webtier` resolves every
+  active `LOLSTATS_AGG_FIXTURES` under `base/web/` through the tier's own root
+  selection and fails if the demo tree can be reached. Fixing the key gap below
+  no longer changes what the public site serves; it resumes crawl into a
+  snapshot that is already published.
 - The `backfill` job is suspended and stays that way; it is a manual tool, so a
   missing key only matters on the day someone runs it.
 - `static-sync`, which mirrored the public Data Dragon CDN and needed no Riot key,
