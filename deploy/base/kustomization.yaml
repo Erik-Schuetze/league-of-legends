@@ -35,6 +35,17 @@ resources:
   - web/deployment.yaml
   - web/service.yaml
 
+  # ---- additions: Go web tier (option B, rendered per request) ----
+  # The same pages served by a Go process that reads the published snapshot
+  # instead of a Caddy file server over a directory a Node build wrote. It has
+  # its own Service (nothing routes to it yet) and its own ingress policy; the
+  # live `lolstats-web` selector above is the one thing that switches traffic,
+  # and it is not switched here.
+  - web/go-deployment.yaml
+  - web/go-service.yaml
+  - web/go-networkpolicy.yaml
+  # ---- end additions: Go web tier ----
+
   # Every scheduled unit of work, in the order they run during a night:
   # aggregate (01:00), discover-seeds (02:10), static-sync (03:10, suspended
   # until its subcommand exists), site-build (03:40), maintain (hourly),
