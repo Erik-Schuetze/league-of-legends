@@ -12,12 +12,12 @@ metadata:
   name: lolstats-web
   labels:
     app.kubernetes.io/name: lolstats
-    app.kubernetes.io/component: web
+    app.kubernetes.io/component: web-go
 spec:
   type: ClusterIP
   selector:
     app.kubernetes.io/name: lolstats
-    app.kubernetes.io/component: web
+    app.kubernetes.io/component: web-go
   ports:
     - name: http
       port: 80
