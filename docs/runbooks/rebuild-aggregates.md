@@ -56,6 +56,27 @@ There is therefore no rollback for a build: a build that failed has already been
 rolled back, and a build that succeeded and published wrong numbers is fixed by
 re-running it with better inputs.
 
+### Repointing `latest` at the previous patch
+
+There is one revert that is not a re-run: `lolstats-aggregate manifest --agg
+/var/lib/lolstats/agg --source riot-match-v5 --patch <old-patch>` re-derives the
+manifest from the tree and repoints `latest` at the patch you name, rewriting no
+partition. The tier serves that patch's own bytes again within one cache key, and
+the patch you repointed away from stays on disk and stays addressable at
+`/patch/<it>/...` for inspection.
+
+What it cannot do is *remove* a partition. The manifest is a union of the disk
+manifest, a scan of the tree and the current build, so an entry that is already
+listed survives every re-index; a stale partition can only be repointed away from
+or overwritten in place. And a partition that is deleted while the manifest still
+advertises it makes the tier **fail closed**: every page route and `/readyz`
+answer `503` with `data-fault="artifact"` rather than serving the previous
+patch's numbers under the new one's label. Both behaviours are measured - with
+the commands, the timings and the served responses - in
+`docs/PATCH-ROLLOVER-EVIDENCE.md` (§10, §16.2), and
+`scripts/verify-patch-rollover.sh` reproduces the whole transition, including
+both, in a namespace of its own.
+
 ## Re-run the build
 
 Check first: `concurrencyPolicy: Forbid` stops the CronJob overlapping *itself*,
