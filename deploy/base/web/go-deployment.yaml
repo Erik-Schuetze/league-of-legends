@@ -21,9 +21,11 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
-    # sha-914d0df: fixtures off for this tier, and /about read out of the
-    # snapshot instead of carrying the demo build's figures as prose.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:820c9e62825101c22cc9eaee6bd7090e1767f97695bf041f4ba3428fb6ba1c88
+    # sha-6ede914: fixtures off for this tier, /about read out of the snapshot
+    # instead of carrying the demo build's figures as prose, and the published
+    # champion count taken from the cells the snapshot publishes rather than
+    # from the length of its champion index.
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:d4e136ddda522238ddc1976afb713173b4c7a1a576a80f28edf3a0e150555f5f
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
