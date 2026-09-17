@@ -88,35 +88,46 @@ spec:
             - configMapRef:
                 name: lolstats-config
           env:
-            # LOLSTATS_AGG_FIXTURES is deliberately NOT set here. This tier
-            # inherits the ConfigMap's "only" and therefore serves the labelled
-            # preview snapshot, which is the posture R2 requires while the site
-            # is publicly reachable.
+            # ------------------------------------------------------------------
+            # PREVIEW BY DEFAULT. The value below is the whole data posture of
+            # this Deployment in one line, and it is set explicitly rather than
+            # inherited from the ConfigMap above so that it cannot change as a
+            # side effect of the shared switch moving.
             #
-            # DO NOT set it to "off" on this Deployment. Publishing real
-            # crawled data is a Phase 5 gate, not a data-availability reflex:
-            # the production key is not approved yet, and R2's required
-            # mitigation is that the publicly reachable site serves
-            # preview/seed data with a visible PREVIEW banner, driven by
-            # data-state, until it is. Having an agg/v1 tree on the PVC from a
-            # real run satisfies the *pipeline* half of Phase 5 (it is proven
-            # and independently verified); it does not satisfy the *key* half.
-            # The edge counts as public: web/caddy-service proxies
-            # lol.erik-schuetze.dev to this namespace's tier, so "the artifact
-            # exists, so serve it" is not a safe reading of the plan.
+            # `only` renders the labelled preview tree with a PREVIEW banner.
+            # That is the posture §12 risk R2 requires of a publicly reachable
+            # site until Riot approves the production key, and the edge counts
+            # as public: web/caddy-service proxies lol.erik-schuetze.dev to this
+            # namespace's tier, so the moment the edge selector points here this
+            # Deployment is on the open internet behind the auth gate alone.
             #
-            # The line below is what the switch looks like when Phase 5 is
-            # unblocked, kept here as the record of the exact change rather than
-            # left live and ambient. Two things must be true first: the Riot
-            # production key is approved (plan.md item 1, the personal/
-            # development key type forbids public use), and §15 question 6 -
-            # whether serving real aggregates before approval is acceptable -
-            # has an answer from the owner.
+            # NEVER set this to "off" or "auto" as a side effect of anything:
+            #
+            #   "off"  renders LOLSTATS_AGG_ROOT, so flipping the edge Caddy
+            #          line publishes the real crawled snapshot to any visitor
+            #          with the gate password - a §12/R2 and §13 publication
+            #          trigger breach with no second step to catch it.
+            #   "auto" is the same hazard one step removed: it serves the real
+            #          snapshot silently as soon as one exists on the PVC, which
+            #          is exactly the state the PVC is already in.
+            #
+            # Real data is a deliberate Phase 5 act, not a default. Two things
+            # must be true before the lines below are uncommented: the Riot
+            # production key is approved (plan.md item 1: the personal/
+            # development key type forbids public use, and it is what the site
+            # is currently built with), and §15 question 6 - whether serving
+            # real aggregates before that approval is acceptable at all - has an
+            # answer from the owner. An agg/v1 tree existing on the PVC from a
+            # real run satisfies the *pipeline* half of Phase 5; it does not
+            # satisfy the *key* half.
+            #
+            # The switch, for whoever is clearing Phase 5 - change the value in
+            # place, do not delete the entry:
             #
             #   - name: LOLSTATS_AGG_FIXTURES
             #     value: "off"     # render LOLSTATS_AGG_ROOT or a loud 503; no demo fallback
             #
-            # Until then, the live-rendering path is exercised on an instance
+            # Until then the live-rendering path is exercised on an instance
             # that is NOT edge-reachable: a probe pod with the PVC mounted
             # read-only and `off`, reached only through
             # `kubectl -n lolstats port-forward pod/...`. That is the sanctioned
@@ -124,7 +135,11 @@ spec:
             # Deployment into a public page.
             #
             # TestDeployedPostureDoesNotPublishRealData (internal/webtier)
-            # fails if this file starts setting "off" or "auto" again.
+            # requires this entry to exist and to be "only", and fails if any
+            # active env in this directory sets "off" or "auto".
+            # ------------------------------------------------------------------
+            - name: LOLSTATS_AGG_FIXTURES
+              value: "only"
             - name: LOLSTATS_WEB_ADDR
               value: ":8080"
             # Where the demo tree is inside this image (the Dockerfile copies
