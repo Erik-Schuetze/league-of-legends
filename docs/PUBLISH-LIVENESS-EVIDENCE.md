@@ -62,7 +62,9 @@ The first three of these would each have silently produced a meaningless PASS, s
    `GET /agg/v1/manifest.json` is `200`. The HTML banner alone would have been a weaker instrument.
 3. **`LOLSTATS_AGG_FIXTURES` decides what is served at all.** `candidateRoots`
    (`internal/webtier/artifacts.go:145-167`) returns *only* the checked-in fixtures when the value is
-   `only` (the configMap's value, and the ADR-010 preview posture), *only* the aggregate root when it
+   `only` (the shared configMap's value at the time, and the posture `ADR-010` chose - both
+   superseded on 2026-09-17 by owner decisions D-1 and D-4; see §14.1), *only* the aggregate
+   root when it
    is `off`, and the primary root when unset-and-configured. Revisions 6-8 of the deployment carried
    an operator override `LOLSTATS_AGG_FIXTURES=off`; revision 8 is the revision this measurement ran
    against. The script's `preflight` now refuses to run unless the served root is the aggregate root
@@ -426,24 +428,73 @@ ReplicaSet evidence, which shows precisely what changed:
 * Revision 9 runs the **same image digest** as revision 8. The only difference relevant to this
   measurement is that the `LOLSTATS_AGG_FIXTURES=off` operator override was dropped, so the tier now
   resolves `LOLSTATS_AGG_FIXTURES=only` from `base/config.yaml` and `candidateRoots` returns only the
-  in-image fixtures (`internal/webtier/artifacts.go:157`). The served site is therefore
-  `data-state="demo"`, `source: demo`, `generated_at=2026-09-15T04:10:00Z`, 2 partitions, and its
+  in-image fixtures (`internal/webtier/artifacts.go:157`). The served site was therefore, from 17:51
+  until the cutover later that evening (§14.1), `data-state="demo"`, `source: demo`,
+  `generated_at=2026-09-15T04:10:00Z`, 2 partitions, and its
   served `/agg/v1/manifest.json` sha256 is `dfabdeffd656...` - deliberately **not** the volume's
-  `3099458535...`, which is the cleanest single number showing that the tier is no longer reading the
-  PVC at all right now.
-* That is the posture the committed manifests intend, and it was a deliberate, reasoned change, not
+  `3099458535...`, which is the cleanest single number showing that the tier was no longer reading the
+  PVC at all for that window.
+* ~~That is the posture the committed manifests intend, and it was a deliberate, reasoned change, not
   drift: commit `1f464dc` ("Do not publish the real snapshot from the edge-facing tier",
   2026-09-17T17:51:04Z, i.e. the roll that produced revision 9) removes the aggregate fixtures
   override because the tier is publicly reachable through namespace `web` and risk R2 requires a
-  labelled preview until the Riot production key is approved. `deploy/base/web/go-deployment.yaml:91`
-  says the tier deliberately does **not** set `LOLSTATS_AGG_FIXTURES`, and
-  `internal/webtier/deploy_posture_test.go` asserts it. The revisions that carried `off` were the
-  override, not revision 9.
+  labelled preview that holds good until the Riot production key is approved.~~
+  **Superseded the same day, and this is the paragraph that went stale first.** As at revision 9 the
+  change *was* deliberate and not drift: commit `1f464dc` ("Do not publish the real snapshot from the
+  edge-facing tier", 2026-09-17T17:51:04Z) removed the aggregate fixtures override because the tier
+  is publicly reachable through namespace `web`. What that commit read as a *deadline* - risk R2,
+  the preview that ADR-010 titled "A labelled public preview while the production key application
+  is pending" - the owner then answered the other way: on 2026-09-17 he decided that real crawled
+  Riot match data from his **development** key is
+  what the site serves (**D-1**) and waived the compliance workstream, so the labelled preview is
+  gone (**D-4**). The measurement below is unaffected - see §14.1 for what the tier serves now.
+* The `LOLSTATS_AGG_FIXTURES` claim in that paragraph also moved. It said
+  `deploy/base/web/go-deployment.yaml:91` has the tier deliberately **not** set the variable; the
+  deployment now sets it *explicitly*, in its own `env` block, as `"off"` - precisely so that the
+  value cannot move when another lane moves the shared `deploy/base/config.yaml`, which still pins
+  `only` for the tiers that inherit it.
+  `internal/webtier/deploy_posture_test.go` still asserts the served root, and its assertion is what
+  now pins the tier to the published snapshot. The revisions that carried `off` were the override,
+  not revision 9.
 * **This does not invalidate the measurement.** The pods, image and binary that were measured are
   revision 8's, and the mechanism proven (`rename(2)` -> new `size`/`mtime` -> new cache key -> re-derived
   `Site`) lives in that image, which is the image revision 9 still runs. What has changed is only
   which root the tier reads, and the script now refuses to measure anything else.
 * No change to any deployment was made by this work; the roll is another lane's.
+
+### 14.1 What the tier serves now, re-measured after the cutover
+
+The posture §14 disclosed was the posture of revision 9 only. The owner's decisions **D-1** and
+**D-4** (2026-09-17) changed it, and the public cutover pointed the edge at this tier. Re-measured
+against the public URL: unauthenticated first, then through the password gate's own credentials.
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' https://lol.erik-schuetze.dev/
+401
+$ curl -s -u "$CREDS" https://lol.erik-schuetze.dev/ | grep -o 'data-state="[^"]*" data-source="[^"]*"'
+data-state="live" data-source="riot-match-v5"
+$ curl -s -u "$CREDS" https://lol.erik-schuetze.dev/agg/v1/manifest.json \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["source"], d["generated_at"], d["latest"]["patch"])'
+riot-match-v5 2026-09-17T21:51:31.86967202Z 16.18
+$ curl -s -u "$CREDS" https://lol.erik-schuetze.dev/ | grep -c 'href="/champions/kennen"'
+1
+```
+
+The last line is the positive control: it proves the fetch returned a real champion-bearing page and
+not an empty body or an error page, which is what would make `data-state="live"` above mean nothing.
+`$CREDS` is the site's password gate; it is deliberately not written down here.
+
+So the present tense in §14 was the wrong tense from the moment of the cutover: the tier is **not**
+serving fixtures, its root is the published snapshot, and the R2 preview that §14 named as the reason
+for `only` is closed. The password gate is still in front of it, which is the part of the old posture
+that survives. Two consequences for this document:
+
+* The measurement in §4-§13 is a record of revision 8 and is unchanged by this - the mechanism it
+  proves is in the image the tier still runs, and it is the mechanism, not the data, that was under
+  test.
+* §16's prerequisite is no longer blocked by the posture. It was written when `only` was the
+  committed value; the tier now sets `off` itself, so nothing has to be overridden by hand. That
+  paragraph is corrected in place.
 
 ## 15. Independent re-verification of the volume, after the roll
 
@@ -474,19 +525,25 @@ bash scripts/verify-publish-liveness.sh            # read-only dry run: everythi
 bash scripts/verify-publish-liveness.sh --apply    # the full run (~17 min; writes, then restores)
 ```
 
-Prerequisite, and it is a real one: the tier must be reading the aggregate root. With the deployment
-resolving `LOLSTATS_AGG_FIXTURES=only` (the current posture, §14) the script's `preflight` stops
-immediately with
+Prerequisite, and it is a real one: the tier must be reading the aggregate root. `deploy/base/config.yaml`
+still pins `LOLSTATS_AGG_FIXTURES: "only"` for the tiers that inherit it, and under that value the
+deployment resolving `only` (the posture §14 recorded, and the posture this paragraph was written in)
+makes the script's `preflight` stop immediately with
 
 ```
 the tier is not reading the aggregate root (fixtures=only); this test would measure fixtures
 ```
 
-which is the intended behaviour - the alternative is a green run that proves nothing. Re-running it
-against a fixtures-served tier is not something this test can arrange for itself: `deploy/base/config.yaml`
-is pinned at `only`, and the per-Deployment `off` override that revision 8 carried was deliberately
-removed by `1f464dc` because the tier is edge-facing (risk R2). Doing so again would be an operator
-decision with a reason, not a favour to this test, so this document does not ask for it. Exit codes
+which is the intended behaviour - the alternative is a green run that proves nothing. **Corrected
+2026-09-17 after the cutover:** the web Deployment now sets `LOLSTATS_AGG_FIXTURES: "off"` in its own
+`env`, and §14.1 measures the served tier as `data-state="live"` on `source: riot-match-v5`, so the
+precondition this paragraph calls unarrangeable is the posture the tier now deploys. The
+per-Deployment `off` override that revision 8 carried was deliberately removed by `1f464dc` because
+the tier was then edge-facing under risk R2; the owner closed R2 the same day by choosing publication
+(**D-1**), which is why `off` is now a committed value rather than an operator override, and why
+re-running this test no longer needs a favour from an operator. What is *not* claimed here: the run
+has not been repeated, and no line above says it would pass - only that the condition `preflight`
+tests is now met. Exit codes
 are 0 ok, 3 control failed, 4 hot reload failed, 5 a restart was detected, 6 restoration failed.
 
 Both forwards must be free before the run starts: `pf_start` refuses a local port that is already

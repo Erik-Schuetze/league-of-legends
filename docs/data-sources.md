@@ -221,12 +221,12 @@ G0.4 to G0.6 run in parallel afterwards.
 
 | Gate | Question | Pass condition | If it fails | Status |
 | --- | --- | --- | --- | --- |
-| G0.1 Data access | Does a development key actually return what v1 needs? | ACCOUNT-V1, LEAGUE-V4 and MATCH-V5 reachable; a real payload confirmed to contain `teams[].bans`, `participants[].item0..item6`, `perks.styles`, `summoner1Id`/`summoner2Id`, `teamPosition`, `individualPosition` and `win` | Drop the unsupported feature from v1 rather than infer it; record the finding here | waived 2026-09-17 - no Riot API key exists; see the waiver note below |
-| G0.2 Rate-limit reality | Are limits observable and adaptive behaviour possible? | `X-App-Rate-Limit` and `X-Method-Rate-Limit` observed on live responses; a deliberate over-rate produces 429 with `Retry-After` | Fall back to a conservatively configured static limiter with a large safety margin, and document the assumption | waived 2026-09-17 - no Riot API key exists; part of the fallback is built, see the waiver note below |
-| G0.3 Statistical sufficiency | Can a personal-key crawl produce credible numbers? | A bounded sample of EUW ranked-solo matches yields a role-level, rank-aggregated grid whose median cell reaches roughly +/-2% | Publish fewer champions or a coarser role set; defer rank brackets and say so on the site | waived 2026-09-17 - no Riot API key exists; see the waiver note below |
+| G0.1 Data access | Does a development key actually return what v1 needs? | ACCOUNT-V1, LEAGUE-V4 and MATCH-V5 reachable; a real payload confirmed to contain `teams[].bans`, `participants[].item0..item6`, `perks.styles`, `summoner1Id`/`summoner2Id`, `teamPosition`, `individualPosition` and `win` | Drop the unsupported feature from v1 rather than infer it; record the finding here | waived 2026-09-17 - no key existed then, and the gate has not been re-run since the development key arrived (**D-1**); see the waiver note below |
+| G0.2 Rate-limit reality | Are limits observable and adaptive behaviour possible? | `X-App-Rate-Limit` and `X-Method-Rate-Limit` observed on live responses; a deliberate over-rate produces 429 with `Retry-After` | Fall back to a conservatively configured static limiter with a large safety margin, and document the assumption | waived 2026-09-17 - no key existed then, and the gate has not been re-run since the development key arrived (**D-1**); part of the fallback is built, see the waiver note below |
+| G0.3 Statistical sufficiency | Can a personal-key crawl produce credible numbers? | A bounded sample of EUW ranked-solo matches yields a role-level, rank-aggregated grid whose median cell reaches roughly +/-2% | Publish fewer champions or a coarser role set; defer rank brackets and say so on the site | waived 2026-09-17 - no key existed then, and the gate has not been re-run since the development key arrived (**D-1**); see the waiver note below |
 | G0.4 Pipeline feasibility | Does raw-to-artifact fit a nightly window, and what does it cost in disk? | A sample archive is read by DuckDB and produces `tierlist.json` well inside the nightly budget; measured compressed bytes per match and projected storage for a year | Reduce the retention window, tighten the sample, or move to a weekly cadence with a documented trade-off | waived 2026-09-17 by the owner - a measured fail, not a pass; no realistic input fits the shipped 1 GiB; see the G0.4 waiver note below |
 | G0.5 Serving feasibility | Can Caddy do the caching job required? | Caddy built with `cache-handler` via `xcaddy` demonstrates a cache hit, brotli compression and correct immutable headers on hashed assets | Serve with plain `file_server` and adjust the performance budget honestly | pass 2026-09-17, one documented deviation; see the G0.5 note below |
-| G0.6 Rank attribution | Is the snapshot-drift limitation acceptable? | LEAGUE-V4 seeding works, and the wording that discloses snapshot attribution is drafted | Publish no per-rank pages in v1; ship a single rank-aggregated view | waived 2026-09-17 - no Riot API key exists; part of the fallback is drafted, see the waiver note below |
+| G0.6 Rank attribution | Is the snapshot-drift limitation acceptable? | LEAGUE-V4 seeding works, and the wording that discloses snapshot attribution is drafted | Publish no per-rank pages in v1; ship a single rank-aggregated view | waived 2026-09-17 - no key existed then, and the gate has not been re-run since the development key arrived (**D-1**); part of the fallback is drafted, see the waiver note below |
 | G0.7 Legal posture | Is every source's basis written down and defensible? | This page records each source's legal basis; the compliance checklist and disclaimer text are drafted; the scrape toggle is designed with a `review_due_at` field | Remove the source from the design rather than argue for it | pass 2026-09-17 - artefacts verified; see the G0.7 note below |
 | G0.8 Key path | Is the path to a production key realistic and started early? | Compliance pages and `riot.txt` planned, and the application timing understood as weeks to months | Treat the production key as unavailable and design v1 permanently around a smaller scope | pass 2026-09-17 - see the G0.8 note below |
 
@@ -234,7 +234,7 @@ G0.4 to G0.6 run in parallel afterwards.
 
 Four of these gates can be settled without a Riot API key. Two of them, G0.4 and
 G0.5, were **run**; the other two, G0.7 and G0.8, were **assessed** against the
-artefacts their pass conditions name. The remaining four cannot be run at all, so they
+artefacts their pass conditions name. The remaining four were not run at all, so they
 are **waived, not passed**. G0.4 is a fifth waiver and a different kind of one: it *was*
 run and it measured a fail, the fail is left standing in full below, and the owner
 waives it with that measurement as the reason. Either way, a waiver is a decision with
@@ -429,8 +429,11 @@ statement, and it is labelled as one.
   cheaper than a guarded `json_*` call per field per row. A waiver that repeated the
   insufficient fix as the way out would be a false statement.
 - **The caveat that caps everything above.** Every payload width here is **synthetic**. There
-  is no Riot API key, so no real payload-size distribution exists to measure, and the
-  independent verifier of this gate could not measure one either and said so. If real payloads
+  was no Riot API key at the time, so no real payload-size distribution existed to measure, and the
+  independent verifier of this gate could not measure one either and said so. (A
+  **development** key arrived later the same day - **D-1**, 2026-09-17 - and real crawled
+  matches are now served, but this gate has not been re-run against that distribution, so
+  the caveat still stands as written.) If real payloads
   are narrower than ~100 KiB this waiver is measured against a corpus wider than reality; if
   they are wider, reality is worse than the numbers above. Neither direction is known.
 - **Exit condition - what lifts this waiver.** Any one of these, measured rather than argued:
@@ -524,7 +527,9 @@ page) are tracked as checkpoint 1 in `docs/compliance.md` and are pending there.
 
 **G0.8 Key path - pass.** The compliance pages exist and build - `/about`,
 `/legal/terms`, `/legal/privacy`, `/disclaimer` - and the application timing is
-recorded as weeks to months (`docs/decisions/ADR-010-public-preview-posture.md:11-12`).
+recorded as weeks to months (`docs/decisions/ADR-010-public-preview-posture.md:11-12`; that ADR is
+superseded 2026-09-17 by **D-1**/**D-4**, but the application-timing estimate it records is not the
+part that changed - the key is still an application and still takes that long).
 `riot.txt` is "planned" in the only sense that is honest: `web/astro.config.mjs:88-95`
 publishes `dist/riot.txt` when and only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set,
 and `web/src/lib/legal.ts:105-106` records why absence is the correct state - Riot's
@@ -533,12 +538,24 @@ of verification while an absent file is an honest "not verified yet". The token 
 issued to the domain owner once a production application is under way, so publishing
 the file is an owner action rather than code work, and a built-and-switched-off
 mechanism is what "planned" should mean. This gate's own fallback is a posture that
-ADR-010 already implements.
+ADR-010 already implements. **Superseded 2026-09-17:** the fallback this paragraph
+names is no longer the posture the site deploys - the owner chose publication
+(**D-1**) and waived the compliance workstream (**D-4**), so that fallback is
+implemented nowhere. The gate's pass condition is untouched by that, and the
+paragraph above is kept as the position that held until then.
 
 **Waived gates: G0.1, G0.2, G0.3, G0.6.** None of these can be run without a Riot API
-key and no key exists - the production key is an application that follows a public
-preview (ADR-010), and there is no development key in this environment. They are
-**waived, not passed**. **G0.4 is waived on a different basis and is not a member of this
+key, and none of them had one when it was waived. **Superseded 2026-09-17:** a
+**development** key is now wired - the Secret `lolstats-riot`, referenced by the
+ingest tier - and the pipeline serves real crawled matches from it (**D-1**), so the
+ground these waivers were recorded on - that the environment lacked any Riot key
+at all - no longer holds, and the "follows a public preview" reading of
+`ADR-010` is superseded too (**D-4**). What holds the four open is narrower and is
+still true: **none of them was re-run against that key**, so none of them has
+evidence, and a waiver with no evidence is what they always were. The four
+`ADR-010` and risk-R2 citations below are therefore the authority **as at the waiver
+date**, kept as history: ADR-010 is superseded, and risk R2 is accepted by the owner
+rather than open. They are **waived, not passed**. **G0.4 is waived on a different basis and is not a member of this
 list** - all four below were never run, while G0.4 *was* run and *failed*; it is waived,
 with its measured fail left standing, in its own note above and in the paragraph after
 this list. Per gate, with the authority named:
@@ -547,7 +564,8 @@ this list. Per gate, with the authority named:
   key, so no real payload can be inspected. Authority: the gate's own response to
   failure - "drop the unsupported feature from v1 rather than infer it; record the
   finding here" (plan.md:753) - with
-  `docs/decisions/ADR-010-public-preview-posture.md` and plan risk R2 (plan.md:771).
+  `docs/decisions/ADR-010-public-preview-posture.md` (superseded) and plan risk R2
+  (plan.md:771, accepted).
   The design's answer is that a field nobody has observed is not inferred, so no v1
   feature ships on one; with no payload observed at all, that is a design statement
   and not evidence, and it is not presented as evidence. The only payloads in the tree
@@ -558,7 +576,8 @@ this list. Per gate, with the authority named:
   `X-Method-Rate-Limit` observation nor the 429-with-`Retry-After` behaviour can be
   seen. Authority: the gate's own fallback - "fall back to a conservatively configured
   static limiter with a large safety margin, and document the assumption" - with
-  ADR-010 and risk R2. **The fallback is partly satisfied in code, stated separately
+  ADR-010 (superseded) and risk R2 (accepted). **The fallback is partly satisfied in
+  code, stated separately
   from the waiver:** the limiter has a hard ceiling that response headers cannot raise
   (`internal/riot/limiter.go:21-31` and `:74-78`, clamped by `clampTo` at `:326`) and
   it starts from `DevelopmentKeyWindows()`, 20/s and 100 per 2 minutes so about
@@ -568,7 +587,8 @@ this list. Per gate, with the authority named:
 - **G0.3 Statistical sufficiency.** Cannot run: a bounded EUW ranked-solo crawl needs a
   key, so no median cell width can be measured. Authority: the gate's own fallback -
   "publish fewer champions, top-N only, or a coarser role set; defer rank brackets and
-  say so on the site" - with ADR-010 and risk R2. **Separately from the waiver**, the
+  say so on the site" - with ADR-010 (superseded) and risk R2 (accepted).
+  **Separately from the waiver**, the
   guard that fallback depends on is built and was exercised in the G0.4 run: with a
   minimum cell sample of 100, 5 cells were suppressed and counted at 20 000 matches
   and 0 at 100 000 as the sample filled in, and the build fails closed rather than
@@ -577,7 +597,8 @@ this list. Per gate, with the authority named:
   waiver.
 - **G0.6 Rank attribution.** Cannot run: LEAGUE-V4 seeding, which is the observable
   half, needs a key. Authority: the gate's own fallback - "publish no per-rank pages in
-  v1; ship a single rank-aggregated view" - with ADR-010 and risk R2. The wording half
+  v1; ship a single rank-aggregated view" - with ADR-010 (superseded) and risk R2
+  (accepted). The wording half
   is drafted: `web/src/lib/legal.ts:300-312` writes the sentence a rate-bearing page
   appends when its rates are not measurements of real games, and every page already
   discloses the manifest's `source` as described above. Drafted wording is not a working
@@ -592,7 +613,7 @@ real match, a single day's window of ~1 428 matches exhausts the shipped 1 GiB, 
 section 14 requires every Phase 0 gate to pass **or be explicitly waived**, and a bare
 `fail` is neither. The waiver is not a pass and does not pretend to be one: the failing
 measurement, the reason the gate's own fallback cannot address it, the caveat that **every
-payload width was synthetic** (no Riot API key exists, so no real payload-size distribution
+payload width was synthetic** (no Riot API key existed then, so no real payload-size distribution
 could be measured, and the independent verifier of this gate could not measure one either),
 and the measured exit condition are all in the G0.4 waiver note above. Authority: the owner,
 **Erik Schuetze**, who accepts the residual risk - this Phase 0 work is executed on the

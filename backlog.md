@@ -6,11 +6,19 @@ something is not here and not in the plan, it does not exist yet.
 
 ## Blocked on external input
 
-**Record the public-preview posture as an ADR.** While a production key
+~~**Record the public-preview posture as an ADR.** While a production key
 application is pending, the public site should serve static seed data and Data
 Dragon content only, clearly labelled as a preview. The reasoning is written in
 `docs/architecture.md` and `docs/compliance.md`, but it is an owner decision and
-has not been accepted as an ADR. Needed before the first deploy.
+has not been accepted as an ADR. Needed before the first deploy.~~
+**Closed 2026-09-17 - done, deployed, and then reversed by the owner.** The posture
+was recorded as `docs/decisions/ADR-010-public-preview-posture.md`, and the first
+deploy happened; the owner then chose the opposite: real crawled Riot match data
+from his **development** key is served behind the existing password gate (**D-1**,
+2026-09-17) and the compliance workstream is **waived** (**D-4**, 2026-09-17).
+ADR-010 is superseded and keeps its original text as history; the value that holds
+is in `deploy/base/web/go-deployment.yaml`. This item is struck rather than deleted
+so that the deferral and its answer both stay on the record.
 
 **Site name and domain.** Drives Caddy configuration, TLS and the `riot.txt` URL
 that Riot verifies - and `riot.txt` must be served from the domain being
@@ -68,8 +76,9 @@ and it is a page-title and champion-name search or it is not worth the JS.
 - Prometheus alerts for crawl staleness, build staleness, elevated 429/403 rates,
   key age, per-cell sample size falling below the floor, raw-volume disk usage
   and build duration approaching the nightly window.
-- `docs/runbooks/` currently holds no files. Ingest-down, rebuild-aggregates,
-  key-rotation and restore-raw are all needed before the first deploy.
+- `docs/runbooks/` now holds these four (ingest-down, rebuild-aggregates,
+  key-rotation, restore-raw) and five more. What is still deferred is the *tested*
+  restore of Postgres from a logical dump, below.
 - A licence inventory for the dependency graph, wired to `make vuln`.
 - A tested restore of Postgres from a logical dump.
 
