@@ -102,8 +102,34 @@ because the namespace was shared with other agents' pods.
 | HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** |
 | HTML ≤40 KB gzipped | worst as served on the wire 10.2 KiB (`/tier-list/top/`, Lighthouse); worst across all 1,058 routes 9.5 KiB (`/about/` = 9,731 B). The same page is 9.3 KiB when re-gzipped with zlib defaults, i.e. the origin's own gzip output runs ~8% larger than zlib — the audited on-wire figure is the conservative one | **PASS** |
 | islands ≤2/page, both deferred | max **1** island/page, on 10 of 1,058 pages; 0 blocking scripts | **PASS** |
-| total first-load ≤300 KB uncompressed | 187.3–199.4 KiB on 4 routes; **429.7 / 447.7 / 939.0 / 1013.3 KiB** on 5 routes | **FAIL** (4 routes) |
+| total first-load ≤300 KB uncompressed | 187.3–199.4 KiB on 4 routes; **429.7 / 447.7 / 939.0 / 1013.3 KiB** on 5 routes | **FAIL** (4 routes) — this row is *measured live*; the lower §11 figures are a **projection**, and this row is **not** superseded by them. See note (a) |
 | zero axe serious+critical | 0 on all 9 routes (axe 4.13.0, 63 rules evaluated) | **PASS** |
+
+**Note (a) — every cell above is a measurement; §11's smaller numbers are arithmetic, not a re-measurement.**
+The figures in §5 and §6 come from the live r1/r2 runs in §4, taken through the deployed tier (§9).
+§11, a later lane's change, reports first-load figures of 218.9 / 213.6 / 228.7 KiB on the three
+affected routes and 222.4–226.3 KiB for the same routes projected from the committed baseline. Those
+are a fixture-posture A/B pair plus a subtraction of the image bytes from the r2 reports; **this table
+is deliberately not rewritten to them.** The §7.4 first-load budget therefore stands **FAIL** in its
+last live measurement (429.7–1013.3 KiB) and is **not known to hold in production** until the
+post-cutover run in §11.8 measures the real edge. A projection that replaces a measurement would be a
+laundered pass; §11.4 restates this on its own side.
+
+**Note (b) — the HTML row and `/matchups/*` are posture-dependent; do not chase them as defects.**
+The 150 KiB HTML ceiling passes live (worst audited 65.4 KiB). The same route renders very differently
+in local fixture posture: `/matchups/mid/` is 26.4 KiB of HTML in the committed live run
+(`lh-r2-matchups-mid`) and 160.6 KiB against local fixtures. That difference is what puts
+`/matchups/{mid,top}/` over the first-load ceiling locally even though **both routes carry zero
+images**; §11.3 reports them unchanged before and after §11.2 for that reason. Fixture-posture HTML is
+not this budget's failure and not a real defect in the served pages.
+
+**Residual for the design lane (recorded, not actioned): the font payload.**
+150.2 KiB over 6 requests, incurred on **every** route, so it is ~78% of the 188–199 KiB image-free
+floor and the next reduction has to come from there. It is 6 self-hosted woff2 files in
+`internal/webtier/assets/fonts/` — `inter-400/600/700` (35,056 / 36,384 / 36,300 B),
+`jetbrains-mono-400/700` (7,368 / 7,484 B) and `montserrat-700` (31,208 B), 153,800 B in total —
+declared by `@font-face` in the copied `internal/webtier/assets/astro/…css`. They are same-origin and
+compliant (gate check 3 passes); subsetting or dropping a weight is a design-lane call, not this row.
 
 ## 6. The two failures, with causes
 
@@ -250,7 +276,11 @@ node scripts/perf/island-runtime.mjs --base http://127.0.0.1:18921 --out docs/ev
 
 ## 11. R15: the first-load row, closed without copying Riot art
 
-Added 2026-09-17 by the R15 lane. §1-§10 above are the measurement lane's findings and are unchanged.
+Added 2026-09-17 by the R15 lane. §1-§10 are the measurement lane's findings. The only edits this lane
+has made inside them are **note (a), note (b) and the font residual directly under §5's table** — added
+on the coordinator's instruction so no reader can mistake this section's projections for a
+measurement — plus the renumbering of the citations in §11.1. **No measured figure in §5 or §6 was
+changed.**
 
 §6.1 states the fix for the failing first-load row as "a 24-48 px asset (or a sprite)". Both are Riot
 champion art **served from this origin**, and the compliance material forbids that, so the fix had to
@@ -259,22 +289,27 @@ per table row. This section records the rule, the change, what it measures, and 
 
 ### 11.1 The compliance rule: rehosting, resizing or spriting is not permitted
 
-`docs/compliance.md:276-279`:
+`docs/compliance.md` §5, "Before using any Riot asset" → "Required action" (currently lines 431-433;
+quoted as it stood when this lane decided on 2026-09-17, before the next day's citation-correction
+commit renumbered the section — the wording of the rule itself is unchanged):
 
 > ### 5. Before using any Riot asset
 >
 > **Required action.** Riot Press Kit and permitted static data only; no champion art, splash art or
 > marks beyond that.
 
-`docs/compliance.md:281-288`:
+`docs/compliance.md` §5, "Status: met" (currently lines 435-445). At the time of this lane's change the
+same passage read "the current build has **2378** `<img>` tags on that origin" — that is the
+**pre-change** count. The corrected text now carries the post-change 1038, so the compliance record,
+§11.3 and §11.7 agree on the figure:
 
 > **Status: met.** The only Riot assets are Data Dragon static data (champion, item, rune and
-> summoner-spell names and icons, plus numeric ids), taken at build time by
-> `web/scripts/fetch-ddragon.mjs`. Gate check 2 scans image references in the built HTML and CSS and
-> confirms every absolute image origin is `https://ddragon.leagueoflegends.com`; the current build has
-> 2378 `<img>` tags on that origin and no other absolute image origin at all. [...]
+> summoner-spell names and icons, plus numeric ids) [...] Gate check 2 scans image references in the
+> **served** HTML and CSS and confirms every absolute image origin is
+> `https://ddragon.leagueoflegends.com`; the captured corpus of 2026-09-18 carries 1038 `<img>` tags
+> on that origin and no other absolute image origin at all.
 
-`docs/compliance.md:290-292`:
+`docs/compliance.md` §5, "Next step (owner)" (currently lines 447-450):
 
 > **Next step (owner).** None. Any future asset needs a Press Kit check and a recorded permission
 > before it is added, and gate check 2 will fail the build if it comes from an unpermitted origin.
@@ -284,12 +319,16 @@ permitted static data / press kit", while Community Dragon is "**Not used.** ...
 image origin other than the Data Dragon CDN, so enabling it is a deliberate compliance change rather
 than a code tweak".
 
-Enforcement is `scripts/compliance-check.sh:255-262`: every origin in the built HTML and CSS is
-compared against `DD_ORIGIN_URL` and any other absolute image origin fails the build. What the build
-does fetch at build time is JSON only — `web/scripts/fetch-ddragon.mjs` writes champion, item, rune and
-spell records whose `icon` fields are URL strings; no PNG bytes enter the repository. And nothing in
+Enforcement is `scripts/compliance-check.sh` check 2 (`DD_ORIGIN_URL` at line 212, the origin diff at
+lines 281-284, cited on 2026-09-17 as lines 255-262 before the file grew): every origin in the served
+HTML and CSS is compared against `DD_ORIGIN_URL` and any other absolute image origin fails the build.
+What the build fetched at build time was JSON only — `web/scripts/fetch-ddragon.mjs` wrote champion,
+item, rune and spell records whose `icon` fields are URL strings; no PNG bytes entered the repository.
+(2026-09-18: the Astro tree and that script were deleted after this change landed; the same static data
+now ships checked in under `projection/` and `internal/webtier/data/`, embedded by
+`internal/webtier/data.go` — `docs/compliance.md` §5.) And nothing in
 the tree records a Press Kit permission (`grep -rn "Press Kit" docs/` returns the rule above and
-nothing else), which is the permission `compliance.md:290` requires before a new asset may be added.
+nothing else), which is the permission §5 "Next step (owner)" requires before a new asset may be added.
 
 **Branch taken: 3, and branch 2 is not permitted.** Resizing, re-encoding, spriting or rehosting the
 champion PNGs, and any origin-side fetch-and-resize cache (which would also multiply load on Riot's
@@ -354,9 +393,18 @@ the image column, nothing else:
 | `/matchups/top/` | 187.3 KiB | 0 (0) | 187.3 KiB |
 
 Maximum 226.3 KiB against a 300 KiB ceiling, and this reproduces §6.1's own "no route exceeds
-222.4 KiB" figure from the same raw reports. The residual is the baseline every route shares: fonts
-(150.2 KiB, 6 requests) plus document plus CSS. A future reduction has to come from there; the images
-are no longer part of the problem.
+222.4 KiB" figure from the same raw reports.
+
+**Read this as arithmetic, not as the budget's verdict.** It does not replace §5 (see note (a) there):
+§5's first-load row is the last live measurement and stays **FAIL**, and the budget is not known to
+hold in production until the post-cutover run in §11.8 replaces the row with an r5 measurement. What
+this section establishes is narrower and sufficient for the decision it was taken for: on these routes
+the third-party images were the *whole* of the overage, so the compliant fix addresses all of it.
+
+The residual is the baseline every route shares: fonts (150.2 KiB, 6 requests) plus document plus CSS.
+That is ~78% of the 188-199 KiB image-free floor, which leaves roughly 110 KB of headroom under a
+300 KiB ceiling and puts the next reduction squarely in the font payload — recorded for the design lane
+under §5 note on fonts, not actioned here. The images are no longer part of the problem.
 
 ### 11.5 The parity pin is why both renderers moved, and what that cost
 
@@ -378,17 +426,29 @@ sides moved, `go test ./internal/webtier/...` passes unchanged — the pin is un
 weakened, and the Astro scope hashes (`data-astro-cid-*`) are stable across the edit, so no other
 route's markup changed.
 
+**Since then (2026-09-18), the pin and its reference tree were retired, and that does not change what
+the quote above shows.** `web/` was deleted (`65f2983`, its build could not run) and the byte-parity
+gate with it (`8e23d67`, `internal/webtier/parity_test.go` is gone), so the two `web/src/...` paths and
+`go test -run TestRenderParity` no longer exist to re-run. The failure above was real and reproduced on
+2026-09-17 while the tree was present, and the coordinator re-ran the same command against the
+still-present reference before the retirement and got `ok`. What survives the retirement is the
+coordination requirement itself: the change had to be made in the Go renderer **and** its Astro twin,
+and the only reason the twins agree today is that they were changed together. See
+`docs/architecture.md` for the retired-toolchain correction.
+
 `web/src/components/BuildList.astro`'s `.icon` rule is now unused. It is left in place deliberately:
 removing it moves shared stylesheet bytes on 1,063 pages, and that is a design-lane call, not this row.
 
 ### 11.6 What this does not fix, and what did not work
 
-- **`/matchups/mid/` 326.0 KiB and `/matchups/top/` 290.8 KiB are not this row and not this change.**
-  Both routes carry zero images, and both measure identically before and after. In this local fixture
-  posture the matchup board renders 160.6 KiB of HTML where the committed live run served 26.4 KiB
-  (same route, `lh-r2-matchups-mid`), which is what puts the pair over the first-load and 150 KiB HTML
-  ceilings here; §5 records those routes at 187.3 KiB live with the HTML row passing at 65.4 KiB worst.
-  This change neither causes nor closes them.
+- **`/matchups/mid/` 326.0 KiB and `/matchups/top/` 290.8 KiB are posture-dependent, and are not this
+  row, not this change, and not a defect in the served pages.** Both routes carry zero images, and both
+  measure identically before and after. In this local fixture posture the matchup board renders 160.6
+  KiB of HTML where the committed live run served 26.4 KiB (same route, `lh-r2-matchups-mid`), which is
+  what puts the pair over the first-load and 150 KiB HTML ceilings *here*; §5 records those routes at
+  187.3 KiB live with the HTML row passing at 65.4 KiB worst. Treat the local figure as a fixture
+  artifact: someone reading a fixture report later should not go hunting for an image or a markup
+  regression on those two routes, because there is none. This change neither causes nor closes them.
 - **Server-side pagination cannot keep the icons.** §7.5 paginates patch archives, not the live tier
   list, and the arithmetic forbids it anyway: §6.1 measures one champion image at 24,762 B, so a
   10-row page would still spend ~240 KiB on images alone against a floor (fonts + document + CSS) of
@@ -417,3 +477,30 @@ node scripts/perf/verify-report.mjs                                   # §1-§10
 
 The r3/r4 raw reports are committed for the same reason r1/r2 are (see §10) and can be pruned once a
 cutover measurement supersedes them.
+
+### 11.8 The deferred live run: the exact invocation, post-cutover
+
+**Not run by this lane, and deliberately not bought with a fixture measurement.** The definitive
+instrument for a 300 KB *traffic* ceiling is the real edge after the cutover, so the live run is
+deferred to the coordinator who schedules it, not dropped. When the edge dials the Go tier, this is
+the mechanical invocation — no port-forward, no fixtures, no local binary, just the public origin:
+
+```bash
+export CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# BASE URL: https://lol.erik-schuetze.dev  (the site's own canonical origin: every canonical link,
+# sitemap.xml and robots.txt entry names it, which compliance gate check 8 asserts)
+# Lighthouse mobile preset, 9 routes; the script asserts 200 on / before it starts
+bash scripts/perf/lighthouse-routes.sh --round 5 --base https://lol.erik-schuetze.dev --out docs/evidence
+
+# extract every figure from the raw reports, and verify §1-§10 against them
+node scripts/perf/extract-lh.mjs --json docs/evidence/lh-r5-*.json.gz > docs/evidence/lh-summary-r5.json
+node scripts/perf/extract-lh.mjs docs/evidence/lh-r5-*.json.gz      # read the first-load column
+node scripts/perf/verify-report.mjs                                 # 146 checks, exit 1 on drift
+```
+
+Then read the r5 first-load column and **either** write it into §5's row **or** leave the row FAIL —
+whichever the measurement says, with no projection substituted for it. §11.3/§11.4 then become history
+rather than evidence, and the r3/r4 reports (and this section's arithmetic) can be pruned in the same
+commit. Nothing in `scripts/perf/` needs to change for the cutover: `--base` is the only input that
+moves, and all six scripts are present and syntax-clean at the time of writing.
