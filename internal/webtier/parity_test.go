@@ -71,6 +71,38 @@ type parityCase struct {
 	name  string
 	dist  string
 	build func(*Renderer) (*Page, error)
+	// interactive marks the routes whose deployed page is the reference page
+	// plus the no-JS filter bar. The distinction matters: on a static route any
+	// difference at all is a port regression, while on an interactive route
+	// exactly one inserted element is expected and everything around it must
+	// still be byte-identical.
+	interactive bool
+}
+
+// The no-JS filter bar is the one element the deployed tier adds to a reference
+// page. It is emitted by templates/interactive.tmpl from the design system's
+// FilterBar component - which web/src defines, styles into every page's
+// stylesheet, and no page ever renders, because the static build had no way to
+// serve a query. Removing exactly this element, and only when it is present, is
+// the entire allowance the interactive routes get.
+const noJSBarOpen = `<form class="ds-filter-bar ds-print-hidden"`
+
+const noJSBarClose = `</form>`
+
+// removeNoJSBar returns the document with the first filter bar removed, whether
+// a bar was there, and the bar itself. The bar contains no nested form, so the
+// first closing tag after it terminates it.
+func removeNoJSBar(html string) (string, bool, string) {
+	start := strings.Index(html, noJSBarOpen)
+	if start < 0 {
+		return html, false, ""
+	}
+	end := strings.Index(html[start:], noJSBarClose)
+	if end < 0 {
+		return html, false, ""
+	}
+	end += start + len(noJSBarClose)
+	return html[:start] + html[end:], true, html[start:end]
 }
 
 // parityCases covers the routes the port claims parity for. `page` is the whole
@@ -82,10 +114,10 @@ func parityCases(t *testing.T) []parityCase {
 		{name: "home", dist: "index.html", build: func(r *Renderer) (*Page, error) { return r.HomePage() }},
 		{name: "about", dist: "about/index.html", build: func(r *Renderer) (*Page, error) { return r.AboutPage() }},
 		{name: "disclaimer", dist: "disclaimer/index.html", build: func(r *Renderer) (*Page, error) { return r.DisclaimerPage() }},
-		{name: "tier-list-mid", dist: "tier-list/mid/index.html", build: func(r *Renderer) (*Page, error) {
+		{name: "tier-list-mid", dist: "tier-list/mid/index.html", interactive: true, build: func(r *Renderer) (*Page, error) {
 			return r.TierListPage("mid", DefaultTierListQuery(), false)
 		}},
-		{name: "patch-tier-list-mid", dist: "patch/16.18/tier-list/mid/index.html", build: func(r *Renderer) (*Page, error) {
+		{name: "patch-tier-list-mid", dist: "patch/16.18/tier-list/mid/index.html", interactive: true, build: func(r *Renderer) (*Page, error) {
 			return r.PatchTierListPage("mid", "16.18", DefaultTierListQuery(), false)
 		}},
 		{name: "matchups-mid", dist: "matchups/mid/index.html", build: func(r *Renderer) (*Page, error) {
@@ -133,6 +165,62 @@ func TestRenderParity(t *testing.T) {
 
 func equalIgnoringEscaping(want []byte, got []byte) bool {
 	return normaliseEscaping(string(want)) == normaliseEscaping(string(got))
+}
+
+// TestInteractiveRenderParity pins the variant the tier actually serves for the
+// two tier-list routes: the reference page with the no-JS filter bar inserted.
+// Both halves are asserted - the bar is present, and removing it leaves the
+// published bytes untouched - so neither a missing bar (the page would stop
+// being sortable, filterable or paginated without JavaScript) nor a changed
+// table (the port would stop being a port) can pass.
+func TestInteractiveRenderParity(t *testing.T) {
+	dir := referenceDir(t)
+	renderer := newFixtureRenderer(t)
+
+	cases := []struct {
+		name  string
+		dist  string
+		build func(*Renderer) (*Page, error)
+	}{
+		{name: "tier-list-mid", dist: "tier-list/mid/index.html", build: func(r *Renderer) (*Page, error) {
+			return r.TierListPage("mid", DefaultTierListQuery(), true)
+		}},
+		{name: "patch-tier-list-mid", dist: "patch/16.18/tier-list/mid/index.html", build: func(r *Renderer) (*Page, error) {
+			return r.PatchTierListPage("mid", "16.18", DefaultTierListQuery(), true)
+		}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			want, err := os.ReadFile(filepath.Join(dir, testCase.dist))
+			if err != nil {
+				t.Fatalf("read reference %s: %v", testCase.dist, err)
+			}
+			if reference, found, _ := removeNoJSBar(string(want)); found {
+				t.Fatalf("the reference %s already contains a filter bar; the allowance would hide a real difference (%d bytes)", testCase.dist, len(reference))
+			}
+			page, err := testCase.build(renderer)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			var got bytes.Buffer
+			if err := renderer.Render(&got, page); err != nil {
+				t.Fatalf("shell: %v", err)
+			}
+			stripped, found, bar := removeNoJSBar(got.String())
+			if !found {
+				t.Fatal("the served variant has no filter bar: the page would not be sortable, filterable or paginated without JavaScript")
+			}
+			if !strings.Contains(bar, `method="get"`) {
+				t.Errorf("filter bar is not a GET form, so its selections are not URLs:\n%s", bar)
+			}
+			if equalIgnoringEscaping(want, []byte(stripped)) {
+				return
+			}
+			t.Errorf("interactive render does not reduce to the reference for %s (%d reference bytes, %d served bytes)\n%s",
+				testCase.name, len(want), len(stripped), firstDifference(normaliseEscaping(string(want)), normaliseEscaping(stripped)))
+		})
+	}
 }
 
 // firstDifference reports the first differing offset with context, which is what
