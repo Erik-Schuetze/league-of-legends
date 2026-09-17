@@ -35,19 +35,68 @@ Work down this list in order. Each step is a question with a cheap answer.
 
 ## Symptom: claims are stuck
 
-A worker that is killed mid-fetch leaves its rows `claimed`. They are reclaimed
-by the grace window, not by hand:
+A worker that is killed mid-fetch leaves its rows `claimed`. Two things reclaim
+them, both under the same grace window:
 
 ```
+lolstats-ingest worker                   # reclaims expired claims on boot
 lolstats-ingest maintain                 # reclaims claims older than 15m
 lolstats-ingest maintain -dry-run        # what would be reclaimed, changed nothing
 ```
 
-`-claim-grace` moves the window. It should stay comfortably above the client
-timeout (`DefaultJobTimeout`, 25s): a short grace reclaims claims that are still
-being worked, which duplicates work rather than losing it - the archive and the
-`match_id` upsert both make the duplicate harmless, but it spends rate-limit
-budget twice.
+The worker's own pass runs before it claims anything, so a crash and restart is
+a recovery and not a wait: before it, a restart recovered nothing and the run
+stalled until the hourly `maintain` job's grace had passed, which put a crash as
+much as seventy-five minutes behind. The boot pass hands back at most 1000 rows
+(`claimRecoveryLimit`); a backlog larger than that is drained by the next boot
+or by `maintain`. `maintain` is still the periodic safety net, and it logs
+`maintain: reclaimed abandoned claims`.
+
+`-claim-grace` moves the window for both. It should stay comfortably above the
+client timeout (`DefaultJobTimeout`, 25s): a short grace reclaims claims that are
+still being worked, which duplicates work rather than losing it - the archive
+and the `match_id` upsert both make the duplicate harmless, but it spends
+rate-limit budget twice.
+
+A graceful `TERM` does not leave claims behind for either pass: the worker stops
+claiming, releases the rows of the batch it had not started, and schedules the
+rows that were in flight, so only a `SIGKILL` produces the stranded claims above.
+The half of the batch that was already archived is finished on the way out - the
+final flush and the updates that close those rows run on a context that outlives
+the stop, because the writer rejects a flush on a cancelled one - so the process
+log ends with `released unstarted rows at shutdown` and, when a batch had already
+archived something, `closed the archived rows of the interrupted batch`. A batch
+whose flush fails for a real reason is left claimed on purpose: the archive holds
+nothing for those rows yet, and a boot's pass (or `maintain`) hands them back.
+
+## Symptom: rows retire with cause `archive`
+
+The archive is written before the control-plane row (`worker.go`), and a write
+that fails - a read-only or mis-mounted raw volume - puts the row back on the
+queue. That retry is bounded like any other failure now: each row climbs to
+`-max-attempts` and then goes `dead` with `last_cause = 'archive'`, with the
+process log carrying one `match requeued ... "cause":"archive"` line per
+attempt and one `match dead-lettered` line at the end. Before, the archive path
+bypassed the attempt ceiling and requeued the same rows with no growth, which
+turned a bad mount into an unbounded hot loop (measured: 2107 requeues in 60s).
+
+`fetch_queue.revivals` counts how often a retired row has been given back to the
+crawl. The queue revives a `dead` row on its own at most three times; after
+that the row is terminal and moving it again is a deliberate act:
+
+```
+lolstats-ingest maintain -replay-dead-letters   # returns dead rows to the queue
+```
+
+Nothing is dropped: a row that is `dead` still holds its `match_id` and cause,
+and a re-fetch of it is a no-op in the control plane because the archive is
+content-addressed and `matches` is keyed by `match_id`.
+
+A `429` with a `Retry-After` longer than one call's timeout is a wait, not a
+shutdown: the worker classifies it from the response, not from the deadline that
+expired while it was holding the call back, and schedules the row after at least
+the `Retry-After`. If the process log shows rows in `job released before
+shutdown` with no shutdown in progress, that classification is what regressed.
 
 ## Symptom: the archive is being written but rows are missing
 

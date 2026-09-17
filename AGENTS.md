@@ -60,14 +60,17 @@ source of truth and the document is the bug.
 - Tool versions are pinned in the `Makefile` so a local run and a CI run are the
   same run. Do not invoke an unpinned tool from a target.
 - Docker images are pinned by digest with a readable tag in front. `CGO_ENABLED=0`,
-  static binary, distroless nonroot runtime.
+  static Go binary, distroless nonroot runtime - the `cc` variant of distroless,
+  because the pinned DuckDB CLI is a glibc binary.
 
 ## Before you say it works
 
 Run `make vet`, `make test`, `make lint` (and `make vuln` for dependency changes,
 `cd web && npm run build` for frontend changes) - or say plainly that you could
-not. Never describe a change as tested, working or verified on the strength of
-having read it carefully.
+not. `make test` skips the DuckDB-dependent analytics tests when the pinned
+client is absent, so `make duckdb && make test-build` is what proves the
+aggregation path actually ran. Never describe a change as tested, working or
+verified on the strength of having read it carefully.
 
 If a tool cannot be made to run locally, say so explicitly rather than reporting a
 pass you did not observe. A false pass costs more than a known gap.

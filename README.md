@@ -78,6 +78,10 @@ rather than one at a time.
 | `LOLSTATS_AGG_BRACKET` | `all` | Bracket segment. `all` in v1 |
 | `LOLSTATS_AGG_QUEUE_ID` | `420` | Ranked solo/duo |
 | `LOLSTATS_AGG_PATCH` | - | Patch to build, `major.minor`. Empty means the newest in the archive |
+| `LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT` | `1GiB` | Hard ceiling for each DuckDB client. Must stay well under the pod's memory limit — DuckDB otherwise sizes itself from the host's RAM |
+| `LOLSTATS_AGG_DUCKDB_THREADS` | `2` | DuckDB thread pool. Matches the aggregate Job's CPU limit; the host-derived default is the node's core count |
+| `LOLSTATS_AGG_DUCKDB_TEMP_DIR` | `$TMPDIR` | Parent of the `duckdb-spill` directory DuckDB spills into. Must be writable: root filesystems here are read-only |
+| `LOLSTATS_AGG_DUCKDB_MAX_TEMP_SIZE` | `10GiB` | Ceiling on that spill directory. DuckDB's own default is 90 % of the node's free disk |
 | `LOLSTATS_HTTP_*_TIMEOUT` | `10s`-`60s` | Metrics listener timeouts |
 
 ## Apply the schema
@@ -119,6 +123,32 @@ cd web && npm ci && npm run build
 
 `make vuln` runs `govulncheck` over the module graph. Run it on any dependency
 change.
+
+### The DuckDB build tests must not skip
+
+The end-to-end analytics tests (`internal/aggregate/fixture*_test.go`) run the
+real DuckDB build over the fixture archive and compare it against numbers a human
+computed by hand. They need the pinned DuckDB CLI, and they **skip** rather than
+fail when it is not installed - which is right for a laptop without it, and means
+`make test` alone can be green without having exercised the aggregation path at
+all. That is never acceptable in CI, so CI runs a target that refuses a skip:
+
+```sh
+make duckdb       # download the pinned DuckDB v1.4.5 client into bin/, sha256-verified
+make test-build   # run the package under -race; fail on a skip or a missing PASS
+```
+
+`make duckdb` is idempotent and covers `Linux/x86_64`, `Linux/aarch64` and
+`Darwin/arm64`; any other platform fails loudly instead of downloading bytes it
+cannot verify. The Linux checksums are the same ones the `duckdb` stage of the
+`Dockerfile` ships, so the client CI tests with is the client the image runs. The
+`verify` job in `.github/workflows/docker-build.yml` installs the pin this way
+and runs `make test-build`, and `build-and-push` needs `verify`, so a run in
+which these tests did not execute cannot publish an image.
+
+To run the tests against a client you already have, point `LOLSTATS_DUCKDB_BIN`
+at it and run `go test ./internal/aggregate/... -v` (the build rejects a client
+whose version is not the pin in `internal/aggregate/engine.go`).
 
 ## The image
 

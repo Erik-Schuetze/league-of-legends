@@ -80,12 +80,23 @@ func (p Publisher) Publish(stagingRoot string, relativeDirs []string, manifestRe
 	}
 
 	trashRoot := filepath.Join(p.AggRoot, trashDirName())
-	if err := os.MkdirAll(trashRoot, 0o755); err != nil {
+	// Publish can be reached without a preceding Build call, so it creates the
+	// root itself - served, because MkdirAll on the trash path would otherwise
+	// create the root private. See perms.go.
+	if err := os.MkdirAll(p.AggRoot, publishedDirPerm); err != nil { //nolint:gosec // G301: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
+		return PublishResult{}, fmt.Errorf("publish: create aggregate root: %w", err)
+	}
+	// Private: the trash holds displaced artifacts for the microseconds a
+	// rename takes and is read by this process alone. See perms.go.
+	if err := os.MkdirAll(trashRoot, privateDirPerm); err != nil {
 		return PublishResult{}, fmt.Errorf("publish: create trash directory: %w", err)
 	}
 	// The trash directory is removed on every path out of this function; a
 	// leftover one is harmless but confusing, and it is the evidence a failed
-	// build was rolled back cleanly.
+	// build was rolled back cleanly. It is private rather than served: a
+	// displaced artifact is still on disk for the moment the rename takes,
+	// and a reader should reach the live tree or nothing, never the previous
+	// copy under a temporary name.
 	defer func() {
 		if err := os.RemoveAll(trashRoot); err != nil {
 			p.Log.Warn("publish: could not remove trash directory", "path", trashRoot, "error", err)
@@ -95,7 +106,7 @@ func (p Publisher) Publish(stagingRoot string, relativeDirs []string, manifestRe
 	var result PublishResult
 	for i, rel := range relativeDirs {
 		live := filepath.Join(p.AggRoot, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(live), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(live), publishedDirPerm); err != nil { //nolint:gosec // G301: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
 			return result, p.rollback(fmt.Errorf("publish: create parent of %s: %w", rel, err), result, trashRoot, i)
 		}
 		moved, err := displace(live, filepath.Join(trashRoot, fmt.Sprintf("old-%d", i)))

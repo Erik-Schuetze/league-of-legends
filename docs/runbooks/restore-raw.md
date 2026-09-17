@@ -46,12 +46,40 @@ backup-archive: NOTE: that is a NON-off-site copy - the same NFS export as the a
 backup-archive: NOTE: plan risk R6 stays accepted and unmet while this is true.
 ```
 
+## The committed drill, and what it does and does not prove
+
+`make archive-verify` (`scripts/archive-verify.sh`) proves the restic half of the
+launch gate mechanically, on any machine with Docker, with no cluster access and
+no pre-existing repository: it builds a synthetic raw archive in the layout
+`internal/raw` documents, initialises a repository with the digest this runbook
+and the CronJob pin, backs up with the job's exact flags, proves a wrong password
+cannot open the repository, runs the job's Sunday branch (`forget --prune`,
+`check --read-data-subset=2%`) and then a full `check --read-data`, restores into
+an empty directory and compares the archive and the restore by sha256 manifest.
+It then proves that comparison can fail - a changed byte in a restored file, a
+file the snapshot never held, and a recorded file missing from the restore - and
+finally runs the nightly backup a second time over a grown archive, because the
+incremental snapshot is the one that has a parent to fall back on.
+
+What it proves: the repository format survives a round trip through the tool that
+will perform the real restore, that the excludes keep half-written parts and
+cache directories out of the snapshot, that retention does not break the
+repository, and that the comparison used to assert all of that is capable of
+failing. What it does not prove: that the archive on the `lolstats-data` volume
+restores. The corpus is synthetic, so it also measures nothing about the archive's
+size or growth. That part of the gate is the rest of this runbook, run by a human
+against the live repository.
+
 ## When to use it
 
 - Files under `/var/lib/lolstats/raw` were deleted or truncated.
 - The archive is intact but you need one match payload back.
 - You are proving the repository can be restored. This is a launch gate, and it
   is the one action that converts "we have a snapshot" into "we have a backup".
+  The reproducible half of it is `make archive-verify`, which needs no cluster;
+  this runbook is the half that has to touch the live repository, because only a
+  restore from *this* repository proves *this* repository restores back to the
+  archive it came from.
 
 ## The repository shell
 
@@ -180,6 +208,8 @@ cannot be kept forever.
 
 - `restic snapshots` lists at least one snapshot for host `lolstats-archive`.
 - The staged tree has roughly the same file count and size as the live one did.
+  For the exact version of this check, `make archive-verify` compares the archive
+  and the restore by sha256 manifest, both directions, and proves it can fail.
 - `lolstats-aggregate verify` passes against `agg/` after a rebuild (see
   `rebuild-aggregates.md`), and a page that reads a match shows real numbers.
 - The next `backup-archive` run reports a new snapshot and does not print the
@@ -241,9 +271,11 @@ the part that makes it a backup.
    (`kubectl -n lolstats create job backup-archive-first
    --from=cronjob/backup-archive`), read the log, confirm with `restic snapshots`
    from the shell pod that a snapshot exists *at the new repository*, and then run
-   the restore drill above against it. A repository that has never been restored
-   from is not yet a backup, and until this step succeeds R6 stays unmet even
-   though the bytes are finally somewhere else.
+   the restore above against it. `make archive-verify` cannot stand in for this:
+   it drives a repository of its own creation, so it says nothing about whether
+   the new medium holds a readable snapshot. A repository that has never been
+   restored from is not yet a backup, and until this step succeeds R6 stays unmet
+   even though the bytes are finally somewhere else.
 6. **Record it.** Update `deploy/README.md` (section Backups) and this runbook to
    say R6 is met, with the date and the medium. Optionally keep the local path as
    a second copy with `restic copy` (it needs both passwords, via

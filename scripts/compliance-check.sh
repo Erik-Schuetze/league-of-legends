@@ -18,7 +18,15 @@
 # Environment:
 #   LOLSTATS_RIOT_VERIFICATION_TOKEN  set -> /riot.txt must be published, unset ->
 #                                     no page may claim Riot verification
-#   LOLSTATS_SITE_URL                 the deployed address, also read by the build
+#   LOLSTATS_SITE_URL                 the deployed address, also read by the build.
+#                                     Check 8 fails on a reserved placeholder hostname
+#                                     whether or not this is set, and requires every
+#                                     canonical, the sitemap and robots.txt to name one
+#                                     host: this variable when it is set, and the build's
+#                                     own deliberate default when it is not
+#   LOLSTATS_DIST                     scan this build instead of web/dist. Used to check
+#                                     the demo, no-data and live builds separately; it
+#                                     changes only which files are read, never a rule
 #   LOLSTATS_CONTACT_EMAIL            the published contact address
 #
 # Where a check can only be satisfied by a decision that is not the code's to
@@ -28,9 +36,18 @@
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-DIST="$ROOT/web/dist"
+# A reviewer who has to verify a specific data state can point the scans at that
+# snapshot instead of the shared web/dist, which concurrent builds overwrite:
+#   LOLSTATS_DIST=.agent-artifacts/provfix/dist-final-demo sh scripts/compliance-check.sh
+DIST="${LOLSTATS_DIST:-$ROOT/web/dist}"
+if [ "${LOLSTATS_DIST:-}" != "" ] && [ "${DIST#/}" = "$DIST" ]; then DIST="$ROOT/$DIST"; fi
 LEGAL="$ROOT/web/src/lib/legal.ts"
-WORK="$ROOT/.agent-artifacts/compliance-check"
+SITE="$ROOT/web/src/lib/site.ts"
+# Scratch space for the scans. It is named after this process so that two
+# reviewers running the gate at the same time cannot delete each other's tally
+# files half way through: that clobbering made whole checks report "0 of 0
+# pages" and fail for a reason that had nothing to do with the site.
+WORK="$ROOT/.agent-artifacts/compliance-check.$$"
 
 mkdir -p "$WORK"
 trap 'rm -rf "$WORK"' EXIT INT TERM
@@ -40,7 +57,15 @@ pass() { printf 'PASS  %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; failures=$((failures + 1)); }
 warn() { printf 'WARN  %s\n' "$1"; }
 note() { printf '      %s\n' "$1"; }
-check() { printf '\n== %s\n' "$1"; }
+check() {
+	# Scans write their tallies into $WORK. Re-create it at every check: a reviewer
+	# who deletes that directory mid-run, or another process sharing the checkout,
+	# would otherwise make whole checks read nothing and report a clean result for
+	# no reason. The guard before the summary catches the case where it cannot be
+	# re-created at all.
+	mkdir -p "$WORK" 2>/dev/null || true
+	printf '\n== %s\n' "$1"
+}
 
 count_lines() { grep -c '' "$1" 2>/dev/null | tr -d ' '; }
 count_files() { find "$1" -type f -name '*.html' | grep -c '' | tr -d ' '; }
@@ -48,6 +73,78 @@ count_nul() { tr -cd '\0' < "$1" | wc -c | tr -d ' '; }
 lower() { tr '[:upper:]' '[:lower:]'; }
 # Built pages are one enormous line each, so report matches without the line.
 trim() { cut -c1-200; }
+
+# Read one string constant out of a TypeScript module, or print nothing.
+#
+# The constants these checks turn into patterns are declared in site.ts and
+# legal.ts, and a declaration is allowed to be wrapped over several lines:
+# site.ts writes UNVERIFIED_PREVIEW_TEXT that way. A line-oriented
+# `sed -n "s/.*NAME = '\(.*\)';.*/\1/p"` returns the empty string for such a
+# declaration, and that empty string then became a grep pattern - an ERE with a
+# trailing `|` has an empty alternative that matches every page, and
+# `grep -LF ""` lists no file at all - so the check that used it passed while
+# proving nothing. Newlines are therefore flattened to spaces before matching
+# (flattening cannot change a single-line string literal, but it does let a
+# declaration be read whole) and the declaration, not a mention of the name, is
+# what is matched: `const NAME = <quote>...<quote>`.
+read_const() {
+	tr '\n' ' ' < "$1" 2>/dev/null | awk -v name="$2" '
+		BEGIN { sq = sprintf("%c", 39); dq = sprintf("%c", 34); bq = sprintf("%c", 96) }
+		{
+			# An optional type annotation is allowed; the literal may be single
+			# quoted, double quoted or backticked.
+			re = "(^|[^A-Za-z0-9_])const[[:space:]]+" name "([[:space:]]*:[^=;]*)?[[:space:]]*=[[:space:]]*"
+			for (i = 1; i <= 3; i++) {
+				q = (i == 1 ? sq : (i == 2 ? dq : bq))
+				if (match($0, re q "([^" q "]*)" q)) {
+					s = substr($0, RSTART, RLENGTH)
+					sub("^[^=]*=[[:space:]]*" q, "", s)
+					sub(q "[^" q "]*$", "", s)
+					print s
+					exit
+				}
+			}
+		}
+	'
+}
+
+# assert_read <file> <constant> <value> <what it labels>: a constant that could
+# not be read is a failure, not a skip, and its message says which one and why.
+# This is the file's own rule from the header - every scan asserts that it read
+# something - applied to the patterns themselves, because an empty pattern is
+# worse than no scan: it matches everything and reports PASS.
+assert_read() {
+	if [ -n "$3" ]; then return 0; fi
+	fail "$2 could not be read from $1, so $4 cannot be checked. An empty pattern is not a skipped check: it is a pattern that matches (or discards) every file, which is how this gate has passed while proving nothing. Expected a single-literal declaration, which may be wrapped over several lines and may be quoted with ' or \" or \`: const $2 = '...';"
+	return 1
+}
+
+# The built site is written by another 'npm run build', which replaces web/dist
+# wholesale. A gate run that lands mid-rebuild reads a torn tree: /disclaimer
+# exists but is empty, no page carries the notice, no canonical can be read - and
+# the gate then reports five content violations that are really one race, which is
+# both alarming and wrong. Five missing-content failures at once is a shape, not a
+# coincidence, so the tree is checked for it up front and the run stops with a
+# diagnosis rather than a verdict. This exits 2: it is not a compliance failure,
+# and no check has been evaluated yet.
+preflight_dist() {
+	torn=''
+	for probe in index.html disclaimer/index.html about/index.html legal/privacy/index.html; do
+		if [ ! -s "$DIST/$probe" ]; then
+			torn="$torn $probe"
+		elif ! grep -qF '</html>' "$DIST/$probe" 2>/dev/null; then
+			torn="$torn $probe(truncated)"
+		fi
+	done
+	if [ "$torn" != '' ]; then
+		printf 'CANNOT RUN  the built site at %s is incomplete:%s\n' "$DIST" "$torn"
+		printf '            another process is writing it (an npm run build replaces web/dist\n'
+		printf '            wholesale) or the site has not been built. Build it, let the build\n'
+		printf '            settle, and re-run: these are missing or half-written files, not\n'
+		printf '            compliance failures.\n'
+		exit 2
+	fi
+}
 
 # A rating-like value in any language this project uses. The delimiters are
 # spelled out rather than \b, because macOS ships BSD grep and portable word
@@ -83,6 +180,8 @@ if [ "$htmls" -lt 10 ]; then
 	exit 1
 fi
 pass "web/dist holds $htmls built HTML pages"
+
+preflight_dist
 
 # ---------------------------------------------------------------------------
 check '1. No MMR, ELO or rating-like value anywhere (Riot prohibition)'
@@ -169,14 +268,22 @@ fi
 
 # ---------------------------------------------------------------------------
 check '4. The free tier is genuinely free and ungated: no account, no paywall'
+GATING='<form[^>]*>|type="password"|type="email"|name="(password|email)"|href="[^"]*(login|sign-in|signin|sign-up|signup|register|subscribe|pricing|checkout)"|data-paywall|>Sign (in|up)<'
 find "$DIST" -type f -name '*.html' -print0 |
-	xargs -0 grep -hoIE '<form[^>]*>|type="password"|type="email"|name="(password|email)"|href="[^"]*(login|sign-in|signin|sign-up|signup|register|subscribe|pricing|checkout)"|data-paywall|>Sign (in|up)<' \
+	xargs -0 grep -hoIE "$GATING" \
 	> "$WORK/gating.txt" 2>/dev/null || true
 gating=$(count_lines "$WORK/gating.txt")
 search_inputs=$(find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -hoIE '<input[^>]*type="search"[^>]*>' 2>/dev/null | grep -c '<input' | tr -d ' ')
 note "scanned $(count_files "$DIST") built pages for a form, a password or email field, a sign-in, registration, subscription or checkout route, or a paywall"
 note "excluded deliberately: $search_inputs <input type=\"search\"> elements, which are the same-origin table filters (data-island), not a gate; the tables render without them"
-if [ "$gating" -eq 0 ]; then
+# A site that gates nothing and a pattern that matches nothing produce the same
+# silence, so the pattern is exercised against the markup this check exists to
+# catch before its silence is believed - the same control check 9 applies to its
+# pattern, and the reason this check has no exemption list to hide behind.
+gating_probe=$(printf '%s\n' '<form action="/login"><input type="password" name="password"></form>' '<a href="/pricing">Pricing</a>' | grep -cE "$GATING" | tr -d ' ')
+if [ "$gating_probe" -lt 2 ]; then
+	fail "the gating pattern matches only $gating_probe of the two pieces of markup it exists to catch, so a clean scan of the built pages would prove nothing"
+elif [ "$gating" -eq 0 ]; then
 	pass 'no form, no credential field, no auth route and no paywall in any built page; every route renders for an anonymous reader'
 else
 	fail "$gating gating element(s) found in the built pages:"
@@ -197,7 +304,14 @@ pages=$(count_files "$DIST")
 find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -hoiE "$CLAIMS" > "$WORK/claims.txt" 2>/dev/null || true
 claims=$(count_lines "$WORK/claims.txt")
 note "scanned $pages built pages for a positive claim that Riot has reviewed, verified or endorsed this site: $claims match(es)"
-if [ -n "$token" ]; then
+# The site is supposed to make no such claim, so this scan is silent by design and
+# a pattern that had stopped matching would be silent too. The pattern is therefore
+# exercised against the sentence it exists to catch first, as check 9 does with its
+# pattern, so that silence here is evidence rather than an absence of evidence.
+claim_probe=$(printf '%s\n' 'This site has been verified by Riot Games.' | grep -cE "$CLAIMS" | tr -d ' ')
+if [ "$claim_probe" -lt 1 ]; then
+	fail 'the claim pattern does not match the sentence it exists to catch, so a scan that found nothing would prove nothing'
+elif [ -n "$token" ]; then
 	if [ -f "$DIST/riot.txt" ]; then
 		published=$(tr -d '\r\n' < "$DIST/riot.txt")
 		if [ "$published" = "$token" ]; then
@@ -239,7 +353,7 @@ check '6. The non-endorsement notice is visible, and the wording has not drifted
 if [ ! -f "$LEGAL" ]; then
 	fail 'web/src/lib/legal.ts is missing, so the shared wording cannot be verified'
 else
-	sed -n "s/^export const NON_ENDORSEMENT_TEXT = '\(.*\)';$/\1/p" "$LEGAL" > "$WORK/non-endorsement.txt"
+	read_const "$LEGAL" NON_ENDORSEMENT_TEXT > "$WORK/non-endorsement.txt"
 	approved=$(count_lines "$WORK/non-endorsement.txt")
 	note "read the approved wording back out of web/src/lib/legal.ts: $approved line"
 	if [ "$approved" -ne 1 ] || ! grep -qF "$NON_ENDORSEMENT_MARKER" "$WORK/non-endorsement.txt"; then
@@ -251,8 +365,50 @@ else
 			fail 'the frozen non-endorsement sentence is missing from the built /disclaimer page'
 		fi
 		find "$DIST" -type f -name '*.html' -print0 |
-			xargs -0 grep -lF "$(cat "$WORK/non-endorsement.txt")" > "$WORK/non-endorsement-pages.txt" 2>/dev/null || true
-		note "pages that render the sentence itself: $(count_lines "$WORK/non-endorsement-pages.txt") of $(count_files "$DIST")"
+			xargs -0 grep -lF "$(cat "$WORK/non-endorsement.txt")" > "$WORK/notice-approved.txt" 2>/dev/null || true
+		find "$DIST" -type f -name '*.html' -print0 |
+			xargs -0 grep -lF "$NON_ENDORSEMENT_MARKER" > "$WORK/notice-any.txt" 2>/dev/null || true
+		notice_any=$(count_lines "$WORK/notice-any.txt")
+		notice_approved=$(count_lines "$WORK/notice-approved.txt")
+		pages=$(count_files "$DIST")
+		note "pages rendering the approved sentence: $notice_approved of $pages"
+		# The notice itself has to be everywhere, or the counts below prove nothing:
+		# a footer that stopped serving it would take every paraphrase with it.
+		if [ "$notice_any" -eq 0 ]; then
+			fail 'no built page carries the non-endorsement notice at all'
+		elif [ "$notice_any" -ne "$pages" ]; then
+			fail "$notice_any of $pages built pages carry the non-endorsement notice; the footer serves it on every page"
+		else
+			pass "all $pages built pages carry the non-endorsement notice"
+		fi
+		# Drift: a page that states the notice in wording that is not the frozen
+		# sentence is the failure this check exists for. web/src/components/Footer.astro
+		# used to carry its own paraphrase on every page while the approved sentence
+		# appeared on four, and this check passed anyway. It does not now.
+		sort "$WORK/notice-any.txt" > "$WORK/notice-any.sorted"
+		sort "$WORK/notice-approved.txt" > "$WORK/notice-approved.sorted"
+		comm -23 "$WORK/notice-any.sorted" "$WORK/notice-approved.sorted" > "$WORK/notice-drift.txt" 2>/dev/null || true
+		drift=$(count_lines "$WORK/notice-drift.txt")
+		if [ "$drift" -ne 0 ]; then
+			fail "$drift built page(s) state the non-endorsement notice in wording that is not the frozen sentence from web/src/lib/legal.ts:"
+			sed 's/^/      /' "$WORK/notice-drift.txt" | head -5
+			note 'the footer and the legal pages must render NON_ENDORSEMENT_TEXT itself rather than a paraphrase'
+		else
+			pass "every page that states the notice uses the frozen sentence, so no paraphrase of it is served ($notice_approved of $pages)"
+		fi
+		# And the source invariant behind that, so the drift is caught even in a state
+		# where every page happens to render the sentence for some other reason.
+		footers=''
+		for footer in web/src/components/Footer.astro web/src/layouts/fallback/Footer.astro; do
+			if [ -f "$ROOT/$footer" ] && ! grep -qF 'NON_ENDORSEMENT_TEXT' "$ROOT/$footer"; then
+				footers="$footers $footer"
+			fi
+		done
+		if [ -n "$footers" ]; then
+			fail "these footers do not read NON_ENDORSEMENT_TEXT from web/src/lib/legal.ts, so they can drift from the approved wording:$footers"
+		else
+			pass 'both footers render the approved sentence from the shared constant rather than a copy of it'
+		fi
 	fi
 fi
 find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -LF 'href="/disclaimer"' > "$WORK/no-disclaimer-link.txt" 2>/dev/null || true
@@ -268,7 +424,7 @@ fi
 check '7. The legal pages publish a contact route'
 email=${LOLSTATS_CONTACT_EMAIL:-}
 if [ -z "$email" ] && [ -f "$LEGAL" ]; then
-	email=$(sed -n "s/^export const OPERATOR_CONTACT_EMAIL = '\(.*\)';$/\1/p" "$LEGAL" | head -1)
+	email=$(read_const "$LEGAL" OPERATOR_CONTACT_EMAIL)
 fi
 if [ -z "$email" ]; then
 	fail 'no contact address is configured and none could be read from web/src/lib/legal.ts'
@@ -291,15 +447,57 @@ fi
 
 # ---------------------------------------------------------------------------
 check '8. The served address is the deployed one, not a reserved placeholder'
-find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -lF 'lolstats.example.invalid' > "$WORK/placeholder.txt" 2>/dev/null || true
+# Every address the deployment publishes, not just the pages: the sitemap and
+# robots.txt carry the origin too, and they are what a crawler reads first.
+PLACEHOLDER='lolstats.example.invalid'
+find "$DIST" -type f \( -name '*.html' -o -name '*.xml' -o -name '*.txt' \) -print0 |
+	xargs -0 grep -lF "$PLACEHOLDER" > "$WORK/placeholder.txt" 2>/dev/null || true
 placeholder=$(count_lines "$WORK/placeholder.txt")
 if [ "$placeholder" -eq 0 ]; then
-	pass 'no built page carries a reserved placeholder hostname'
-elif [ -n "${LOLSTATS_SITE_URL:-}" ]; then
-	fail "$placeholder built page(s) still carry the reserved placeholder hostname although LOLSTATS_SITE_URL is set to $LOLSTATS_SITE_URL"
+	pass 'no built page, sitemap or robots.txt carries a reserved placeholder hostname'
 else
-	warn "$placeholder of $(count_files "$DIST") built pages carry the reserved placeholder hostname lolstats.example.invalid, because this build was not given LOLSTATS_SITE_URL"
-	note 'the deployed build must set LOLSTATS_SITE_URL to the registered domain; until it does, the canonical URLs and the sitemap name a host that is not this site'
+	fail "$placeholder published file(s) carry the reserved placeholder hostname $PLACEHOLDER; a missing LOLSTATS_SITE_URL must never reach the canonicals or the sitemap"
+	sed 's/^/      /' "$WORK/placeholder.txt" | head -5
+	note 'astro.config.mjs publishes a stated default instead of a placeholder, and refuses a reserved hostname outright'
+fi
+
+: > "$WORK/hosts.txt"
+find "$DIST" -type f -name '*.html' -print0 |
+	xargs -0 grep -oh 'rel="canonical" href="[^"]*"' 2>/dev/null |
+	sed 's/.*href="//; s/".*$//; s|^http://|https://|; s|\(^https://[^/]*\).*|\1|' >> "$WORK/hosts.txt"
+if [ -f "$DIST/sitemap.xml" ]; then
+	grep -oh '<loc>https\{0,1\}://[^<]*' "$DIST/sitemap.xml" 2>/dev/null |
+		sed 's|<loc>||; s|^http://|https://|; s|\(^https://[^/]*\).*|\1|' >> "$WORK/hosts.txt"
+fi
+if [ -f "$DIST/robots.txt" ]; then
+	grep -oh '^Sitemap: https\{0,1\}://[^ ]*' "$DIST/robots.txt" 2>/dev/null |
+		sed 's|^Sitemap: ||; s|^http://|https://|; s|\(^https://[^/]*\).*|\1|' >> "$WORK/hosts.txt"
+fi
+sort -u "$WORK/hosts.txt" > "$WORK/hosts-uniq.txt"
+addressed=$(count_lines "$WORK/hosts.txt")
+hosts=$(count_lines "$WORK/hosts-uniq.txt")
+if [ "$addressed" -eq 0 ]; then
+	fail 'no canonical URL could be read out of the built site, so this check cannot prove where it points'
+elif [ "$hosts" -ne 1 ]; then
+	fail "the built site addresses $hosts different hosts; every canonical and the sitemap must name one origin:"
+	sed 's/^/      /' "$WORK/hosts-uniq.txt" | head -5
+else
+	pass "all $addressed canonical, sitemap and robots.txt addresses name $(cat "$WORK/hosts-uniq.txt")"
+	if [ -n "${LOLSTATS_SITE_URL:-}" ]; then
+		expected=$(printf '%s' "$LOLSTATS_SITE_URL" | sed 's|/$||; s|^http://|https://|')
+		# A degenerate value (a bare "/", say) reduces to the empty pattern, and an
+		# empty pattern matches every line, so "the served origin is the configured
+		# address" would be asserted without comparing anything.
+		if [ -z "${expected#https://}" ] || [ "$expected" = '/' ]; then
+			fail "LOLSTATS_SITE_URL is set to '$LOLSTATS_SITE_URL', which names no host, so the served origin cannot be compared with it"
+		elif grep -qxF "$expected" "$WORK/hosts-uniq.txt"; then
+			pass "the served origin is the configured LOLSTATS_SITE_URL ($expected)"
+		else
+			fail "the served origin $(cat "$WORK/hosts-uniq.txt") is not LOLSTATS_SITE_URL ($expected)"
+		fi
+	else
+		note "LOLSTATS_SITE_URL is not set, so the build used its own default; the addresses above are that default, not a placeholder"
+	fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -394,6 +592,112 @@ else
 	else
 		fail 'fixtures/README.md no longer states that nothing in fixtures/ is real Riot data'
 	fi
+fi
+
+# ---------------------------------------------------------------------------
+check '11. Every built page is a whole document that carries its data-provenance labelling'
+# The served tree is a copy of web/dist, so this is the same property that
+# scripts/verify-serving.sh asserts against a live origin, checked one step
+# earlier and for all 1000+ pages instead of the handful a running tier is polled
+# for. It is not redundant with it: this one runs in CI without a cluster, and
+# that one catches a tier that damages a page on the way out.
+#
+# The labelling is mandatory rather than decorative. With no Riot API key the
+# site publishes demo data on purpose, and a page that has lost its banner is
+# presenting illustrative numbers as if they were statistics. That is what a page
+# cut short looks like from the outside, and no status-code check can see it: a
+# damaged page is still a 200.
+#
+# What is asserted is that the banner matches the state the page itself declares,
+# rather than that every page carries one fixed string, because the site renders
+# three honest states with different wording each (demo, live, no-data) and a
+# check hardcoded to the demo wording would fail a live build for being live.
+# A page that declares no state at all still fails, and the demo wording is read
+# from its declaration so that changing it cannot quietly leave this check
+# asserting a string the site no longer emits. An unreadable declaration is a
+# failure rather than a skip, because a scan that matched nothing would otherwise
+# report a clean result.
+#
+# All three constants are asserted, not just the first. The demo scan is a union
+# of two alternatives and the no-data scan is an exclusion, so an empty constant
+# does not weaken those scans, it deletes them: `PREVIEW|` matches every page,
+# and `grep -LF ""` lists nothing. UNVERIFIED_PREVIEW_TEXT was empty because it is
+# declared across two lines and the extractor used to read one line at a time, so
+# a demo page that had lost its banner passed this check. read_const reads the
+# declaration whole, and assert_read fails the gate by name when it cannot.
+PREVIEW_TEXT=$(read_const "$SITE" PREVIEW_TEXT)
+UNVERIFIED_PREVIEW_TEXT=$(read_const "$SITE" UNVERIFIED_PREVIEW_TEXT)
+NO_DATA_HEADING=$(read_const "$SITE" NO_DATA_HEADING)
+readable=1
+assert_read "$SITE" PREVIEW_TEXT "$PREVIEW_TEXT" 'the demo labelling of every built page' || readable=0
+assert_read "$SITE" UNVERIFIED_PREVIEW_TEXT "$UNVERIFIED_PREVIEW_TEXT" 'the demo labelling of a snapshot whose manifest does not declare its source' || readable=0
+assert_read "$SITE" NO_DATA_HEADING "$NO_DATA_HEADING" 'the no-data labelling of every built page' || readable=0
+# Escape a literal for use inside an extended regular expression: everything
+# except the characters that appear in this site's wording is escaped, which is
+# cheaper to read than a bracket expression and cannot under-escape a dot.
+ere() { printf '%s' "$1" | sed 's/[^A-Za-z0-9 _,-]/\\&/g'; }
+if [ "$readable" -eq 0 ]; then
+	note 'the three constants are read out of web/src/lib/site.ts by read_const; an empty one is reported above rather than searched for'
+else
+	find "$DIST" -type f -name '*.html' -print0 > "$WORK/pages.bin" 2>/dev/null || true
+	pages_checked=$(count_nul "$WORK/pages.bin")
+	# grep -L lists the files that do NOT match. The built pages are one long
+	# line each, so an anchored </html>$ matches only a page that really ends
+	# where it should; a page cut short has no line that ends with it.
+	xargs -0 grep -LE '</html>$' < "$WORK/pages.bin" > "$WORK/pages-truncated.txt" 2>/dev/null || true
+	# A page must declare a state, and then carry the banner for that state.
+	xargs -0 grep -LE 'data-state="(demo|live|no-data)"' < "$WORK/pages.bin" > "$WORK/pages-bannerless.txt" 2>/dev/null || true
+	for state in demo live no-data; do
+		xargs -0 grep -Fl "data-state=\"$state\"" < "$WORK/pages.bin" > "$WORK/pages-$state.txt" 2>/dev/null || true
+	done
+	tr '\n' '\0' < "$WORK/pages-demo.txt" > "$WORK/pages-demo.bin"
+	xargs -0 grep -LE "$(ere "$PREVIEW_TEXT")|$(ere "$UNVERIFIED_PREVIEW_TEXT")" < "$WORK/pages-demo.bin" > "$WORK/pages-unlabelled.txt" 2>/dev/null || true
+	tr '\n' '\0' < "$WORK/pages-live.txt" > "$WORK/pages-live.bin"
+	xargs -0 grep -LF 'state-banner--live' < "$WORK/pages-live.bin" > "$WORK/pages-live-broken.txt" 2>/dev/null || true
+	tr '\n' '\0' < "$WORK/pages-no-data.txt" > "$WORK/pages-no-data.bin"
+	xargs -0 grep -LF "$NO_DATA_HEADING" < "$WORK/pages-no-data.bin" > "$WORK/pages-no-data-broken.txt" 2>/dev/null || true
+	truncated=$(count_lines "$WORK/pages-truncated.txt")
+	bannerless=$(count_lines "$WORK/pages-bannerless.txt")
+	unlabelled=$(count_lines "$WORK/pages-unlabelled.txt")
+	live_broken=$(count_lines "$WORK/pages-live-broken.txt")
+	no_data_broken=$(count_lines "$WORK/pages-no-data-broken.txt")
+	note "scanned $pages_checked built page(s) for a final </html> and for the banner their state declares: $(count_lines "$WORK/pages-demo.txt") demo, $(count_lines "$WORK/pages-live.txt") live, $(count_lines "$WORK/pages-no-data.txt") no-data"
+	if [ "$pages_checked" -lt 10 ]; then
+		fail "only $pages_checked built page(s) were inspected, so the scan is not reaching the pages and a clean result would be meaningless"
+	elif [ "$truncated" -eq 0 ] && [ "$bannerless" -eq 0 ] && [ "$unlabelled" -eq 0 ] && [ "$live_broken" -eq 0 ] && [ "$no_data_broken" -eq 0 ]; then
+		pass "all $pages_checked built page(s) end with </html> and carry the labelling their declared state requires"
+	else
+		if [ "$truncated" -gt 0 ]; then
+			fail "$truncated built page(s) do not end with </html>:"
+			sort -u "$WORK/pages-truncated.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
+		fi
+		if [ "$bannerless" -gt 0 ]; then
+			fail "$bannerless built page(s) declare no data state at all, so they carry no provenance:"
+			sort -u "$WORK/pages-bannerless.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
+		fi
+		if [ "$unlabelled" -gt 0 ]; then
+			fail "$unlabelled demo page(s) do not carry '$PREVIEW_TEXT':"
+			sort -u "$WORK/pages-unlabelled.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
+		fi
+		if [ "$live_broken" -gt 0 ]; then
+			fail "$live_broken live page(s) carry no live banner:"
+			sort -u "$WORK/pages-live-broken.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
+		fi
+		if [ "$no_data_broken" -gt 0 ]; then
+			fail "$no_data_broken no-data page(s) do not carry '$NO_DATA_HEADING':"
+			sort -u "$WORK/pages-no-data-broken.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
+		fi
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Scans write their tallies into $WORK. If that directory is deleted while the
+# gate runs - two reviewers sharing one scratch tree, or a script that clears it -
+# the counts above read as zero and the run can look clean for a reason that has
+# nothing to do with the site. Say so instead of trusting it.
+if [ ! -d "$WORK" ]; then
+	printf '\n'
+	fail "the work directory $WORK was deleted while the gate was running, so the scans above did not all read the site and this result cannot be trusted: re-run, and give each concurrent reviewer their own checkout or LOLSTATS_DIST"
 fi
 
 # ---------------------------------------------------------------------------

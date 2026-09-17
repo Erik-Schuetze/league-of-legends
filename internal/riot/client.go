@@ -260,6 +260,7 @@ func (e endpoint) url() string {
 // body limit.
 func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 	requestURL := e.url()
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
 
@@ -273,13 +274,18 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 			return nil, ErrNoAPIKey
 		}
 		if err := c.limiter.Wait(ctx); err != nil {
-			return nil, err
+			// The limiter holds the call until the next advertised slot. If
+			// that is further away than this call's deadline, the wait ends
+			// here rather than being paid for; the row is told which of the two
+			// deadlines expired so it can wait out the limiter instead of
+			// coming back into it.
+			return nil, c.ownDeadline(parent, err, e.method)
 		}
 
 		body, status, header, err := c.attempt(ctx, requestURL, e.method, key)
 		if err != nil {
 			if ctxErr := context.Cause(ctx); ctxErr != nil {
-				return nil, ctxErr
+				return nil, c.ownDeadline(parent, ctxErr, e.method)
 			}
 			c.metrics.IncRiotRetry(e.method, "transport")
 			lastErr = err
@@ -302,19 +308,37 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 			// penalising the shared limiter, honour it for every other
 			// worker too. Without that, four concurrent workers each wait
 			// out the same 429 and then arrive together.
-			wait := ParseRetryAfter(header.Get(headerRetryAfter), c.opts.Clock.Now())
-			if wait <= 0 {
-				wait = c.backoff(attempt)
-			}
+			wait, suspended := c.rateLimitedWait(
+				ParseRetryAfter(header.Get(headerRetryAfter), c.opts.Clock.Now()),
+				c.backoff(attempt))
 			c.limiter.Penalize(wait)
 			c.metrics.IncRiotRetry(e.method, "429")
 			c.breaker.fail()
-			lastErr = &RateLimitedError{Method: e.method, Attempts: attempt, RetryAfter: wait}
-			c.log.Warn("riot rate limited", "method", e.method, "attempt", attempt, "retry_after", wait.String())
+			lastErr = &RateLimitedError{
+				Method:     e.method,
+				Attempts:   attempt,
+				RetryAfter: wait,
+				Suspended:  suspended,
+			}
+			c.log.Warn("riot rate limited",
+				"method", e.method, "attempt", attempt, "retry_after", wait.String())
+			if suspended {
+				c.log.Warn("retry-after outlasts the call's own deadline; the call is released",
+					"method", e.method, "retry_after", wait.String(), "deadline", c.opts.Timeout.String())
+			}
 			if attempt == c.opts.MaxAttempts {
 				break
 			}
 			if err := c.sleep(ctx, wait); err != nil {
+				if suspended {
+					// Sleeping until the call's deadline and then reporting the
+					// deadline is what turned a 429 into a shutdown: the worker
+					// logged "job released before shutdown" for rows released
+					// ten seconds apart in a run where nothing was shutting
+					// down. The 429 is the answer; the expired deadline is only
+					// why the answer arrived early.
+					return nil, lastErr
+				}
 				return nil, err
 			}
 			continue
@@ -335,7 +359,7 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 			// Riot returns for a revoked, banned or wrong key, and
 			// continuing to call with it is how access is lost.
 			if status == http.StatusForbidden {
-				if c.breaker.fail() {
+				if c.breaker.failAuth() {
 					c.log.Error("riot API refused the key repeatedly; backing off",
 						"method", e.method, "status", status, "trips", c.breaker.Trips())
 				}
@@ -346,7 +370,50 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 	if lastErr == nil {
 		lastErr = fmt.Errorf("riot %s: no attempt was made", e.method)
 	}
+	var limited *RateLimitedError
+	if errors.As(lastErr, &limited) && !limited.Suspended && ctx.Err() != nil {
+		// The deadline expired while this call was still waiting out a
+		// Retry-After. The sleep returns the context's error rather than the
+		// deadline itself, so the mark is made here as well, where every exit
+		// from the loop passes.
+		limited.Suspended = true
+	}
 	return nil, lastErr
+}
+
+// rateLimitedWait decides how long to wait after a 429, and whether that wait is
+// longer than this call is allowed to take.
+//
+// Riot's Retry-After is not capped: a long one is how a key is disciplined, and
+// the client's job is to honour it (the limiter caps what it will hold) rather
+// than to shorten it until the key is refused outright. The per-call deadline is
+// ten seconds, so a wait past it cannot be slept off inside this call: the
+// caller is told the suspension instead, and it schedules the retry past it.
+func (c *Client) rateLimitedWait(after, fallback time.Duration) (time.Duration, bool) {
+	wait := after
+	if wait <= 0 {
+		wait = fallback
+	}
+	return wait, wait > c.opts.Timeout
+}
+
+// ownDeadline decides what to return when a call failed for a reason one of the
+// two deadlines on its context explains.
+//
+// Two deadlines are on that context and they mean different things to the queue:
+// the per-call timeout says "this row ran out of time, retry it on schedule",
+// while the run's cancellation says "this process is going away, hand the row
+// back at once". Returning the bare deadline for both made the worker report a
+// shutdown that never happened. The run's context is checked first, so a real
+// shutdown still reads as one.
+func (c *Client) ownDeadline(parent context.Context, err error, method string) error {
+	if parentErr := context.Cause(parent); parentErr != nil {
+		return parentErr
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return fmt.Errorf("riot %s: call deadline exceeded: %w", method, err)
+	}
+	return err
 }
 
 // attempt performs a single HTTP round trip and normalises its outcome into

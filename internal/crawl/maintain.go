@@ -29,13 +29,23 @@ type QueueInspector interface {
 }
 
 // MaintenanceStore is the mutating surface maintenance needs beyond the frozen
-// contract. Both methods are additive on *store.Store: reclaiming an abandoned
-// claim and re-ranking the frontier are recovery operations, not crawl
-// progress, so they have no place in the interface the crawler moves work
-// through.
+// contract. All three methods are additive on *store.Store: reclaiming an
+// abandoned claim, re-ranking the frontier and replaying a dead letter are
+// recovery operations, not crawl progress, so they have no place in the
+// interface the crawler moves work through.
 type MaintenanceStore interface {
 	ResetStuckClaims(ctx context.Context, olderThan time.Time, limit int) (int, error)
 	RecomputeFrontierPriority(ctx context.Context) (int, error)
+	ReplayDeadLettered(ctx context.Context, limit int) (int, error)
+}
+
+// ClaimRecoverer is the boot-time half of MaintenanceStore: it lets a worker
+// reclaim claims abandoned by a process that died as soon as it starts, instead
+// of waiting for the hourly maintenance job. It is one method wide so a fake
+// store in a test only has to implement the reclaim, not the whole of
+// maintenance.
+type ClaimRecoverer interface {
+	ResetStuckClaims(ctx context.Context, olderThan time.Time, limit int) (int, error)
 }
 
 // FrontierInspector is the read-only frontier surface maintenance reports.
@@ -58,6 +68,11 @@ type MaintainOptions struct {
 	MaxConsecutiveEmpty int
 	// Limit bounds each mutating statement.
 	Limit int
+	// ReplayDeadLetters returns dead-lettered rows to the queue. It is off by
+	// default: a dead letter exists to stop a poison row being retried forever,
+	// so replaying one is an operator's decision that the global condition
+	// which retired the rows - a revoked key, a ban - has passed.
+	ReplayDeadLetters bool
 	// DryRun reports what would change without changing it. The 24h key makes
 	// this the difference between "show me" and "spend the budget".
 	DryRun bool
@@ -65,27 +80,31 @@ type MaintainOptions struct {
 
 // MaintainResult is the pass summary.
 type MaintainResult struct {
-	Pruned           int
-	ReclaimedClaims  int
-	Reprioritised    int
-	FrontierSize     int
-	DeadFrontierSize int
-	QueueDepths      map[contract.JobStatus]int
-	QueueOldest      time.Time
-	HasQueueOldest   bool
-	NewestFetchedAt  time.Time
-	HasFetched       bool
-	DryRun           bool
+	Pruned              int
+	ReclaimedClaims     int
+	Reprioritised       int
+	ReplayedDeadLetters int
+	FrontierSize        int
+	DeadFrontierSize    int
+	QueueDepths         map[contract.JobStatus]int
+	QueueOldest         time.Time
+	HasQueueOldest      bool
+	NewestFetchedAt     time.Time
+	HasFetched          bool
+	DryRun              bool
 }
 
-// Maintain performs the three jobs that keep a long-running crawl honest:
-// reclaim claims abandoned by a dead worker, prune the frontier of players who
-// are gone or fruitless, and recompute frontier priority so that the walk
-// spends its budget where it is still producing.
+// Maintain performs the jobs that keep a long-running crawl honest: reclaim
+// claims abandoned by a dead worker, prune the frontier of players who are gone
+// or fruitless, and recompute frontier priority so that the walk spends its
+// budget where it is still producing. With ReplayDeadLetters it also returns
+// retired rows to the queue, which is the only way back from a global failure
+// that outlived a row's attempt budget.
 //
 // It never touches the archive. Everything it does is recoverable: a claim
 // returned to the queue is retried, a pruned player is rediscovered through the
-// matches of others, and a priority is recomputed from scratch on the next pass.
+// matches of others, a priority is recomputed from scratch on the next pass, and
+// a replayed dead letter is just work again.
 func Maintain(ctx context.Context, opts MaintainOptions) (MaintainResult, error) {
 	opts.normalize()
 	if opts.Store == nil {
@@ -129,6 +148,16 @@ func Maintain(ctx context.Context, opts MaintainOptions) (MaintainResult, error)
 		}
 		result.Reprioritised = reprioritised
 		log.Info("maintain: recomputed frontier priority", "count", reprioritised)
+
+		if opts.ReplayDeadLetters {
+			replayed, err := recovery.ReplayDeadLettered(ctx, opts.Limit)
+			if err != nil {
+				return result, fmt.Errorf("replay dead letters: %w", err)
+			}
+			result.ReplayedDeadLetters = replayed
+			log.Warn("maintain: dead letters returned to the queue",
+				"count", replayed, "limit", opts.Limit)
+		}
 	}
 
 	if err := reportInspection(ctx, opts, &result); err != nil {

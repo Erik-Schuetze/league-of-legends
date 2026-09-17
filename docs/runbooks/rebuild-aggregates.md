@@ -110,6 +110,10 @@ kubectl -n lolstats logs job/aggregate-verify
 
 # 3. the site
 curl -sSI https://lol.erik-schuetze.dev/ | head -1
+#    ...and then read the pages, not just the status line: the web tier caches
+#    its own responses, and a damaged cache entry answers 200 with a short body.
+#    See docs/runbooks/site-integrity.md.
+sh scripts/verify-serving.sh https://lol.erik-schuetze.dev
 ```
 
 `cells_suppressed` is normal and not a fault: it is the count of cells too thin to

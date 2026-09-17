@@ -169,20 +169,54 @@ func TestLimiterEffectiveRateFollowsHeaders(t *testing.T) {
 			want: 5,
 		},
 		{
+			// The ceiling is a set of windows and every request spends
+			// from all of them, so the ceiling's two-minute window binds
+			// even though this advertisement talks only about one second.
 			name: "an advert larger than the ceiling is clamped",
 			header: rateLimitHeaders{
 				AppLimit:       []Window{{Limit: 100000, Period: time.Second}},
 				HasApplication: true,
 			},
-			want: 20,
+			want: 1000.0 / 120.0,
 		},
 		{
-			name: "an unknown period is trusted as advertised",
+			// An unfamiliar period is kept, because it may be tighter
+			// than the ceiling; it binds at 1/s here because it is.
+			name: "an unknown period binds only when it is below the ceiling",
 			header: rateLimitHeaders{
 				AppLimit:       []Window{{Limit: 10, Period: 10 * time.Second}},
 				HasApplication: true,
 			},
 			want: 1,
+		},
+		{
+			// A production key's advertisement. Neither period is one the
+			// ceiling configures, and the old behaviour trusted it: 300/s
+			// against a configured ceiling of 1000 per two minutes.
+			name: "a production advertisement for periods the ceiling has never seen cannot raise the rate",
+			header: rateLimitHeaders{
+				AppLimit:       []Window{{Limit: 3000, Period: 10 * time.Second}, {Limit: 180000, Period: 600 * time.Second}},
+				HasApplication: true,
+			},
+			want: 1000.0 / 120.0,
+		},
+		{
+			name: "a period nobody has ever configured cannot raise the rate",
+			header: rateLimitHeaders{
+				AppLimit:       []Window{{Limit: 5000, Period: 45 * time.Second}},
+				HasApplication: true,
+			},
+			want: 1000.0 / 120.0,
+		},
+		{
+			// The other direction has to keep working: an advertised window
+			// wider than any ceiling window may still slow the limiter down.
+			name: "an unfamiliar wider window can still reduce the rate",
+			header: rateLimitHeaders{
+				AppLimit:       []Window{{Limit: 5, Period: 10 * time.Minute}},
+				HasApplication: true,
+			},
+			want: 5.0 / 600.0,
 		},
 	}
 	for _, tc := range tests {
@@ -201,6 +235,44 @@ func TestLimiterEffectiveRateFollowsHeaders(t *testing.T) {
 				t.Fatalf("EffectiveRate() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLimiterCeilingIsAuthoritativeForUnfamiliarWindowPeriods is the permanent
+// form of the probe that found the ceiling bypassed. The fixture is the header
+// a production key sends (`3000:10,180000:600`), the ceiling is the documented
+// development-key one, and neither period matches: before the fix the effective
+// rate was 300/s, and the first second of the run could spend 3,300 requests
+// against a documented ceiling of 18/s.
+func TestLimiterCeilingIsAuthoritativeForUnfamiliarWindowPeriods(t *testing.T) {
+	clock := NewFakeClock(testStart)
+	ceiling := ConfigWindows(18, 95)
+	l := NewLimiter(LimiterOptions{Clock: clock, Ceiling: ceiling, Bootstrap: ceiling})
+
+	l.Observe(rateLimitHeaders{
+		AppLimit:       []Window{{Limit: 3000, Period: 10 * time.Second}, {Limit: 180000, Period: 600 * time.Second}},
+		AppCount:       map[time.Duration]int{10 * time.Second: 1, 600 * time.Second: 1},
+		HasApplication: true,
+	})
+	if got, want := l.EffectiveRate(), 95.0/120.0; got != want {
+		t.Fatalf("EffectiveRate() = %v for a ceiling of 18/s and 95/2m, want %v", got, want)
+	}
+
+	// The first second of a key with an 18/s ceiling holds 18 requests, not
+	// the 3,300 the advertisement claims.
+	for i := 0; i < 18; i++ {
+		if err := l.Wait(context.Background()); err != nil {
+			t.Fatalf("Wait %d: %v", i, err)
+		}
+		if got := clock.Total(); got != 0 {
+			t.Fatalf("request %d, inside the ceiling's first second, waited %s", i+1, got)
+		}
+	}
+	if err := l.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if got := clock.Total(); got == 0 {
+		t.Fatal("the nineteenth request of the second did not wait: the advertised window raised the rate above the ceiling")
 	}
 }
 

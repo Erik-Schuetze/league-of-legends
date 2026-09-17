@@ -1,64 +1,455 @@
 # Compliance
 
-Riot's rules are a launch gate, not a review step. This page is the checklist
-and the evidence log. A checkpoint is either satisfied with a recorded artifact,
-or it is open; there is no "probably fine".
+Riot's rules are a launch gate, not a review step. This page is a register, not
+an essay: for every checkpoint it records the trigger, the action required, what
+is **actually true today**, the artifact that proves it, and what the owner has
+to do next. A checkpoint is either satisfied with a recorded artifact or it is
+open; there is no "probably fine".
 
-Nothing in this project is live yet, so every checkpoint below is **open**
-except where a row says otherwise.
+Two facts frame everything below:
 
-## Checkpoints
+- **Nothing in this project is live.** No public deployment exists, no production
+  key has been granted, and no Riot API data has been ingested.
+- **No Riot production key has been applied for.** The site therefore renders a
+  deliberately labelled preview and states its data state honestly on the page.
 
-| Trigger | Required action | Status | Evidence |
+Last reviewed: **2026-09-17**. Next review due: **2026-12-17**.
+
+## How the gate is run
+
+```
+make compliance          # or: sh scripts/compliance-check.sh
+```
+
+`scripts/compliance-check.sh` is a POSIX `sh` script with no network access and
+no package manager. It reads the source tree, the shared wording in
+`web/src/lib/legal.ts` and the **built** site in `web/dist`, so build the site
+first: several checks are about what the deployment actually serves rather than
+about what the source intends. It prints `PASS` or `FAIL` per check together with
+the number of files each scan read, and exits non-zero if any launch-blocking
+check fails.
+
+A build is published in three data states (`demo`, no data, live `riot-match-v5`),
+so the gate has to hold in all three. `LOLSTATS_DIST` points the scans at one
+snapshot instead of the shared `web/dist`, which concurrent builds overwrite:
+
+```
+LOLSTATS_DIST=web/dist-demo sh scripts/compliance-check.sh
+```
+
+It changes only which files are read, never a rule. Verify every state a release
+serves, not just the last build in the checkout.
+
+The file count is not decoration. A check that passes because it scanned nothing
+is worse than no check at all, so every scan asserts a floor on how much it read,
+and the rating scan additionally fails if it finds **zero** mentions (which would
+mean the pattern is wrong, not that the code is clean) and prints the lines it
+exempted so a reviewer can see each exemption is a negation in prose. Check 9
+proves its pattern by requiring it to match in `internal/contract/contract.go`,
+where `puuid` genuinely appears. Check 10 refuses to pass when the fixtures have
+been deleted to silence it.
+
+The twelve checks, in the order the gate runs them:
+
+| # | Check | Fails when |
+| --- | --- | --- |
+| 0 | The built site is present and whole | `web/dist` is missing or holds implausibly few pages, so the later scans would read nothing. It also refuses to run at all (exit 2, not a FAIL) when a page it is about to judge is empty or has no closing `</html>`: another `npm run build` replaces `web/dist` wholesale, and a run that lands mid-rebuild used to report five content violations that were really one race. A torn tree is diagnosed, not scored |
+| 1 | No MMR, ELO or rating-like value anywhere | A rating-like identifier, key or column appears in Go, SQL, TS/JS, Astro, JSON, HTML or CSS |
+| 2 | Only permitted Riot assets | An image reference has an absolute origin other than the Data Dragon CDN |
+| 3 | No third-party scripts, embeds or tracking | An executable resource in a built page is not same-origin |
+| 4 | The free tier is free and ungated | A form, credential field, auth route, pricing route or paywall appears |
+| 5 | Verified-site claims are only made when satisfied | A page claims Riot reviewed or endorsed the site, or a `/riot.txt` is published without the token (or vice versa) |
+| 6 | The non-endorsement notice is visible, and its wording has not drifted | The frozen sentence is not on `/disclaimer` word for word; a built page states the notice in wording other than `NON_ENDORSEMENT_TEXT`; a built page carries no notice; an editable footer stops rendering `NON_ENDORSEMENT_TEXT`; or a built page stops linking to `/disclaimer` |
+| 7 | The legal pages publish a contact route | Any of the four compliance pages renders with no contact address |
+| 8 | The served address is the deployed one | A built page, the sitemap or `robots.txt` carries a reserved placeholder hostname, with or without `LOLSTATS_SITE_URL` set; or the published addresses name more than one origin, or an origin other than `LOLSTATS_SITE_URL`. `astro.config.mjs` publishes a stated default instead of a placeholder and refuses a reserved hostname outright, so a missing variable fails the build rather than the deployment |
+| 9 | Nothing per-player is published | The artifact schema or a served JSON file carries a PUUID, summoner id, account id, Riot id or profile icon id, or the dist holds a raw-archive path |
+| 10 | Committed payloads carry no real player identifier | A fixture identifier is neither the reserved `fixture-` prefix nor the generator's reserved `FIXT` tagline, or the fixtures are deleted |
+| 11 | Every built page is a whole document | A built page is truncated, or loses the demo labelling that discloses its data state |
+
+Each `PASS`/`FAIL` line names the number of files or pages the scan read, so a
+check that passed vacuously is visible in its own output.
+
+## Checkpoint register
+
+The seven triggers are from plan section 13. "Status" is the state today, with
+the reason, not an aspiration.
+
+### 1. Before any public launch
+
+**Required action.** Terms of Service and Privacy Policy published; the
+non-endorsement disclaimer visible; `riot.txt` hosted; the free tier genuinely
+free and ungated; no MMR/ELO calculator anywhere; no data-broker behaviour.
+
+**Status: partially met - 5 of 6 satisfied, `riot.txt` pending.**
+
+| Sub-requirement | Status | Reason and evidence |
+| --- | --- | --- |
+| Terms of Service published | met | `web/src/pages/legal/terms.astro` builds to `/legal/terms`; the built page carries the 13 required sections, from acceptable use to a "Governing law" clause and an explicit Riot non-endorsement section |
+| Privacy Policy published | met | `web/src/pages/legal/privacy.astro` builds to `/legal/privacy` |
+| Non-endorsement disclaimer visible | met | `web/src/pages/disclaimer.astro` builds to `/disclaimer`; 4 of 4 compliance pages render the frozen sentence verbatim, and every one of the 1063 built pages links to `/disclaimer` |
+| `riot.txt` hosted | **pending** | `astro.config.mjs` publishes `dist/riot.txt` only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set. It is unset, so **no `riot.txt` exists and none is offered** - a placeholder would be a false claim. The token is issued to the domain owner after they start a production-key application, so this is owner action, not code work |
+| Free tier genuinely free and ungated | met | gate check 4: no `<form>`, no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any of the 1063 pages |
+| No MMR/ELO calculator anywhere | met | gate check 1: 1370 files scanned, 4 rating mentions, all 4 exempt negations of the standing prohibition, 0 rating-like identifiers or keys. The count moves as the other workstreams add files; the run in the evidence log, not this number, is the evidence |
+| No data-broker behaviour | met | gate check 9: the published artifact schema (`web/src/types/agg.d.ts`, `agg.schema.json`) declares no PUUID and no served JSON file carries one; `web/dist` contains no raw-archive path |
+
+**Next step (owner).** Ratify the preview posture and then start the
+production-key application. The position the site implements - the preview stays
+up, labelled as a preview, and real crawled data is not published until a key is
+approved - is recorded in
+`docs/decisions/ADR-010-public-preview-posture.md` and in
+`docs/data-sources.md`. The ADR is this workstream's interpretation of plan
+question 6; it is accepted as a project decision but has not been confirmed by
+the product owner, so it is listed as a gap below.
+
+### 2. Before enabling any scraper
+
+**Required action.** `robots.txt` and ToS reviewed and recorded in
+`source_toggles` with a `review_due_at` date, plus a documented decision.
+
+**Status: not applicable - no scraper is enabled, and none is implemented.**
+`sql/migrations/0001_init.up.sql:117` defines `source_toggles (source, enabled,
+decided_by, decided_at, review_due_at, notes)` with `enabled NOT NULL DEFAULT
+false` and a partial index `WHERE enabled = true`. **No row is seeded**, so
+absence means off; `internal/contract/contract.go` documents that optional
+sources are off unless a row enables them, and `internal/store/runs.go` is the
+only writer. The design position is in `docs/data-sources.md`.
+
+**Next step (owner).** Answer plan open question 4 - whether scraping is wanted
+at all. Until that is answered, the review date below is a reminder to re-decide,
+not a plan to enable. The conditions under which it may ever be enabled, and the
+targets that are permanently excluded, are recorded in `docs/data-sources.md`.
+
+### 3. Before publishing a new derived dataset or adding a game mode
+
+**Required action.** Confirm Riot has not restricted publication of that data -
+Riot polices display, not only API access.
+
+**Status: met for the v1 artifact set; the trigger is live for anything new.**
+The frozen route table in `docs/contracts.md` section 1.3 covers a tier list,
+champion detail, matchups and the legal pages. Nothing beyond that is published.
+`web/src/types/agg.d.ts` and `fixtures/agg/agg.schema.json` are the whole
+published shape, and gate checks 1 and 9 re-prove on every run that it carries no
+rating-like value and nothing per-player.
+
+**Next step (owner).** Nothing to do until a new dataset or game mode is
+proposed. When one is, it needs a written check against Riot's display policy and
+an ADR before it ships; re-run `make compliance` afterwards.
+
+### 4. On every Riot policy update
+
+**Required action.** Policies are explicitly amendable; review on a fixed cadence
+and record the outcome.
+
+**Status: pending - no review has been run, and the cadence is now set.**
+
+| Review | Date due | Scope | Outcome |
 | --- | --- | --- | --- |
-| Before any public launch | Terms of Service, Privacy Policy and the non-endorsement disclaimer published; `riot.txt` hosted at the registered domain; the free tier genuinely free and ungated; no MMR/ELO calculator anywhere; no data-broker behaviour | open | Disclaimer is rendered by `web/src/components/Footer.astro` on every page (contract frozen in `docs/contracts.md` section 3); the other pages do not exist yet |
-| Before enabling any scraper | robots.txt and ToS reviewed and recorded in `source_toggles` with a `review_due_at` date, plus a documented decision | open | `source_toggles` table exists in `sql/migrations/0001_init.up.sql`; no toggle is enabled |
-| Before publishing a new derived dataset or adding a game mode | Confirm Riot has not restricted publication of that data - Riot polices display, not only API access | open | No dataset beyond the v1 tier list, champion detail and matchup artifacts |
-| On every Riot policy update | Policies are explicitly amendable; review on a fixed cadence and record the outcome | open | No review has been run; `docs/data-sources.md` lists the source pages to re-read |
-| Before using any Riot asset | Riot Press Kit and permitted static data only; no champion art, splash art or marks beyond that | open | Static sync is planned to use Data Dragon icons only |
-| Dependency changes | Maintain a licence inventory; run `make vuln` on dependency changes | open | `make vuln` target exists; no inventory file yet |
-| If monetisation is ever considered | Stop and re-read Riot's transformative-use test before adding anything paid | not applicable | No monetisation is planned or implemented |
+| First scheduled policy review | **2026-12-17** | Re-read the General Policies, the LoL policy and the API Terms; diff against the assumptions listed in `docs/data-sources.md`; re-check the no-MMR and no-data-broker clauses; confirm Data Dragon is still permitted static data | not yet run |
+| Then quarterly | 2027-03-17, 2027-06-17, ... | As above | - |
+
+Riot's General Policies were last published 2025-05-29 and are amendable at any
+time, so a calendar cadence is the only reliable trigger. Two things besides the
+calendar force an out-of-band review: any change to the Riot API Terms, and any
+notice from Riot. The crawler's User-Agent carries a contact URL, so Riot can
+reach the operator without publishing a changelog entry.
+
+**Next step (owner).** Run the 2026-12-17 review and record the outcome in the
+table above. If the no-data-broker or no-MMR clause has changed, re-run
+`make compliance` and treat a failure as launch-blocking.
+
+### 5. Before using any Riot asset
+
+**Required action.** Riot Press Kit and permitted static data only; no champion
+art, splash art or marks beyond that.
+
+**Status: met.** The only Riot assets are Data Dragon static data (champion,
+item, rune and summoner-spell names and icons, plus numeric ids), taken at build
+time by `web/scripts/fetch-ddragon.mjs`. Gate check 2 scans image references in
+the built HTML and CSS and confirms every absolute image origin is
+`https://ddragon.leagueoflegends.com`; the current build has 2378 `<img>` tags on
+that origin and no other absolute image origin at all. No champion art, splash
+art, loading screen, logo or Riot mark is loaded from anywhere else, and the
+favicon is a local file.
+
+**Next step (owner).** None. Any future asset needs a Press Kit check and a
+recorded permission before it is added, and gate check 2 will fail the build if
+it comes from an unpermitted origin.
+
+### 6. Dependency changes
+
+**Required action.** Licence inventory maintained; `make vuln` on dependency
+changes.
+
+**Status: partially met - `make vuln` exists, no licence inventory exists.**
+
+| Sub-requirement | Status | Reason and evidence |
+| --- | --- | --- |
+| Vulnerability scan on dependency changes | met | `make vuln` runs `govulncheck` (v1.8.0, pinned); the Go module graph is the only compiled dependency |
+| Licence inventory | **not met** | No inventory file and no `make` target produce one. The site itself has **no npm runtime dependencies** and no `package.json` dependencies beyond the Astro toolchain, which keeps the exposure small, but "small" is not a record |
+
+**Next step (owner).** Generate a licence inventory for the Go module graph and
+the npm toolchain, commit it, and add a check that fails when a new dependency
+appears without a recorded licence. Until then this row stays open, and any new
+dependency should be treated as unrecorded.
+
+### 7. If monetisation is ever considered
+
+**Required action.** Stop and re-read Riot's transformative-use test before
+adding anything paid.
+
+**Status: not applicable.** No monetisation is planned or implemented. Gate
+check 4 confirms there is no checkout route, no subscription route and no pricing
+page in the built site, so the free-tier requirement and the no-monetisation
+posture are the same fact today.
+
+**Next step (owner).** Nothing while the posture holds. Any paid feature re-opens
+checkpoints 1, 3 and 5 at once: Riot's transformative-use test applies to a paid
+derivative as much as to a free one, and the "no data broker" clause is about
+selling access rather than about price.
+
+## Launch-blocking claims, and how each is proved
+
+Every claim below is reproducible offline with no network and no `npm install`.
+The automated form is `make compliance`; the commands are given so a reviewer can
+run the claim in isolation.
+
+### The free tier is genuinely free and ungated
+
+No account, no login, no paywall, no rate-limited teaser, no email capture. Every
+primary route in the frozen route table (`/`, `/tier-list/<role>`,
+`/champions/<slug>`, `/matchups/<role>`, `/about` and the three legal pages)
+renders its substantive content for an anonymous reader, and all of it renders
+**without JavaScript** - the tables are server-rendered and the island only adds
+sorting and filtering.
+
+Evidence: gate check 4 scans all 1063 built pages for a `<form>`, a password or
+email field, a `name="password"`/`name="email"` field, a login, sign-in, sign-up,
+register, subscribe, pricing or checkout route, `data-paywall` or a "Sign in"/"Sign
+up" link, and finds none. There is no auth code in the repository, no session
+cookie, and the deployment has no identity provider: `deploy/base/web/` serves
+static files through Caddy, and `caddyfile.yaml` contains no `basic_auth`,
+`forward_auth` or other authentication directive. Twenty
+`<input type="search">` elements exist and are deliberately excluded from the
+pattern - they are the same-origin table filters inside a `data-island`, they
+filter data the reader has already been served in full, and the tables are
+complete and readable with JavaScript disabled.
+
+### No MMR, ELO or rating-like value is computed, stored or displayed anywhere
+
+This is a hard Riot prohibition, so it is checked as an absence across every
+language the project uses, and the check refuses to pass vacuously.
+
+Reproduce:
+
+```
+sh scripts/compliance-check.sh          # check 1
+```
+
+What it scans: every `*.go`, `*.sql`, `*.ts`, `*.js`, `*.mjs`, `*.astro`,
+`*.json`, `*.html` and `*.css` file under the repository root, excluding
+`node_modules`, `.git` and `.agent-artifacts`. That includes the built HTML in
+`web/dist`, so the scan covers what is actually served as well as what is
+written. **1370 files** on the last run; the count grows as the other workstreams
+add files, so the recorded run is the evidence and the number is orientation only.
+
+What it finds: **4 lines mention a rating, and all 4 are negations** of the hard
+prohibition - the standing `NO_RATING_TEXT` statement in `web/src/lib/legal.ts`,
+its use on the About page, and the same sentence as it appears in the served
+`/about` and `/disclaimer` HTML. A line is exempt only when a negation word
+precedes the token on the same line, and the exempt lines are printed so a
+reviewer can read them rather than trust them. **Zero rating-like identifiers,
+keys or columns exist** - the scan also looks for the declaration and key forms
+(`mmr`, `elo`, `rating`, `skill_rating`, `matchmaking_rating`, `player_rating`,
+`hidden_rating`) with explicit non-identifier delimiters.
+
+Coverage: Go (the control plane, the crawler and the aggregator), SQL (the
+migrations, including the view and column names), TypeScript and Astro (the
+frontend), and the aggregate artifact schema in `web/src/types/agg.d.ts` plus
+`fixtures/agg/agg.schema.json`. Lead-by-lead, there is no field, no column, no
+view and no page that could carry such a value, so none can be displayed.
+
+### The privacy policy describes what the implementation actually does
+
+`/legal/privacy` is written from the implementation rather than from a template,
+so each of its claims is checkable. The site processes exactly one thing - an
+ordinary web-server access log - and the policy says so rather than claiming that
+nothing is collected.
+
+| Claim | How it was checked | Result |
+| --- | --- | --- |
+| No cookies, and none set on the site's behalf | `grep -rniE 'set-cookie\|set_cookie\|cookie' deploy/` and `grep -rniE 'document\.cookie' web/src/` | no match in either |
+| No analytics, advertising, tracking pixel or third-party embed | gate check 3 over all 1063 built pages | no executable third-party resource; every script, embed and preconnect is same-origin |
+| No accounts, logins, forms or user submissions | gate check 4 | no form, credential field or auth route |
+| Nothing stored on the device | no `document.cookie`, no `localStorage` or `sessionStorage` use anywhere in `web/src` | absent |
+| The access log is the only processing | `deploy/base/web/caddyfile.yaml:80` - `log { output stdout }`, and `grep -rniE 'fluent\|vector\|promtail\|filebeat\|logstash' deploy/` | logs go to container stdout; **no log shipper, no log store and no retention configuration exists**, which is why the policy says the practical retention is days, until the container is replaced |
+| The Data Dragon icon request is disclosed | the privacy policy names `ddragon.leagueoflegends.com`, states that it receives the visitor's IP address and user agent, that Riot Games is established in the United States, and that this is therefore a transfer outside the EEA | disclosed rather than omitted |
+
+The policy also discloses a near miss deliberately: the operator runs a
+self-hosted Umami analytics instance elsewhere on the same home cluster at a
+different hostname. This site loads no script from it and sends it nothing. That
+is stated on the page, because a reader who discovered the instance themselves
+would reasonably wonder, and a disclosure that only covers what is definitely
+fine is not a disclosure.
+
+### No data-broker behaviour
+
+The site serves derived aggregates only. It does not resell or expose the raw
+archive, and it publishes no per-player identifiable data.
+
+Evidence: gate check 9. The raw archive - verbatim Riot payloads - lives on the
+cluster and is never fetched by a visitor. The deployed artifact root is `/agg`;
+`web/dist` contains **no** `/agg` path, **no** JSON file at all, and no path
+matching `*/raw/*` or `*/archive/*`. The published artifact schema declares no
+PUUID, no summoner id, no account id, no Riot id and no profile icon id, and the
+check proves its pattern works by requiring it to match in
+`internal/contract/contract.go`, where the crawler genuinely stores a PUUID
+(6 lines). That field is addressed by MATCH-V5, which is why the control plane
+holds it and the published surface does not.
+
+Per-player data is not published in any other form either: there is no summoner
+or profile route in the frozen route table, and no aggregate type carries a
+player dimension. The aggregates are role, champion, rank bracket, region, queue
+and patch - never a person. Committed payloads carry only synthetic identifiers
+(gate check 10: 13 fixture files, 655 identifier values, all either the reserved
+`fixture-` prefix or the reserved `FIXT` Riot ID tagline that
+`internal/aggregate/fixture_test.go` writes when it regenerates them),
+and `fixtures/README.md` states that nothing in the directory is real Riot data.
+
+### Only permitted Riot assets are used
+
+Data Dragon static data (names, icons, numeric ids) and nothing else: no champion
+art, no splash art, no loading screens, no Riot marks.
+
+Reproduce against the built output:
+
+```
+grep -rhoE 'https?://[A-Za-z0-9.-]+' web/dist --include='*.html' --include='*.css' \
+  | tr '[:upper:]' '[:lower:]' | sort -u
+```
+
+Every origin that appears in an image, icon, `og:image`, `twitter:image`,
+`<source>` or CSS `url()` position is `ddragon.leagueoflegends.com/cdn/`.
+Gate check 2 is the automated form: it extracts those references from the built
+HTML and CSS, then removes the Data Dragon origin and fails if anything remains.
+The current build has 2378 `<img>` tags pointing at the Data Dragon CDN and
+**zero** other absolute image origins; nothing else is loaded from a third
+party, and the remaining references are same-origin.
+
+Data Dragon is fetched at build time by `web/scripts/fetch-ddragon.mjs`, so the
+build needs network access but the served site does not, and no visitor's page
+view causes a Riot request.
 
 ## Standing constraints
 
 These are properties of the design rather than steps, and a change that breaks
 one of them is a decision that needs an ADR:
 
-- **No request-time Riot API access from the site.** The site reads
-  pre-computed artifacts. A visitor's page view never causes a Riot API call.
-- **No MMR, ELO or skill-rating calculator.** Not in v1, not on the backlog.
+- **No request-time Riot API access from the site.** The site reads pre-computed
+  artifacts. A visitor's page view never causes a Riot API call.
+- **No MMR, ELO or skill-rating calculator.** Not in v1, not on the backlog, and
+  gate check 1 fails the build if one appears in any form.
 - **No paid tier and no gating.** The published data is free and unauthenticated.
-- **`n` is published on every statistic**, and thin cells are suppressed rather
+- **`n` is published on every statistic,** and thin cells are suppressed rather
   than shown. See `docs/contracts.md` section 1.
+- **The data state is disclosed on the page, not inferred by the reader.** Every
+  page carries the patch, region, queue and bracket it was built from, plus the
+  aggregate manifest's `source` (`demo`, `riot-match-v5`, or no data), rendered
+  from `web/src/lib/legal.ts` and `web/src/lib/site.ts`.
 - **Rank attribution is disclosed as a snapshot.** The tier and division in a
   frontier entry are where a PUUID was discovered, not where it is now.
 - **Secrets are never committed and never baked into an image.** The Riot key is
   an environment variable read by `internal/config`; `deploy/*/secret.yaml` is
   gitignored.
 
-## Open compliance work
+## Honest gaps and known weaknesses
 
-1. Draft the Terms of Service, Privacy Policy and disclaimer copy - blocked on
-   the site name and domain (open question 1 in the plan).
-2. Host `riot.txt` once a production key application is started. Note that Riot
-   verifies the file from the domain being registered, so the domain must exist
-   first.
-3. Decide the public-preview posture while a production key application is
-   pending: the plan's position is that the public site serves static seed data
-   and Data Dragon content only, clearly labelled as a preview, with real crawled
-   data unpublished until the key is approved. This is an owner decision and is
-   not yet recorded as an ADR.
-4. Build the licence inventory and wire `make vuln` into CI on dependency
-   changes.
+Recorded here rather than smoothed over, because a register that only lists
+successes is not a register.
+
+1. ~~**The frozen non-endorsement sentence is verbatim on 4 pages, not on all
+   1063.**~~ **Closed.** The footer served its own paraphrase on all 1063 pages
+   while the exact frozen sentence reached only the four compliance pages. Both
+   footers now render `NON_ENDORSEMENT_TEXT` from `web/src/lib/legal.ts` itself,
+   so the approved sentence is served byte for byte on every built page in every
+   data state, and gate check 6 fails any page that states the notice in other
+   wording. The `web/src/layouts/fallback/Footer.astro` wording quoted here
+   before the fix is no longer published anywhere.
+2. ~~**The build names a reserved placeholder hostname.**~~ **Closed in the
+   code, open in the deployment.** With `LOLSTATS_SITE_URL` unset the 1063 built
+   pages used to carry `lolstats.example.invalid` in their canonicals and the
+   sitemap, disagreeing with the legal copy. `web/astro.config.mjs` now publishes
+   `https://lol.erik-schuetze.dev` - the address this deployment is served from -
+   and logs that it fell back, and it refuses a reserved or relative value with a
+   build error instead of publishing a wrong canonical. Gate check 8 **fails** on
+   a reserved hostname with or without the variable. What remains open is not code:
+   the deployed job still does not set `LOLSTATS_SITE_URL`
+   (`deploy/base/config.yaml`), so the release depends on the deliberate default
+   rather than on a declared value.
+3. **`riot.txt` cannot be published yet.** Reported under checkpoint 1. There is
+   nothing the code can do: the token is issued to the domain owner.
+4. **No licence inventory exists.** Reported under checkpoint 6.
+5. **No off-site backup of the raw archive exists.** The archive is the project's
+   only non-regenerable asset, because Riot retains matches for two years and
+   timelines for one. A tested off-site restore is a launch gate and it is not
+   mine to build; `scripts/backup-verify.sh` verifies restores but no off-site
+   medium has been chosen (plan open question 3).
+6. **The public-preview posture is recorded but not owner-ratified.**
+   `docs/decisions/ADR-010-public-preview-posture.md` records the posture the
+   site implements - publicly reachable and clearly labelled, preview data only,
+   real crawled data unpublished until a production key is approved - in the
+   absence of an answer to plan question 6. The ADR is written to be correct
+   whichever way that question is answered, but it is this workstream's
+   interpretation rather than a decision the product owner has confirmed. Until
+   they do, the preview page is a position, not an approval.
 
 ## Non-endorsement disclaimer text
 
-The wording is rendered by `Footer.astro`; the approved sentence is frozen here
-so the component and the legal pages cannot drift apart:
+The wording lives in one place, `web/src/lib/legal.ts`, and this page quotes it
+rather than restating it. All four compliance pages import it, and both footers
+(`web/src/components/Footer.astro`, `web/src/layouts/fallback/Footer.astro`)
+render it instead of carrying a paraphrase, so the site and this register cannot
+drift apart.
 
 > This project is not endorsed by Riot Games and does not reflect the views or
 > opinions of Riot Games or anyone officially involved in producing or managing
 > Riot Games properties. Riot Games and all associated properties are trademarks
 > or registered trademarks of Riot Games, Inc.
 
-Changing this wording is a compliance change, not a copy change.
+Gate check 6 reads the sentence back out of `web/src/lib/legal.ts` and requires it
+to appear word for word on the built `/disclaimer` page. Changing this wording is
+a compliance change, not a copy change.
+
+## Compliance changes made on 2026-09-17
+
+- The four compliance pages were written: `/about`, `/legal/terms`,
+  `/legal/privacy` and `/disclaimer`, all importing the shared strings from
+  `web/src/lib/legal.ts` (operator identity, contact address, effective date,
+  non-endorsement sentence, data-source sentence). The contact address is
+  configured by the `LOLSTATS_CONTACT_EMAIL` environment variable, documented in
+  that file, with a working default.
+- `EFFECTIVE_DATE` is a single constant and "last updated" is derived from it, so
+  there is no second date to forget.
+- `scripts/compliance-check.sh` and `make compliance` were added, together with
+  a negative control (`.agent-artifacts/compliance-negative-probe.sh`) that
+  plants one violation at a time and asserts the gate exits non-zero for each.
+  Each plant is asserted to have landed before the gate is run, the clean tree is
+  asserted to pass (so a probe cannot pass for the wrong reason), and the scratch
+  tree is copied from a snapshot of the built site that is asserted page-for-page
+  against the source. The observed result is 29 probes holding and 0 broken; the
+  full output is section 8 of `.agent-artifacts/compliance-verification.log`.
+  A verified-site claim is only accepted when `/riot.txt` is published and holds
+  the configured `LOLSTATS_RIOT_VERIFICATION_TOKEN`; both states are probed.
+- `docs/data-sources.md` was extended with the dated source register, the
+  retention and rate-limit facts that drive the design, and the scraping
+  position.
+- The provenance copy was made conditional on the data state. A build renders
+  `demo`, no data, or `riot-match-v5` from the manifest's `source`, and the
+  champion pages, `/about`, the landing page, the privacy policy, the table and
+  matchup notes and the JSON-LD datasets now read their claims from that state:
+  only a `riot-match-v5` build describes MATCH-V5, and `web/src/lib/seo.ts`
+  throws rather than publish a Dataset `measurementTechnique` in any other state.
+  Gate check 11 asserts that every built page carries the labelling its declared
+  state requires, so a page cannot lose its banner or claim a state it is not in.
+- Three decisions were recorded: `docs/decisions/ADR-008-no-third-party-ingestion.md`,
+  `ADR-009-operator-identity-and-governing-law.md` and
+  `ADR-010-public-preview-posture.md`.

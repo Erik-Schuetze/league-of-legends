@@ -262,3 +262,107 @@ func TestMaintainDefaults(t *testing.T) {
 		t.Fatalf("status = %q, want the default grace to protect a recent claim", got)
 	}
 }
+
+// retireRow puts a row through the state a global failure leaves it in: claimed,
+// charged to its ceiling, and then dead-lettered. The attempt budget is the
+// whole question a replay has to answer.
+func retireRow(t *testing.T, store *fakeStore, matchID string, attempts int) {
+	t.Helper()
+	store.forceEnqueue(contract.QueueItem{MatchID: matchID, Attempts: attempts})
+	if _, err := store.ClaimJobs(context.Background(), store.jobCount(), testBaseTime()); err != nil {
+		t.Fatalf("claim %s: %v", matchID, err)
+	}
+	job := store.jobFor(matchID)
+	if job == nil || job.status != "claimed" {
+		t.Fatalf("row %s was not claimed", matchID)
+	}
+	if err := store.DeadLetterJob(context.Background(), job.item.ID, "riot match: unexpected status 403 (Forbidden)"); err != nil {
+		t.Fatalf("dead-letter %s: %v", matchID, err)
+	}
+	if got := store.jobStatus(matchID); got != "dead" {
+		t.Fatalf("status of %s = %q, want dead", matchID, got)
+	}
+}
+
+// Before the fix a dead letter was terminal: no code path anywhere selected
+// status = 'dead', so an outage that outlasted one row's retry budget discarded
+// every match it touched and the row could only be recovered by hand-written
+// SQL. Replay is the operator's way back, and it is deliberately opt-in: the
+// condition that retired the rows is global, so only a human knows it has
+// passed.
+func TestMaintainReplaysDeadLetteredRowsOnlyWhenAsked(t *testing.T) {
+	store, deps := newMaintainHarness(t)
+	ids := []string{"EUW1_dead_a", "EUW1_dead_b", "EUW1_dead_c"}
+	for _, id := range ids {
+		retireRow(t, store, id, DefaultMaxAttempts)
+	}
+	store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_live"})
+
+	// Default: a poisoned row stays retired.
+	result, err := Maintain(context.Background(), MaintainOptions{Deps: deps})
+	if err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+	if result.ReplayedDeadLetters != 0 {
+		t.Fatalf("replayed = %d, want 0 without the opt-in", result.ReplayedDeadLetters)
+	}
+	for _, id := range ids {
+		if got := store.jobStatus(id); got != "dead" {
+			t.Fatalf("status of %s = %q, want it left retired", id, got)
+		}
+	}
+
+	// A dry run reports and changes nothing, replay included.
+	if _, err := Maintain(context.Background(), MaintainOptions{Deps: deps, ReplayDeadLetters: true, DryRun: true}); err != nil {
+		t.Fatalf("Maintain dry run: %v", err)
+	}
+	for _, id := range ids {
+		if got := store.jobStatus(id); got != "dead" {
+			t.Fatalf("status of %s = %q, want a dry run to change nothing", id, got)
+		}
+	}
+
+	// The real thing, bounded by the limit so an operator can replay in
+	// measured batches.
+	result, err = Maintain(context.Background(), MaintainOptions{Deps: deps, ReplayDeadLetters: true, Limit: 2})
+	if err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+	if result.ReplayedDeadLetters != 2 {
+		t.Fatalf("replayed = %d, want the limit of 2", result.ReplayedDeadLetters)
+	}
+	replayed := 0
+	for _, id := range ids {
+		job := store.jobFor(id)
+		switch store.jobStatus(id) {
+		case "pending":
+			replayed++
+			if job.item.Attempts != 0 {
+				t.Fatalf("replayed row %s kept %d attempts; the budget that retired it was spent on the outage",
+					id, job.item.Attempts)
+			}
+		case "dead":
+		default:
+			t.Fatalf("status of %s = %q, want pending or dead", id, store.jobStatus(id))
+		}
+	}
+	if replayed != 2 {
+		t.Fatalf("rows returned to pending = %d, want 2", replayed)
+	}
+
+	// A replayed row is ordinary work again: the crawler can claim it.
+	claimed, err := store.ClaimJobs(context.Background(), store.jobCount(), testBaseTime())
+	if err != nil {
+		t.Fatalf("ClaimJobs: %v", err)
+	}
+	claimedDead := 0
+	for _, item := range claimed {
+		switch item.MatchID {
+		case "EUW1_dead_a", "EUW1_dead_b", "EUW1_dead_c":
+			claimedDead++
+		}
+	}
+	if claimedDead != 2 {
+		t.Fatalf("claimed %d replayed rows, want 2", claimedDead)
+	}
+}

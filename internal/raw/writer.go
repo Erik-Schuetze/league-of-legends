@@ -29,6 +29,23 @@ const (
 	partSuffix  = ".parquet.zst"
 	partTmp     = ".tmp"
 	partDirPerm = 0o750
+
+	// partTmpStaleAfter is how old an abandoned temporary part must be before
+	// a later writer deletes it.
+	//
+	// A `.tmp` is only ever renamed into place by the finalize that publishes
+	// it, so one that is still lying there was never committed and deleting it
+	// costs no archived data. Deleting a *live* one would cost the rows its
+	// writer is still holding in memory, so the threshold sits far above the
+	// longest a part can legitimately stay open: a worker batch is bounded by
+	// JobBatch*JobTimeout (twenty jobs of twenty-five seconds today) and the
+	// archive has exactly one writer per partition.
+	partTmpStaleAfter = time.Hour
+
+	// maxPartIndexSkips bounds the indices one open steps over when it finds
+	// them already taken. Exceeding it means the directory holds something a
+	// human should look at, and saying so beats looping.
+	maxPartIndexSkips = 64
 )
 
 // DefaultRowsPerPart is the rotation threshold. Twenty thousand rows of match
@@ -55,6 +72,10 @@ type Options struct {
 	CompressionLevel int
 	// Metrics receives the compressed byte count. Optional.
 	Metrics obs.MetricsRecorder
+	// Now is the clock the stale-part reaper reads. Nil means the real clock.
+	// It is injectable so that a test can age an abandoned part without
+	// sleeping for partTmpStaleAfter.
+	Now func() time.Time
 }
 
 // Writer appends payloads to the archive.
@@ -92,6 +113,9 @@ func New(opts Options) (*Writer, error) {
 	}
 	if opts.CompressionLevel < 0 {
 		return nil, fmt.Errorf("raw: compression level must not be negative: %d", opts.CompressionLevel)
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
 	}
 	return &Writer{
 		opts:         opts,
@@ -324,24 +348,54 @@ func (p *partWriter[T]) append(row T) error {
 // open creates the next free part path in the directory. The index is derived
 // from the directory listing rather than from a counter, so a restarted
 // process appends to yesterday's sequence instead of overwriting it.
+//
+// A writer that dies between its first write to a part and the flush that
+// publishes it leaves `part-NNNNN.parquet.zst.tmp` behind, and that file must
+// not be able to stop the partition forever: the listing steps over indices
+// that are already taken, and a temporary part old enough to be abandoned is
+// reaped first.
 func (p *partWriter[T]) open() error {
 	if err := os.MkdirAll(p.dir, partDirPerm); err != nil {
 		return fmt.Errorf("raw: create partition %s: %w", p.dir, err)
 	}
-	index, err := nextIndex(p.dir, partPrefix, partSuffix)
+	index, stale, err := scanPartDir(p.dir, p.opts.Now())
 	if err != nil {
 		return err
 	}
-	p.finalPath = filepath.Join(p.dir, fmt.Sprintf("%s%05d%s", partPrefix, index, partSuffix))
-	p.tmpPath = p.finalPath + partTmp
+	p.reap(stale)
+	return p.create(index)
+}
 
-	file, err := os.OpenFile(p.tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, partDirPerm)
-	if err != nil {
-		return fmt.Errorf("raw: create part %s: %w", p.tmpPath, err)
+// reap removes abandoned temporary parts. It is best-effort housekeeping, not
+// recovery - create steps over a taken index on its own - which is why a
+// failure to remove one is not worth failing a write for.
+func (p *partWriter[T]) reap(stale []string) {
+	for _, path := range stale {
+		_ = os.Remove(path)
 	}
-	p.file = file
-	p.enc = parquet.NewGenericWriter[T](file, parquet.Compression(compressionCodec(p.opts.CompressionLevel)))
-	return nil
+}
+
+// create opens the first free temporary part at or after index. The create is
+// exclusive, so an index that is already taken is stepped over rather than
+// disturbed: under the archive's one-writer-per-partition model the only thing
+// that can be holding it is a writer that died, and on NFS a same-name create
+// over a live writer's part would be worse than a skipped index.
+func (p *partWriter[T]) create(index int) error {
+	for skip := 0; skip < maxPartIndexSkips; skip++ {
+		p.finalPath = filepath.Join(p.dir, fmt.Sprintf("%s%05d%s", partPrefix, index, partSuffix))
+		p.tmpPath = p.finalPath + partTmp
+		file, err := os.OpenFile(p.tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, partDirPerm)
+		if err == nil {
+			p.file = file
+			p.enc = parquet.NewGenericWriter[T](file, parquet.Compression(compressionCodec(p.opts.CompressionLevel)))
+			return nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("raw: create part %s: %w", p.tmpPath, err)
+		}
+		index++
+	}
+	return fmt.Errorf("raw: create part in %s: the first %d part indices are already taken", p.dir, maxPartIndexSkips)
 }
 
 // finalize writes the footer, syncs, and renames the part into place. On any
@@ -377,31 +431,46 @@ func (p *partWriter[T]) finalize() error {
 	return nil
 }
 
-// nextIndex returns the first unused part index in dir. finalize publishes
-// with a rename, so a `.tmp` sibling is never a candidate and no lock is
-// needed between runs of the same process; two processes writing one partition
-// is out of scope - the plan gives the archive exactly one writer.
-func nextIndex(dir, prefix, suffix string) (int, error) {
+// scanPartDir lists dir once: it returns the index a new part should use and
+// the temporary parts old enough to have been abandoned.
+//
+// finalize publishes with a rename, so a `.tmp` sibling is never a committed
+// part and never raises the index - a stale one is stepped over by create and
+// reaped once it is older than partTmpStaleAfter. Two processes writing one
+// partition is out of scope - the plan gives the archive exactly one writer -
+// which is what makes "older than an hour" a safe definition of abandoned.
+func scanPartDir(dir string, now time.Time) (int, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return 1, nil
+		return 1, nil, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("raw: list partition %s: %w", dir, err)
+		return 0, nil, fmt.Errorf("raw: list partition %s: %w", dir, err)
 	}
+	cutoff := now.Add(-partTmpStaleAfter)
 	highest := 0
+	var stale []string
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		if entry.IsDir() || !strings.HasPrefix(name, partPrefix) {
 			continue
 		}
-		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix))
-		if err != nil || n <= highest {
-			continue
+		switch {
+		case strings.HasSuffix(name, partSuffix):
+			n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, partPrefix), partSuffix))
+			if err != nil || n <= highest {
+				continue
+			}
+			highest = n
+		case strings.HasSuffix(name, partSuffix+partTmp):
+			info, err := entry.Info()
+			if err != nil || !info.ModTime().Before(cutoff) {
+				continue
+			}
+			stale = append(stale, filepath.Join(dir, name))
 		}
-		highest = n
 	}
-	return highest + 1, nil
+	return highest + 1, stale, nil
 }
 
 func compressionCodec(level int) *parquetzstd.Codec {

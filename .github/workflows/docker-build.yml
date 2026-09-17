@@ -69,6 +69,22 @@ jobs:
       - name: Test
         run: make test-race
 
+      # The end-to-end analytics tests in internal/aggregate need the pinned
+      # DuckDB CLI, and they skip themselves rather than fail when it is absent.
+      # That is the right behaviour for a contributor without the client, but it
+      # means the `Test` step above goes green on a runner that has no DuckDB
+      # without ever running a single build against the fixture archive. This
+      # step closes that hole: `make test-build` installs the pin (downloaded
+      # from the release asset and verified against the same sha256 the
+      # Dockerfile ships), exports LOLSTATS_DUCKDB_BIN at its absolute path, and
+      # then fails if the hand-computed fixture build did not report PASS or if
+      # anything in the package reported SKIP. The download failing, the version
+      # not matching the pin, and a skip all fail the job.
+      - name: Test the DuckDB aggregation path
+        env:
+          LOLSTATS_DUCKDB_BIN: ${{ github.workspace }}/bin/duckdb
+        run: make test-build
+
       # The linter and govulncheck are pinned in the Makefile and invoked
       # through `go run`, so CI runs the same versions a contributor does.
       - name: Lint

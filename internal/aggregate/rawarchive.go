@@ -113,7 +113,10 @@ func isParquetPart(name string) bool {
 // namings and both encodings work. Decompressed parts are written into scratch,
 // which the caller owns.
 func (a RawArchive) StageParts(ctx context.Context, parts []ArchivePart, scratch string) ([]string, error) {
-	if err := os.MkdirAll(scratch, 0o755); err != nil {
+	// The scratch directory holds decompressed archive bytes that only this
+	// process and the engine it spawns read, and the engine is a child of this
+	// process, so it needs no group or other access. See perms.go.
+	if err := os.MkdirAll(scratch, privateDirPerm); err != nil {
 		return nil, fmt.Errorf("create scratch dir: %w", err)
 	}
 	paths := make([]string, 0, len(parts))

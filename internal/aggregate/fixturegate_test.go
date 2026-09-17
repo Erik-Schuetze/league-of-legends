@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -884,7 +886,7 @@ var _ Engine = (*doctoringEngine)(nil)
 func newDoctoringEngine(t *testing.T, bin, base string, edit func(value any)) *doctoringEngine {
 	t.Helper()
 
-	inner, err := OpenCLIEngine(context.Background(), bin, false, nil)
+	inner, err := OpenCLIEngine(context.Background(), bin, false, DuckDBSettings{}, nil)
 	if err != nil {
 		t.Fatalf("open the pinned client: %v", err)
 	}
@@ -1367,4 +1369,218 @@ func countDiffering(got, want map[string]string) int {
 		}
 	}
 	return differing
+}
+
+// ---------------------------------------------------------------------------
+// The verifier against a real build
+// ---------------------------------------------------------------------------
+
+// TestVerifyAcceptsTheFixtureBuild runs the verifier over the tree the fixture
+// archive builds, and then over that tree with one field damaged.
+//
+// The first half is the only check that the writer and the verifier agree on
+// what a correct artifact set is. A verifier rule stricter than the writer
+// makes the verification command useless against real data - it would report a
+// problem for a build that did everything right - and no test of the verifier
+// alone can see that, because the bad rule is inside the verifier.
+//
+// The second half is the control that keeps the first half honest: a verifier
+// that accepts everything passes an acceptance test too, so every rule the
+// fixture tree relies on is shown to reject a tree that breaks it.
+func TestVerifyAcceptsTheFixtureBuild(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	good := t.TempDir()
+	rawRoot := fixtureRawRoot(t, fixtureFiles(fixtureMatches()))
+	if _, err := Build(ctx, fixtureBuildOptions(t, good, rawRoot)); err != nil {
+		t.Fatalf("build the fixture archive: %v", err)
+	}
+
+	result, err := Verify(VerifyOptions{AggRoot: good, Source: aggmodel.SourceRiotMatchV5})
+	if err != nil {
+		t.Fatalf("verifying a good build failed: %v", err)
+	}
+	if got, want := result.Cells, fixtureExpectedCounts.CellsPublished; got != want {
+		t.Errorf("verification checked %d cells, want the %d published cells", got, want)
+	}
+	if result.Partitions != 1 || result.Documents == 0 {
+		t.Errorf("verification checked %d partitions and %d documents, want 1 and some",
+			result.Partitions, result.Documents)
+	}
+
+	seg := aggmodel.Seg{Patch: "16.18", Region: "EUW",
+		Queue: aggmodel.QueueIDRankedSolo5x5, Bracket: aggmodel.BracketAll}
+	// championID is a champion the tier list and the manifest both carry, so
+	// the case that edits it starts from a document that exists.
+	championID := fixtureExpectedCells[0].ChampionID
+
+	cases := []struct {
+		name   string
+		want   string
+		damage func(t *testing.T, root string)
+	}{
+		{
+			name: "a cell below the floor",
+			want: "should have been suppressed",
+			damage: func(t *testing.T, root string) {
+				editTierList(t, root, seg, func(cells []map[string]any) []map[string]any {
+					cells[0]["n"] = fixtureMinCellN - 1
+					cells[0]["wins"] = fixtureMinCellN - 1
+					cells[0]["win_rate"] = 1
+					cells[0]["ci95_half_width"] = 0.98 / math.Sqrt(float64(fixtureMinCellN-1))
+					return cells
+				})
+			},
+		},
+		{
+			name: "a confidence interval that is not 0.98/sqrt(n)",
+			want: "is not 0.98/sqrt(n)",
+			damage: func(t *testing.T, root string) {
+				editTierList(t, root, seg, func(cells []map[string]any) []map[string]any {
+					cells[0]["ci95_half_width"] = 0.5
+					return cells
+				})
+			},
+		},
+		{
+			name: "a win rate that is not wins/n",
+			want: "is not wins/n",
+			damage: func(t *testing.T, root string) {
+				editTierList(t, root, seg, func(cells []map[string]any) []map[string]any {
+					cells[0]["win_rate"] = 1.0
+					return cells
+				})
+			},
+		},
+		{
+			name: "a tier list that lost a cell",
+			want: "publishable cells but the manifest says",
+			damage: func(t *testing.T, root string) {
+				editTierList(t, root, seg, func(cells []map[string]any) []map[string]any {
+					return cells[1:]
+				})
+			},
+		},
+		{
+			// The schema rejects an unpublished grade before the tier-list
+			// check runs, so this case pins the schema message rather than the
+			// verifier's own wording. Both exist: the schema document is the
+			// contract cmd/gen-types ships to the frontend, so a grade the
+			// web app cannot render must fail at the schema, not later.
+			name: "a grade the schema does not allow",
+			want: "cells[0].tier",
+			damage: func(t *testing.T, root string) {
+				editTierList(t, root, seg, func(cells []map[string]any) []map[string]any {
+					cells[0]["tier"] = "S++"
+					return cells
+				})
+			},
+		},
+		{
+			name: "a champion document that is gone",
+			want: "file is missing",
+			damage: func(t *testing.T, root string) {
+				if err := os.Remove(filepath.Join(root, filepath.FromSlash(seg.ChampionPath(championID)))); err != nil {
+					t.Fatalf("remove champion document: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			copyTree(t, good, root)
+			tc.damage(t, root)
+
+			_, err := Verify(VerifyOptions{AggRoot: root, Source: aggmodel.SourceRiotMatchV5})
+			if err == nil {
+				t.Fatalf("verification accepted a tree with %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("verification of %s reported:\n%v\nwant a problem mentioning %q", tc.name, err, tc.want)
+			}
+		})
+	}
+
+	// The manifest is the last control, because a tree whose manifest lies
+	// about where its numbers came from must fail even when every number in it
+	// is right.
+	root := t.TempDir()
+	copyTree(t, good, root)
+	manifestPath := filepath.Join(root, filepath.FromSlash(aggmodel.ManifestPath))
+	manifest, err := readJSONDoc[map[string]any](manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	manifest["source"] = string(aggmodel.SourceDemo)
+	if err := writeDoc(root, aggmodel.ManifestPath, manifest); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if _, err := Verify(VerifyOptions{AggRoot: root, Source: aggmodel.SourceRiotMatchV5}); err == nil {
+		t.Error("verification accepted a real tree whose manifest claims to be demo data")
+	}
+}
+
+// editTierList rewrites the tier list of one partition in place.
+//
+// The edit is applied to the decoded documents rather than to the bytes so a
+// case states the field it damages and nothing else, and the re-encode writes
+// the documents back through the same writer the build uses.
+func editTierList(t *testing.T, root string, seg aggmodel.Seg, edit func(cells []map[string]any) []map[string]any) {
+	t.Helper()
+
+	relPath := seg.TierListPath()
+	doc, err := readJSONDoc[map[string]any](filepath.Join(root, filepath.FromSlash(relPath)))
+	if err != nil {
+		t.Fatalf("read tier list: %v", err)
+	}
+	cells, ok := doc["cells"].([]any)
+	if !ok {
+		t.Fatalf("tier list has no cells array")
+	}
+	decoded := make([]map[string]any, 0, len(cells))
+	for _, cell := range cells {
+		one, ok := cell.(map[string]any)
+		if !ok {
+			t.Fatalf("tier list cell is not an object")
+		}
+		decoded = append(decoded, one)
+	}
+	edited := edit(decoded)
+	doc["cells"] = edited
+	if err := writeDoc(root, relPath, doc); err != nil {
+		t.Fatalf("write tier list: %v", err)
+	}
+}
+
+// copyTree copies every file under src into dst, which is how a damage case
+// starts from the build the acceptance half already approved.
+func copyTree(t *testing.T, src, dst string) {
+	t.Helper()
+
+	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		body, err := os.ReadFile(path) //nolint:gosec // G304: a test-owned temporary tree.
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, body, 0o644)
+	})
+	if err != nil {
+		t.Fatalf("copy %s: %v", src, err)
+	}
 }

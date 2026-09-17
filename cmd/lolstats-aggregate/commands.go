@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,6 +37,11 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		duckdbBin   string
 		allowMism   bool
 		metricsAddr = cfg.MetricsAddr
+
+		duckdbMemoryLimit = cfg.Aggregate.DuckDBMemoryLimit
+		duckdbThreads     = cfg.Aggregate.DuckDBThreads
+		duckdbTempDir     = cfg.Aggregate.DuckDBTempDir
+		duckdbMaxTempSize = cfg.Aggregate.DuckDBMaxTempSize
 	)
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -50,6 +57,14 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		"pinned duckdb client, empty means $LOLSTATS_DUCKDB_BIN or PATH")
 	fs.BoolVar(&allowMism, "duckdb-allow-mismatch", false,
 		"run even when the client is not the pinned DuckDB release")
+	fs.StringVar(&duckdbMemoryLimit, "duckdb-memory-limit", duckdbMemoryLimit,
+		"hard DuckDB memory ceiling such as 1GiB; must stay well below the pod's memory limit")
+	fs.IntVar(&duckdbThreads, "duckdb-threads", duckdbThreads,
+		"DuckDB thread pool size, zero means the default rather than the host's core count")
+	fs.StringVar(&duckdbTempDir, "duckdb-temp-dir", duckdbTempDir,
+		"parent of the DuckDB spill directory, empty means the system temporary directory")
+	fs.StringVar(&duckdbMaxTempSize, "duckdb-max-temp-size", duckdbMaxTempSize,
+		"bound on the DuckDB spill directory such as 10GiB")
 	fs.StringVar(&metricsAddr, "metrics-addr", metricsAddr,
 		"prometheus listen address, empty disables the endpoint")
 	if err := fs.Parse(args); err != nil {
@@ -82,6 +97,12 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		MinCellN:   minCellN,
 		GitSHA:     gitSHA(getenv),
 		DuckDBBin:  duckdbBin,
+		DuckDB: aggregate.DuckDBSettings{
+			MemoryLimit: duckdbMemoryLimit,
+			Threads:     duckdbThreads,
+			TempDir:     duckdbTempDir,
+			MaxTempSize: duckdbMaxTempSize,
+		},
 
 		AllowVersionMismatch: allowMism,
 		Auditor:              auditor,
@@ -236,21 +257,115 @@ func runManifest(args []string, stdout, stderr io.Writer, getenv config.Getenv) 
 	if err != nil {
 		return fail(stderr, "manifest", err)
 	}
-	manifest, err := aggregate.UpdateManifest(aggRoot, aggmodel.Partition{
-		Patch:   seg.patch,
-		Region:  strings.ToUpper(seg.region),
-		Queue:   seg.queue,
-		Bracket: aggmodel.Bracket(seg.bracket),
-	}, aggmodel.Source(source), stamp)
+	if stamp.IsZero() {
+		// A re-index changes no number, so it does not claim a new generation
+		// time: it keeps the one the live manifest carries, and only stamps now
+		// when there was no manifest to read. This is also why the flag is not
+		// simply defaulted to now the way build and demo default it.
+		if live, err := aggregate.ReadManifest(aggRoot); err == nil {
+			stamp = live.GeneratedAt
+		}
+		if stamp.IsZero() {
+			stamp = time.Now().UTC()
+		}
+	}
+	// The segment flags name the partition this re-index is authoritative for,
+	// which only matters when several partitions share the newest patch: the
+	// named one wins `latest`. With no --patch the manifest is rebuilt from the
+	// tree alone, and a partition with an empty patch never reaches the
+	// document - an index entry that no directory backs is a phantom.
+	named := aggmodel.Partition{}
+	if seg.patch != "" {
+		named = aggmodel.Partition{
+			Patch:   seg.patch,
+			Region:  strings.ToUpper(seg.region),
+			Queue:   seg.queue,
+			Bracket: aggmodel.Bracket(seg.bracket),
+		}
+		if err := requirePartition(aggRoot, named); err != nil {
+			return fail(stderr, "manifest", err)
+		}
+	}
+
+	// The zero Partition is passed deliberately: this subcommand publishes no
+	// partition, so the entry already on disk - or, failing that, the one the
+	// tree walk derives from tierlist.json - is the authority for every field
+	// except the path. Passing the four flags as a Partition instead would give
+	// it precedence and blank generated_at, source_window, min_cell_n,
+	// suppressed_cells, cells_published, champions and matchup_roles for that
+	// partition, which is a manifest that under-reports a partition the site
+	// then cannot render.
+	manifest, err := aggregate.UpdateManifest(aggRoot, aggmodel.Partition{}, aggmodel.Source(source), stamp)
 	if err != nil {
+		return fail(stderr, "manifest", err)
+	}
+	if len(manifest.Partitions) == 0 {
+		return fail(stderr, "manifest", fmt.Errorf("no partition under %s: nothing to index", filepath.Join(aggRoot, aggmodel.VersionDir, "p")))
+	}
+	if seg.patch != "" {
+		entry, ok := findPartition(manifest.Partitions, named)
+		if !ok {
+			return fail(stderr, "manifest", fmt.Errorf("partition %s is in the tree but was not indexed", segOf(named).Dir()))
+		}
+		manifest.Latest = entry
+	}
+	if err := aggregate.WriteManifest(aggRoot, manifest); err != nil {
 		return fail(stderr, "manifest", err)
 	}
 	statusLine(stdout, "manifest", "ok",
 		"partitions", len(manifest.Partitions),
 		"latest", manifest.Latest.Patch,
 		"source", manifest.Source,
+		"generated_at", manifest.GeneratedAt.Format(time.RFC3339),
 		"path", aggmodel.ManifestPath)
 	return exitOK
+}
+
+// findPartition looks a partition up by the four path elements that identify it.
+//
+// The lookup is by key rather than by pointer because the entry the manifest
+// carries is the one read from disk or derived from the artifacts, so it is not
+// the value the caller passed in.
+func findPartition(partitions []aggmodel.Partition, want aggmodel.Partition) (aggmodel.Partition, bool) {
+	for _, p := range partitions {
+		if p.Patch == want.Patch && p.Region == want.Region &&
+			p.Queue == want.Queue && p.Bracket == want.Bracket {
+			return p, true
+		}
+	}
+	return aggmodel.Partition{}, false
+}
+
+// requirePartition refuses a --patch whose partition is not in the tree.
+//
+// A manifest entry is a promise that the directory behind it is complete, so
+// naming a partition that is not there would publish an index entry a reader
+// cannot follow. It catches the common operator mistake - a typo, or a build
+// that has not run yet - before the manifest is swapped.
+func segOf(partition aggmodel.Partition) aggmodel.Seg {
+	return aggmodel.Seg{
+		Patch:   partition.Patch,
+		Region:  partition.Region,
+		Queue:   partition.Queue,
+		Bracket: partition.Bracket,
+	}
+}
+
+// requirePartition refuses a --patch whose partition is not in the tree.
+//
+// A manifest entry is a promise that the directory behind it is complete, so
+// naming a partition that is not there would publish an index entry a reader
+// cannot follow. It catches the common operator mistake - a typo, or a build
+// that has not run yet - before the manifest is swapped.
+func requirePartition(aggRoot string, partition aggmodel.Partition) error {
+	seg := segOf(partition)
+	if err := seg.Validate(); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(aggRoot, filepath.FromSlash(seg.TierListPath()))); err != nil {
+		return fmt.Errorf("partition %s has no %s: %w", seg.Dir(), filepath.Base(seg.TierListPath()), err)
+	}
+	return nil
 }
 
 func runDemo(args []string, stdout, stderr io.Writer, getenv config.Getenv) int {
