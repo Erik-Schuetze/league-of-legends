@@ -5,6 +5,24 @@
 # rebuild reads. It is therefore the one tree that needs a copy older than the
 # mistake that would destroy it.
 #
+# CHOOSING A DESTINATION IS A SECRET-SIDE CHANGE, NOT A MANIFEST CHANGE. The
+# repository location this job actually uses is `RESTIC_REPOSITORY_OVERRIDE` when
+# the `lolstats-restic` Secret defines it, and the ConfigMap value below
+# otherwise. Every backend's credentials ride along from the same Secret through
+# `envFrom` - AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for s3, B2_ACCOUNT_ID/
+# B2_ACCOUNT_KEY for b2, and RESTIC_EXTRA for the `-o sftp.command=...` an sftp
+# host needs (its key and known_hosts are mounted read-only at /etc/restic) - so
+# pointing this job at a second machine or an object store is a Secret edit and
+# nothing else. The Secret reference is deliberately `optional: true`: a cluster
+# without it still starts every other workload here, and this job alone fails
+# loudly. The template for it is deploy/base/ops/restic-secret.example.yaml.
+#
+# The two things that are NOT automatic are an egress rule (see
+# deploy/base/network/default-deny.yaml, and the note in
+# deploy/base/backup/config.yaml) and the destination existing in the first
+# place. deploy/README.md, section Backups, subsection "Point it somewhere
+# else", is the procedure.
+#
 # WHAT THIS IS AND IS NOT. `RESTIC_REPOSITORY` defaults to a directory on the
 # same ReadWriteMany volume the archive itself lives on, because no off-site
 # medium exists on this cluster today (plan open question 3 is unanswered). That
@@ -106,6 +124,28 @@ spec:
                   export RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-/tmp/restic-cache}"
                   export HOME=/tmp
                   mkdir -p "$RESTIC_CACHE_DIR"
+
+                  # The ConfigMap sets the default repository; the Secret may
+                  # override it. The override wins by name, not by whatever order
+                  # envFrom happens to apply two sources in, which is the reason
+                  # it is a separate key rather than a second RESTIC_REPOSITORY.
+                  if [ -n "${RESTIC_REPOSITORY_OVERRIDE:-}" ]; then
+                    echo "backup-archive: RESTIC_REPOSITORY_OVERRIDE is set; using it instead of the default"
+                    RESTIC_REPOSITORY="$RESTIC_REPOSITORY_OVERRIDE"
+                    export RESTIC_REPOSITORY
+                  fi
+
+                  # Every restic call below goes through this function, so a
+                  # backend that needs extra options gets them everywhere at
+                  # once: an sftp host is
+                  # RESTIC_EXTRA="-o sftp.command=ssh -i /etc/restic/id_ed25519
+                  #             -o UserKnownHostsFile=/etc/restic/known_hosts -o
+                  #             StrictHostKeyChecking=yes user@host"
+                  # (the unquoted expansion is deliberate - it is a list of
+                  # words - and the value therefore must not contain globs or
+                  # shell metacharacters; `command` bypasses this function so
+                  # there is no recursion).
+                  restic() { command restic ${RESTIC_EXTRA:-} "$@"; }
 
                   # Say out loud which of the two worlds this run is in, so the
                   # log of a nightly job is itself the evidence for whether the
@@ -210,6 +250,17 @@ spec:
                     name: lolstats-config
                 - configMapRef:
                     name: lolstats-backup-config
+                # Every key of the restic Secret, as environment variables. That
+                # is what makes a remote destination configuration instead of a
+                # rewrite: RESTIC_REPOSITORY_OVERRIDE points at it, and whatever
+                # credentials its backend needs (AWS_ACCESS_KEY_ID,
+                # AWS_SECRET_ACCESS_KEY, B2_ACCOUNT_ID, B2_ACCOUNT_KEY,
+                # RESTIC_EXTRA) are simply more keys in the same object. The
+                # reference is optional, so a namespace without the Secret still
+                # comes up and only this job fails.
+                - secretRef:
+                    name: lolstats-restic
+                    optional: true
               env:
                 # Only the repository location and the cache come from the
                 # ConfigMap above; the password is a Secret and it is referenced
@@ -246,9 +297,24 @@ spec:
                   mountPath: /var/lib/lolstats
                 - name: tmp
                   mountPath: /tmp
+                # For an sftp destination: the private key and its known_hosts
+                # are keys of the same Secret, seen here as files. 0440 rather
+                # than 0400 because the kubelet owns mounted secret files as
+                # root:fsGroup, and this container is uid 65532.
+                - name: restic-secret
+                  mountPath: /etc/restic
+                  readOnly: true
           volumes:
             - name: data
               persistentVolumeClaim:
                 claimName: lolstats-data
             - name: tmp
               emptyDir: {}
+            # Optional, like every other reference to this Secret: with no
+            # Secret the directory is empty and an s3/local repository does not
+            # care.
+            - name: restic-secret
+              secret:
+                secretName: lolstats-restic
+                optional: true
+                defaultMode: 0440
