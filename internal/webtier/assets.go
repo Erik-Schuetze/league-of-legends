@@ -22,7 +22,7 @@ import (
 // each component, keyed by the component name.
 //
 // They are the scoped-style suffixes of the design system that was kept as-is:
-// the stylesheets below are the ones web/src/*.astro compiled to, and the
+// the stylesheets below are the ones the retired web/ tree compiled to, and the
 // selectors in them are `[data-astro-cid-<token>]` attribute selectors. A
 // template that emits the matching attribute therefore gets the component's
 // styles without the CSS having to be rewritten, and the rendered output stays

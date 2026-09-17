@@ -11,7 +11,7 @@ import (
 
 // Number and date formatting for published values.
 //
-// These are ports of web/src/lib/format.ts. Grouping is done by hand rather
+// These are ports of the retired web/ tree's format.ts. Grouping is done by hand rather
 // than with a locale-aware formatter for the reason the original gives: the
 // rendering tier is the only place these numbers are ever produced, and a
 // locale-dependent formatter would let two environments emit different HTML for
