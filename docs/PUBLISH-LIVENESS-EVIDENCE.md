@@ -33,7 +33,7 @@ not needed. The measurement below is of that claim, not of a restatement of it.
 | Deployment revision | `deployment.kubernetes.io/revision=8`, `generation=8`, uid `68d4362e-c2e0-4869-9b81-46a1bf553401` |
 | Image measured | `ghcr.io/erik-schuetze/league-of-legends@sha256:d4e136ddda522238ddc1976afb713173b4c7a1a576a80f28edf3a0e150555f5f` |
 | Volume | `pvc/lolstats-data`, NFS-backed RWX, mounted at `/var/lib/lolstats` in the tier, aggregate root `/var/lib/lolstats/agg` |
-| Reached through | `kubectl port-forward svc/lolstats-go-web 18820:80` and, for a second opinion, `port-forward pod/lolstats-go-web-86c6b9fb86-dn54j 18821:80` |
+| Reached through | `kubectl port-forward svc/lolstats-go-web 18820:80` and, for a second opinion, `port-forward pod/lolstats-go-web-86c6b9fb86-dn54j 18821:8080` (both inherited from run 1 rather than started by this run - see §12.5) |
 | Not measured | the real `build` subcommand end to end (it needs Postgres and the raw archive). The publisher's *effect* was reproduced by an injector that follows `Publish()`'s step order exactly - see §12.4. Also not measured: sub-second latency, and the static Astro/Caddy tier |
 
 Map from the brief's required order of proofs to what was done:
@@ -271,6 +271,12 @@ running Go tier with no restart, no rollout and no pod replacement, in ≤ one 5
 with the reader's own cache key (`size`, `mtime`) as the only trigger. The instrument was proven
 capable of seeing a change before that verdict was reached, and the volume was left byte-identical.
 
+One defect found in the final sweep is disclosed in §12.5: the HTTP samples were served through
+port-forwards that run 1 had leaked, not through forwards this run started. They pointed at the same
+service and the same pod, and §9 proves that pod was never replaced, so the verdict stands - the
+defect is fixed in the instrument, and a stale forward to a *replaced* pod is exactly the shape of
+measurement it could otherwise have corrupted.
+
 ## 12. What did not work
 
 Reported because the brief asks for it, and because two of these failures initially *looked like the
@@ -340,6 +346,52 @@ as "publish-by-rename is not visible to the tier", which is the opposite of what
   route re-derives from the same cached `Site`, which is why the two stamps were asserted instead of
   crawling the site.
 
+### 12.5 Both port-forwards were left over from run 1, and every later run silently reused them
+
+Found during the final hygiene sweep, and worth stating because it is the same trap that bit the
+perf lane. Two `kubectl port-forward` processes were still alive at the end of the session:
+
+```
+5138  Do. 17 Sep. 19:22:30 2026  kubectl -n lolstats port-forward pod/lolstats-go-web-86c6b9fb86-dn54j 18821:8080
+98689 Do. 17 Sep. 19:20:28 2026  kubectl -n lolstats port-forward svc/lolstats-go-web 18820:80
+```
+
+Those local times are 17:22:30Z and 17:20:28Z - inside **run 1**'s window (run 1 published its
+control at 17:24:18Z and finished at 17:37:05Z), which is the only run whose own process could
+have created them. So an earlier invocation leaked its forwards (most plausibly the dry run that
+was killed rather than allowed to exit, which skips the `EXIT` trap), and then:
+
+* runs 2 and 3 each found 18820 and 18821 already listening, so their own `kubectl port-forward`
+  children died on bind with `address already in use`;
+* `pf_start`'s readiness probe - a `curl` against `http://127.0.0.1:$port/` - still passed
+  instantly, because the inherited forward answered on that port.
+
+The three transcripts are indistinguishable on this point: all three print
+`port-forward svc/lolstats-go-web -> 127.0.0.1:18820` and
+`port-forward pod/lolstats-go-web-86c6b9fb86-dn54j -> 127.0.0.1:18821`, and none of those lines
+proves *whose* process owned the port.
+
+Why the measurement is still sound, and what it would have taken to invalidate it: the inherited
+forwards pointed at the same service and at the same pod that the run measured, and that pod
+(`-dn54j`, uid `49e5c278-3077-47ae-9281-56c24b153f27`, created `2026-09-17T17:16:34Z`) is proven by
+§9 to have been the same process before and after, with `restartCount=0`. A forward to a *replaced*
+pod is exactly how this defect would have produced a wrong answer - a stale forward keeps serving
+the dead pod's bytes and the tier would look "unchanged" while the real reader had moved. The
+no-restart proof is therefore doing double duty here: it is also what rules out the stale-target
+failure mode.
+
+Fixed in the instrument, two changes: `pf_start` now refuses to run at all if anything is already
+listening on the local port (`port_busy`, via `lsof`) instead of reaping it, because whatever holds
+the port may belong to another lane; and `cleanup` now escalates to `kill -9` and then *verifies*
+the port was released, warning by name if it was not. The check is unit-tested from the shipped
+function bodies by `.agent-artifacts/publish-liveness/unit-port-guard.sh` (13 assertions: free
+port reported free, real listener seen, busy port refused with the port named and no forward
+recorded, forward started and recorded as `pid:port`, cleanup releasing its own port and killing
+its own child, and cleanup leaving - but naming - a listener it did not start). Both leftovers were
+then killed with explicit numeric PIDs and 18820/18821 verified free; the two other
+`kubectl port-forward` processes on the machine (18933, 18999, and the Postgres one on 15432) are
+other lanes' and were left alone.
+
 ## 13. Side effects this run had on the live system
 
 Disclosed in full, because the volume backs the public site:
@@ -350,8 +402,9 @@ Disclosed in full, because the volume backs the public site:
   inode numbers and ctimes are not restorable from inside a container and were not.
 * The probe pod wrote a 24 MB statically-linked `lolstats-aggregate` binary to `/tmp` **inside its
   own container**, which was created for the test and deleted at the end.
-* The two port-forwards and the periodic polling added a small, bounded request load to the tier for
-  the duration of the run.
+* The two port-forwards (created by run 1 and inherited by the later runs, §12.5) and the periodic
+  polling added a small, bounded request load to the tier for the duration of the run. They were
+  killed during the final sweep, so no forward to this cluster remains from this work.
 * Nothing else: no deployment, service, configmap, secret or CronJob was created, patched,
   suspended, scaled or deleted, and the tier was never restarted or rolled by this work.
 
@@ -436,6 +489,11 @@ removed by `1f464dc` because the tier is edge-facing (risk R2). Doing so again w
 decision with a reason, not a favour to this test, so this document does not ask for it. Exit codes
 are 0 ok, 3 control failed, 4 hot reload failed, 5 a restart was detected, 6 restoration failed.
 
+Both forwards must be free before the run starts: `pf_start` refuses a local port that is already
+listening (the two ports are 127.0.0.1:18820 for the service and 127.0.0.1:18821 for the pod), and
+`cleanup` verifies the ports are released and kills what it started. See §12.5 for why that check
+exists.
+
 ## 17. Artefacts
 
 | Path | What it is |
@@ -446,6 +504,7 @@ are 0 ok, 3 control failed, 4 hot reload failed, 5 a restart was detected, 6 res
 | `.agent-artifacts/publish-liveness/transcript-run1-failed-instrument.txt` | run 1, exit 6, the instrument bugs of §12 |
 | `.agent-artifacts/publish-liveness/transcript-run2-pass.txt` | run 2, first full pass |
 | `.agent-artifacts/publish-liveness/plan.json` | the plan the injector and the assertions both read their expected values from |
+| `.agent-artifacts/publish-liveness/unit-port-guard.sh` | unit test for the port guard of §12.5, run against the shipped function bodies |
 
 Everything under `.agent-artifacts/` is git-ignored scratch, so it is not part of the commit and will
 not survive a clean checkout. The excerpts quoted above are the durable record; nothing in this
