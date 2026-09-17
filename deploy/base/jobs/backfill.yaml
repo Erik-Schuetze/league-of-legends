@@ -3,19 +3,22 @@
 # schedule would mean re-fetching data that is already archived at a cost in Riot
 # API budget for no new information.
 #
-# To use it, an operator creates a one-off job with the range they want. The
-# range cannot be supplied by `--from=cronjob` alone - a job created that way
+# To use it, an operator creates a one-off job naming the keys to reprocess. The
+# selection cannot be supplied by `--from=cronjob` alone - a job created that way
 # carries only the `backfill` argument and exits 2 with a usage message, because
 # the subcommand refuses to guess which slice of the archive to reprocess:
 #
 #   kubectl -n lolstats create job backfill-manual --from=cronjob/backfill \
 #     --dry-run=client -o json \
-#   | python3 -c 'import json,sys; j=json.load(sys.stdin); j["spec"]["template"]["spec"]["containers"][0]["args"] += ["-from","2026-01-01T00:00:00Z","-to","2026-02-01T00:00:00Z"]; json.dump(j,sys.stdout)' \
-#   | kubectl apply -f -
+#   | python3 -c 'import json,sys; j=json.load(sys.stdin); j["spec"]["template"]["spec"]["containers"][0]["args"] += ["-match-ids","EUW1_7944950978","-limit","1"]; json.dump(j,sys.stdout)' \
+#   | kubectl create -f -
 #
-# `-puuid <uuid>` is the other accepted form: one player instead of a window.
-# The manifest itself stays parameter-free so that the schedule can never run an
-# unbounded backfill by accident.
+# One of `-match-ids a,b`, `-ids-file <path>` or `-puuid <uuid>` is required;
+# `-from`/`-to` only bound the keys that are already selected, so a run with the
+# window alone is rejected with the same usage message. Verified live: the bare
+# instantiation exits 2, the form above completes with `candidates 1 known 1
+# failed 0`. The manifest itself stays parameter-free so that the schedule can
+# never run an unbounded backfill by accident.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
