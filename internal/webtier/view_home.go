@@ -14,7 +14,7 @@ func (r *Renderer) HomePage() (*Page, error) {
 	description := ""
 	switch {
 	case live:
-		description = "Patch-specific League of Legends ranked tier lists and champion matchups, published as static pages. " +
+		description = "Patch-specific League of Legends ranked tier lists and champion matchups, computed from Riot match data. " +
 			"Every win rate carries its sample size, and thin samples are withheld rather than shown."
 	case site.State() == StateDemo:
 		description = "What this site publishes, how the numbers are produced, and an honest statement of where the numbers on " +
@@ -23,7 +23,7 @@ func (r *Renderer) HomePage() (*Page, error) {
 		description = "What this site publishes and how the numbers will be produced once a snapshot exists. No aggregate " +
 			"snapshot has been published yet, so this build carries no match statistics at all."
 	}
-	title := "LoL Stats - League of Legends ranked statistics, published as static pages"
+	title := "LoL Stats - League of Legends ranked statistics"
 	if live {
 		title = "LoL Stats - League of Legends ranked statistics from Riot match data"
 	}

@@ -201,7 +201,7 @@ func (r *Renderer) PrivacyPage() (*Page, error) {
 		return nil, err
 	}
 	title := "Privacy Policy - " + SiteName
-	description := SiteName + " privacy policy: the site serves static pages, sets no cookies of its own, has no accounts, forms or analytics, and the only third-party request a page makes is for champion icons from Riot Data Dragon."
+	description := SiteName + " privacy policy: the site sets no cookies of its own, has no accounts, forms or analytics, and the only third-party request a page makes is for champion icons from Riot Data Dragon."
 	jsonld, err := JSONLDNode(webPageNode(r.absolute("/legal/privacy/"), title, description))
 	if err != nil {
 		return nil, err
