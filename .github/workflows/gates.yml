@@ -93,3 +93,11 @@ jobs:
       # that control runs here, with a deliberately non-empty stdin.
       - name: Compliance gate under GNU userland
         run: make compliance-gnu
+
+      # Last, and on its own: it rewrites web/dist/index.html in place to prove
+      # the parity comparison is live, so nothing else may read the reference
+      # tree while it runs. It does not assert that the unmutated tree passes -
+      # that is what `Test` in docker-build.yml is for - so an unrelated parity
+      # break stays reported by its own job and not by this control.
+      - name: Parity gate mutation control
+        run: make parity-mutation-control

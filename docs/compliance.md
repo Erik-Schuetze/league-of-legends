@@ -23,6 +23,7 @@ make compliance-served   # the same gate over the HTML the tier actually served
 make compliance-negative-control   # one planted violation at a time
 make capture-served-pages          # refresh the served corpus from a running tier
 make compliance-gnu      # the same gate in a GNU userland, when docker is present
+make parity-mutation-control       # change one rendering input, require the gate to fail
 ```
 
 `scripts/compliance-check.sh` is a POSIX `sh` script with no network access and
@@ -797,3 +798,21 @@ a compliance change, not a copy change.
   workflow file's header records this. The immediate consequence is that the
   compliance evidence for that date is readable even while the parity gate is
   red.
+- **The parity gate gained a mutation control, on 2026-09-17.** The ordering fix
+  proved the parity tests *run* (`make test-parity` fails on `SKIP`, and a design
+  token rename did redden `TestRenderParity` in CI), but not that they still
+  *compare*: a comparison that had been neutered - both renderers swapping in the
+  same wrong bytes, say - would report `PASS`. `scripts/parity-mutation-control.sh`
+  and `make parity-mutation-control` close that: the reference page is mutated
+  (`lang="en"` -> `lang="zz"` in `web/dist/index.html`), the gate must exit
+  non-zero, the `home` route must be the case that fails, the mutation must appear
+  on the reference side of the first-difference excerpt, and the page must come
+  back byte for byte (hash-compared). Observed: 6 controls held, 0 broken
+  (`bin/parity-mutation-pass.log`). Two further paths are exercised by hand: an
+  interrupted run is recovered by restoring the validated backup so the page is
+  never left mutated, and a backup that does not look like an original is
+  *refused* rather than written over the tree. The control is also controlled:
+  with a stub `make` that exits 0 - a gate that no longer compares anything - the
+  control reports `RESULT: FAIL - 3 control(s) held, 3 broken`
+  (`bin/parity-mutation-stub.log`). It runs as the last step of `Launch gates`,
+  after every scan that reads the reference tree, because it rewrites it in place.
