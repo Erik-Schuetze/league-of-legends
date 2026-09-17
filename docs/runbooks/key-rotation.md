@@ -83,10 +83,23 @@ when no key is configured, and it resets to `0` on every restart. `KeyWarnAge` i
   reaches 12 hours.
 
 A real expiry alert needs a metric derived from the key's own `expires_at`.
-`LOLSTATS_RIOT_API_KEY_EXPIRES_AT` is parsed by `internal/config` and consumed by
-nothing. Until the ingestion workstream emits it, the expiry symptom you can
-actually observe is a rising 403 rate - which is what `LolstatsRiotKeyRevoked`
-watches - and the practical control is a calendar alarm.
+`LOLSTATS_RIOT_API_KEY_EXPIRES_AT` is parsed by `internal/config`
+(`config.Config.Riot.KeyExpiresAt`) and reaches no metric - but it is not
+"consumed by nothing": `cmd/lolstats-ingest` reads it in three places (it refuses
+to start once the declared deadline has passed, the worker carries it as
+`KeyExpiry`, and `/readyz` reports it), and it is wired from the Secret's
+optional `RIOT_API_KEY_EXPIRES_AT` key in `deploy/base/ingest/deployment.yaml`,
+`deploy/base/jobs/discover-seeds.yaml` and `deploy/base/jobs/backfill.yaml`. What
+is missing is a *metric*; the deadline itself still has to be written down by
+hand, and Riot does not tell this stack when a development key dies.
+
+It has never been written down here: Secret `lolstats-riot` carries
+`RIOT_API_KEY` and no `RIOT_API_KEY_EXPIRES_AT` (verified 2026-09-17), so no
+process can fail early on a passed deadline and a dead key is discovered exactly
+as the code comment says it is - a 401 on the first call. Until the ingestion
+workstream emits an expiry metric, the symptom you can actually observe is a
+rising 403 rate - which is what `LolstatsRiotKeyRevoked` watches - and the
+practical control is a calendar alarm.
 
 ## Rotate, the path that works today
 
