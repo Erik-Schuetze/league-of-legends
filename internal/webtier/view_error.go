@@ -52,10 +52,16 @@ type errorView struct {
 	HasRoutes   bool
 	RoutesNote  string
 
-	// The standalone form has no shell to carry the stylesheet, so it carries
-	// the same two style sources itself. The shelled form ignores them.
+	// The standalone form has no shell to carry the stylesheets, so it carries
+	// the same three sources itself, in the shell's order: the base sheet by
+	// link, then the scoped chunk, then the frozen layer. The frozen layer is
+	// last because that is the only reason any of its rules beat the scoped
+	// layer's, and it is present because the faults this form answers are the
+	// ones where a reader has least else to look at. The shelled form ignores
+	// these three; it gets them from shell.tmpl.
 	Stylesheet string
 	ScopedCSS  template.CSS
+	FrozenCSS  template.CSS
 	Source     string
 	State      string
 }
@@ -130,6 +136,7 @@ func (r *Renderer) faultView(path string, status int, kind string, detail string
 		Explanation: "",
 		Stylesheet:  baseCSSPath,
 		ScopedCSS:   trustedCSS(string(scopedCSS(false))),
+		FrozenCSS:   trustedCSS(frozenCSSChunk()),
 		Source:      "fault",
 		State:       "no-data",
 	}
