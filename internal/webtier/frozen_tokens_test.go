@@ -822,7 +822,8 @@ func redundantTokens(layer, earlier string) []string {
 // TestFrozenLayerDeclaresNoRedundantToken pins finding 5. A declaration that
 // repeats an identical value from an earlier sheet, and that nothing in the
 // layer reads, is bytes in the one block no visitor can cache and no browser can
-// act on. Twenty-eight of them were removed (1,114 B of declaration text); the
+// act on. Twenty-eight of them were removed (800 B of declaration text, 828 with
+// the line endings, per the reconciliation in DESIGN-FREEZE.md); the
 // register above is why the twenty-ninth stays.
 //
 // The predicate reproduces the measured finding exactly: run against the layer

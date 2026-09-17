@@ -248,7 +248,7 @@ Four measured changes, none of them a redesign:
 | 1 | the 42 block comments in the two sheets deleted; their reasoning is this file | frozen block 14,178 B → **6,777 B**; the comment text alone was 6,470 B (6,450 of the block's 14,158 characters, 45.6%) |
 | 5 | 28 declarations deleted that repeat a value the base sheet already provides and that nothing in the layer reads | 800 B of declaration text (`--print-ink/-paper/-rule` and `--text-muted` kept, see `redundantByDesign`) |
 | 2 | A11y 3 extended with `.menu .panel .link[aria-current=page]` so the mandated underline wins its tie | computed `border-bottom-color` on the panel link on `/matchups/top`: `rgba(0, 0, 0, 0)` → **`rgb(27, 75, 198)`**; the layer's total contribution to that route is that one pair |
-| 7 | the standalone fault form inlines the frozen layer as its third and last style source | that document 21,352 B → **28,144 B** raw (4,183 → 5,808 gzip); ablating the layer there changes **1,469** computed pairs — 1,426 custom-property pairs and 43 rendered-property pairs over 15 elements — and 28 tokens the other two sheets do not define stop resolving |
+| 7 | the standalone fault form inlines the frozen layer as its third and last style source | that document 21,352 B → **28,144 B** raw (4,183 → 5,808 gzip); ablating the layer there changes **1,469** computed pairs — 1,426 custom-property pairs and 43 rendered-property pairs over 15 elements — and 33 tokens the other two sheets do not define stop resolving (28 of them are consumed by that document; the other five — `--bp-mobile`, `--bw-pre`, `--dur-hover`, `--float-amp`, `--shell-max` — are declared only there) |
 
 The 7,401 B by which the layer shrank is not simply the 6,470 B of comments plus
 the 828 B of duplicate declarations. Reconcile the two sheets separately against
@@ -259,8 +259,8 @@ the served sheets, byte counts not character counts):
 | --- | --- |
 | comment text, both sheets (42 comments) | −6,470 |
 | the 28 duplicate declarations, with their lines (`design-tokens.css`) | −828 |
-| the lines the comments occupied, now empty (`design-tokens.css` 126, `components.css` 15) | −141 |
-| the A11y 3 selector added to `components.css` | +38 |
+| the lines the comments occupied — **deleted outright, not emptied** (`design-tokens.css` 126, `components.css` 15); 143 B of indentation is what remains once the comment text is subtracted | −143 |
+| the A11y 3 selector added to `components.css` (`+67 B` over three lines, less the `27 B` single-selector line it replaced) | +40 |
 | **net** | **−7,401** |
 
 The whole-document effect on `/tier-list/top`, which is the route the audit
