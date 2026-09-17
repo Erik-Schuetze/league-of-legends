@@ -243,39 +243,154 @@ fi
 
 # ---------------------------------------------------------------------------
 check '3. No third-party scripts, embeds, fonts or tracking in the served pages'
-find "$DIST" -type f -name '*.html' -print0 |
-	xargs -0 grep -hoIE '<script[^>]*>|<iframe[^>]*>|<link[^>]*rel="[^"]*(preconnect|dns-prefetch)[^"]*"[^>]*>|@import[^;]*' \
-	> "$WORK/resource-tags.txt" 2>/dev/null || true
-resource_tags=$(count_lines "$WORK/resource-tags.txt")
-script_tags=$(grep -ohE '<script[^>]*>' "$WORK/resource-tags.txt" 2>/dev/null | wc -l | tr -d ' ')
-script_srcs=$(grep -ohE '<script[^>]*src="[^"]*"' "$WORK/resource-tags.txt" 2>/dev/null | wc -l | tr -d ' ')
-note "scanned tags in the built HTML: $resource_tags lines, $script_tags <script> tags, $script_srcs of them with a src"
-if [ "$script_tags" -lt 1 ]; then
-	fail 'no <script> tag was found in the built site, so this scan cannot tell whether a third-party one exists'
-else
+# AMENDED 2026-09-17 - see docs/compliance.md, "Amendment: checks 3 and 4, the
+# dynamic-serving amendment". The check no longer fails a page for having fewer
+# than one <script> tag. That floor was written for a pre-rendered site whose
+# every page carried a hydration bundle; in the server-rendered tier a page is
+# legitimately script-free (the /champions/<champion>/ pages emit no <script> at
+# all, and elsewhere the only one is the JSON-LD block), and a tag *count* was
+# never the invariant anyway. The invariant is that no executable resource or
+# tracking service on a served page comes from anywhere but this origin, and the
+# honesty labelling that the floor was standing in for is asserted directly by
+# check 11, which requires every page's banner to match the data-state the page
+# declares. What replaced the floor is a negative control: the extractor and the
+# origin filter below are run against markup that does phone home, and the check
+# fails if they do not flag it. This is strictly more than the floor proved, and
+# it is fail-closed in the same direction: a scan that reads a suspiciously small
+# number of pages still fails.
+#
+# The origin a reference may legally name is the one this build declares for
+# itself, read from the canonical link of the built index rather than from an
+# environment variable, so a checkout with no site URL configured still knows
+# which absolute references are its own.
+SELF_ORIGIN=$(grep -ohE '<link[^>]*rel="canonical"[^>]*>' "$DIST/index.html" 2>/dev/null |
+	grep -ohE 'https?://[A-Za-z0-9.:-]+' | head -1)
+# The tags that can load or execute something, extracted by a function so that
+# the control below runs through exactly the code the scan runs through.
+resource_tags_of() {
+	grep -hoIE '<script[^>]*>|<iframe[^>]*>|<link[^>]*rel="[^"]*(stylesheet|preload|modulepreload|prefetch|preconnect|dns-prefetch)[^"]*"[^>]*>|@import[^;]*' "$@"
+}
+# Everything in those tags that is not this origin: an absolute URL, a
+# protocol-relative URL, or the name of a tracking service. It takes a file
+# rather than standard input because two greps read it.
+external_of() {
 	{
-		grep -ohE '(src|href)="[^"]*"' "$WORK/resource-tags.txt" 2>/dev/null | grep -E 'https?:' || true
-		grep -ohiE "$TRACKERS" "$WORK/resource-tags.txt" 2>/dev/null || true
-	} > "$WORK/external-resources.txt"
-	external_resources=$(count_lines "$WORK/external-resources.txt")
-	if [ "$external_resources" -eq 0 ]; then
-		pass 'no executable third-party resource: every script, embed and preconnect in the built pages is same-origin, and no tracking service is referenced'
+		grep -ohE '(src|href)="[^"]*"' "$1" | grep -E '="(https?:)?//' | grep -vF "\"$SELF_ORIGIN/" || true
+		grep -ohiE "$TRACKERS" "$1" || true
+	} 2>/dev/null || true
+}
+pages_scanned=$(count_files "$DIST")
+if [ -z "$SELF_ORIGIN" ]; then
+	fail "the origin this build declares for itself could not be read from $DIST/index.html (its canonical link), so an absolute same-origin reference could not be told apart from a third-party one"
+else
+	note "this build's own origin, from the canonical link of its index: $SELF_ORIGIN"
+	find "$DIST" -type f -name '*.html' | LC_ALL=C sort > "$WORK/pages.txt" 2>/dev/null || true
+	: > "$WORK/resource-tags.txt"
+	# A loop rather than xargs: resource_tags_of is a shell function, and xargs
+	# would try to execute it as a program, find nothing, and leave an empty scan
+	# that passes. The count of tags read is asserted below for that reason.
+	while IFS= read -r page; do
+		[ -n "$page" ] || continue
+		resource_tags_of "$page" >> "$WORK/resource-tags.txt" 2>/dev/null || true
+	done < "$WORK/pages.txt"
+	resource_tags=$(count_lines "$WORK/resource-tags.txt")
+	script_tags=$(grep -ohE '<script[^>]*>' "$WORK/resource-tags.txt" 2>/dev/null | wc -l | tr -d ' ')
+	script_srcs=$(grep -ohE '<script[^>]*src="[^"]*"' "$WORK/resource-tags.txt" 2>/dev/null | wc -l | tr -d ' ')
+	external_of "$WORK/resource-tags.txt" > "$WORK/external-resources.txt"
+	sort -u < "$WORK/external-resources.txt" > "$WORK/external-resources-uniq.txt" 2>/dev/null || cp "$WORK/external-resources.txt" "$WORK/external-resources-uniq.txt"
+	external_resources=$(count_lines "$WORK/external-resources-uniq.txt")
+	note "scanned $pages_scanned built pages: $resource_tags usable-resource tags, $script_tags <script> tags, $script_srcs of them with a src"
+	note 'a page with no <script> is not a failure and is not evidence of anything by itself: what is asserted is that no <script>, stylesheet, font preload, embed or @import in the served markup names any origin but the one above, and that no tracking service appears at all'
+	# The negative control. Each fragment below is one the check exists to catch,
+	# and the two positive controls must be flagged while the two negative ones
+	# must not be: a filter that flags everything is as useless as one that flags
+	# nothing, and the third probe is the ordinary same-origin reference the tier
+	# itself emits on every page.
+	probe() { printf '%s\n' "$1" | resource_tags_of > "$WORK/probe.txt"; external_of "$WORK/probe.txt"; }
+	probe_prefix() { printf '<link rel="stylesheet" href="%s/_astro/tokens.css">\n' "$SELF_ORIGIN" | resource_tags_of > "$WORK/probe.txt"; external_of "$WORK/probe.txt"; }
+	ctrl_tracker=$(probe '<script src="https://www.googletagmanager.com/gtag/js?id=G-1"></script>' | grep -c 'googletagmanager' | tr -d ' ')
+	ctrl_font=$(probe '<link rel="preconnect" href="https://fonts.gstatic.com">' | grep -c 'fonts\.gstatic\.com' | tr -d ' ')
+	ctrl_self=$(probe_prefix | grep -c 'tokens\.css' | tr -d ' ')
+	ctrl_image=$(probe '<img src="https://example.invalid/x.png">' | grep -c 'example\.invalid' | tr -d ' ')
+	if [ "$pages_scanned" -lt 100 ]; then
+		fail "the resource scan read $pages_scanned built page(s); that is too few to be evidence about a site of this size"
+	elif [ "$resource_tags" -eq 0 ]; then
+		fail "the resource scan read $pages_scanned pages and extracted no resource tag at all, so its clean result is evidence of nothing: the extractor no longer matches the markup"
+	elif [ "$ctrl_tracker" -lt 1 ] || [ "$ctrl_font" -lt 1 ]; then
+		fail "the negative control did not fire: an analytics <script> was flagged $ctrl_tracker time(s) and a third-party font preconnect $ctrl_font time(s), so a clean scan of the built pages would prove nothing"
+	elif [ "$ctrl_self" -ne 0 ] || [ "$ctrl_image" -ne 0 ]; then
+		fail "the control is over-broad: a same-origin stylesheet was flagged $ctrl_self time(s) and a third-party <img> $ctrl_image time(s) (images are check 2's business, not this check's)"
+	elif [ "$external_resources" -eq 0 ]; then
+		pass "no executable third-party resource and no tracker: all $resource_tags resource tags across $pages_scanned pages are same-origin, and the control flagged the analytics and third-party-font probes as designed"
 	else
 		fail "$external_resources external resource reference(s) or tracker name(s) found:"
-		sed 's/^/      /' "$WORK/external-resources.txt" | sort -u | head -20
+		trim < "$WORK/external-resources-uniq.txt" | sed 's/^/      /' | head -20
 	fi
 fi
 
 # ---------------------------------------------------------------------------
 check '4. The free tier is genuinely free and ungated: no account, no paywall'
-GATING='<form[^>]*>|type="password"|type="email"|name="(password|email)"|href="[^"]*(login|sign-in|signin|sign-up|signup|register|subscribe|pricing|checkout)"|data-paywall|>Sign (in|up)<'
+# AMENDED 2026-09-17 - see docs/compliance.md, "Amendment: checks 3 and 4, the
+# dynamic-serving amendment". The check no longer fails on the presence of a
+# <form>. "Any form is a gate" was a proxy for a property that is now asserted
+# directly, because the server-rendered tier deliberately ships forms: the
+# tier-list filter bar is a GET form, which is the no-JS path for sorting,
+# filtering and paging, and it is the reason the site works with JavaScript
+# disabled. Banning the tag would have banned the accessibility mechanism the
+# redesign is built on.
+#
+# Three invariants replace it, each checked on its own and none of them weaker
+# than what the tag ban caught:
+#   R1  no credential field, no auth/subscription/checkout route and no paywall -
+#       the original pattern, kept, minus the bare <form> alternative.
+#   R2  every form is a no-JS server-side path: method="get" and an explicit
+#       action on this origin. A form that can change state, or that posts to
+#       somewhere that is not this site, is a failure. An action is required
+#       rather than optional so that the destination of every control is
+#       checkable in the markup instead of inherited from whatever URL the page
+#       was reached by.
+#   R3  every named control (<input>, <select>, <textarea>, <button> with a name)
+#       sits inside a form: a named control submits something, and if it is not
+#       in a form then it submits to nothing and the control has no server-side
+#       path at all. A control with no name - the islands' own filter and sort
+#       widgets are exactly that - cannot submit anything and is a JS
+#       enhancement on top of a working page, so it is not this check's subject.
+#
+# R1 is exercised by a two-fragment control, as before, and R2/R3 by their own
+# controls: bad markup must be flagged and the tier's own markup must not be.
+GATING='type="password"|type="email"|name="(password|email)"|href="[^"]*(login|sign-in|signin|sign-up|signup|register|subscribe|pricing|checkout)"|data-paywall|>Sign (in|up)<'
+FORM_TAG='<form[^>]*>'
+NAMED_CONTROL='<(input|select|textarea|button)[^>]*[[:space:]]name="[^"]+"'
+# A form tag that is a no-JS server-side path: GET, and an action that is a path
+# on this origin. Both are read case-insensitively, because attribute names and
+# values are case-insensitive in HTML and a check that only recognised the
+# lowercase spelling would pass a form written in the other spelling.
+form_is_nojs_path() {
+	printf '%s' "$1" | grep -qiE 'method="get"' || return 1
+	printf '%s' "$1" | grep -qE 'action="/[^"[:space:]]*"' || return 1
+	return 0
+}
+# Remove every <form ...> ... </form> span from the pages on standard input. The
+# built and served pages are one line each, so a line-oriented state machine is
+# enough; nested forms are invalid HTML and are not considered.
+strip_forms() {
+	awk '{
+		line = $0; out = "";
+		while (match(line, /<form[^>]*>/)) {
+			out = out substr(line, 1, RSTART - 1);
+			line = substr(line, RSTART + RLENGTH);
+			if (match(line, /<\/form>/)) { line = substr(line, RSTART + RLENGTH); }
+			else { line = ""; }
+		}
+		print out line;
+	}'
+}
 find "$DIST" -type f -name '*.html' -print0 |
 	xargs -0 grep -hoIE "$GATING" \
 	> "$WORK/gating.txt" 2>/dev/null || true
 gating=$(count_lines "$WORK/gating.txt")
 search_inputs=$(find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -hoIE '<input[^>]*type="search"[^>]*>' 2>/dev/null | grep -c '<input' | tr -d ' ')
-note "scanned $(count_files "$DIST") built pages for a form, a password or email field, a sign-in, registration, subscription or checkout route, or a paywall"
-note "excluded deliberately: $search_inputs <input type=\"search\"> elements, which are the same-origin table filters (data-island), not a gate; the tables render without them"
+note "scanned $(count_files "$DIST") built pages for a credential field, a sign-in, registration, subscription or checkout route, or a paywall"
 # A site that gates nothing and a pattern that matches nothing produce the same
 # silence, so the pattern is exercised against the markup this check exists to
 # catch before its silence is believed - the same control check 9 applies to its
@@ -284,10 +399,51 @@ gating_probe=$(printf '%s\n' '<form action="/login"><input type="password" name=
 if [ "$gating_probe" -lt 2 ]; then
 	fail "the gating pattern matches only $gating_probe of the two pieces of markup it exists to catch, so a clean scan of the built pages would prove nothing"
 elif [ "$gating" -eq 0 ]; then
-	pass 'no form, no credential field, no auth route and no paywall in any built page; every route renders for an anonymous reader'
+	pass 'no credential field, no auth route and no paywall in any built page; every route renders for an anonymous reader'
 else
 	fail "$gating gating element(s) found in the built pages:"
 	trim < "$WORK/gating.txt" | sort -u | sed 's/^/      /' | head -20
+fi
+
+# R1's control is above; R2 and R3 get their own, because a form rule that flags
+# nothing is indistinguishable from a site without forms, and the tier's own
+# filter bar is a form this check has to accept.
+find "$DIST" -type f -name '*.html' -print0 |
+	xargs -0 grep -HoIE "$FORM_TAG" > "$WORK/forms.txt" 2>/dev/null || true
+forms=$(count_lines "$WORK/forms.txt")
+: > "$WORK/forms-bad.txt"
+while IFS= read -r formline; do
+	[ -n "$formline" ] || continue
+	if ! form_is_nojs_path "${formline#*:}"; then
+		printf '%s\n' "$formline" >> "$WORK/forms-bad.txt"
+	fi
+done < "$WORK/forms.txt"
+forms_bad=$(count_lines "$WORK/forms-bad.txt")
+# Every named control that is left after the forms are removed has no form to
+# submit through, so it has no server-side path.
+find "$DIST" -type f -name '*.html' -print0 | xargs -0 cat 2>/dev/null | strip_forms |
+	grep -ohIE "$NAMED_CONTROL" > "$WORK/controls-outside-form.txt" 2>/dev/null || true
+controls_outside=$(count_lines "$WORK/controls-outside-form.txt")
+note "scanned $forms form(s) in the built pages, and every named control outside one; $search_inputs <input type=\"search\"> elements are the islands' own filters, which carry no name and therefore submit nothing"
+# The controls. Both must fire on markup that is a gate or a dead control, and
+# neither may fire on the tier's own filter bar.
+r2_ctrl=$(printf '%s\n' '<form action="https://example.invalid/login" method="post"><input name="u"></form>' '<form method="get"><input name="q"></form>' | grep -cE "$FORM_TAG" | tr -d ' ')
+r2_ctrl_bad=$(printf '%s\n' '<form action="https://example.invalid/login" method="post"><input name="u"></form>' '<form method="get"><input name="q"></form>' |
+	grep -oE "$FORM_TAG" | while IFS= read -r tag; do form_is_nojs_path "$tag" || printf 'bad\n'; done | grep -c 'bad' | tr -d ' ')
+r2_ctrl_good=$(printf '%s\n' '<form class="ds-filter-bar" action="/tier-list/mid" method="get" aria-label="Filters">' |
+	grep -oE "$FORM_TAG" | while IFS= read -r tag; do form_is_nojs_path "$tag" || printf 'bad\n'; done | grep -c 'bad' | tr -d ' ')
+r3_ctrl=$(printf '%s\n' '<input name="q"><select name="sort"></select>' | strip_forms | grep -oE "$NAMED_CONTROL" | wc -l | tr -d ' ')
+r3_ctrl_good=$(printf '%s\n' '<form action="/tier-list/mid" method="get"><input name="q"><select name="sort"></select></form>' | strip_forms | grep -oE "$NAMED_CONTROL" | wc -l | tr -d ' ')
+if [ "$r2_ctrl" -lt 2 ] || [ "$r2_ctrl_bad" -lt 2 ] || [ "$r2_ctrl_good" -ne 0 ]; then
+	fail "the no-JS-path control is wrong: of two forms (one posting off-origin, one with no action) it flagged $r2_ctrl_bad of 2, and it flagged $r2_ctrl_good of the tier's own GET form"
+elif [ "$r3_ctrl" -lt 2 ] || [ "$r3_ctrl_good" -ne 0 ]; then
+	fail "the named-control control is wrong: $r3_ctrl of 2 named controls outside a form were found, and $r3_ctrl_good of the two named controls inside the tier's own form were reported as outside one"
+elif [ "$forms_bad" -eq 0 ] && [ "$controls_outside" -eq 0 ]; then
+	pass "every form in the built pages is a GET form on this origin ($forms checked) and every named control is inside one (0 of $controls_outside outside); no credential field, no auth route and no paywall"
+else
+	fail "$forms_bad form(s) are not a no-JS server-side path and $controls_outside named control(s) sit outside a form:"
+	trim < "$WORK/forms-bad.txt" | sed 's/^/      /' | head -10
+	trim < "$WORK/controls-outside-form.txt" | sed 's/^/      /' | head -10
 fi
 
 # ---------------------------------------------------------------------------
