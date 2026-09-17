@@ -234,6 +234,24 @@ short. "Breaking" means something that used to work no longer does.
   pixel found an occluder - of which it found none. The bar's paint and layout are
   unchanged: the closed bar is pixel-identical to the previous build (0 differing
   pixels at scrollY 0/560/570/580) and the caret's ink does not move.
+- The ingest log could not distinguish a throttled crawl from a stopped one, so
+  a healthy run read as a stall. Absorbed 429s were logged at WARN
+  (`"attempt":1`, once a minute on a development key ridden at its `20:1`
+  application ceiling), the probe that would have shown the loop advancing was
+  `Debug` (`Log.Debug("limiter state", ...)`) and therefore invisible at
+  `LOLSTATS_LOG_LEVEL=info`, and the only other progress lines were `Debug`
+  too. One hour of `--tail` output was 100% `WARN "riot rate limited"` on a
+  crawler that was fetching ~44 matches a minute, which is the silent staleness
+  this pipeline is required to report instead of hiding. The report interval now
+  writes one line at Info - `crawl pipeline status` with `matches_retained`,
+  `frontier`, `staleness`, the limiter's `advertised` window and
+  `effective_rps` - and promotes it to a WARN once `staleness` passes the hour
+  the staleness alert holds for (`crawl.StaleWarnAge`), so the numbers that
+  freeze in a stall are the ones the log carries. A 429 the call goes on to wait
+  out and retry is logged at Debug; a 429 that ends the call (Riot's
+  `Retry-After` past the retry wait budget, or the last attempt) is still a
+  WARN. The 429 counters are unchanged on both paths, so
+  `LolstatsRiotRateLimited` reads what it always did.
 
 ### Notes
 

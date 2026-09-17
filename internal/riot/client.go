@@ -374,8 +374,25 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 				Suspended:  suspended,
 			}
 			lastErr = limited
-			c.log.Warn("riot rate limited",
-				"method", e.method, "attempt", attempt, "retry_after", wait.String())
+			// A 429 this call is about to retry is not a failure to report at
+			// WARN. Riot's Retry-After is an instruction to wait, the wait is
+			// paid below, and the next attempt usually succeeds - and success
+			// is silent. So warning on every absorbed bump is how a crawler
+			// running correctly at its key's ceiling produced a full hour of
+			// nothing but WARN lines and no INFO: a healthy, throttled,
+			// forty-four-matches-a-minute crawl that reads exactly like the
+			// permanent stall it was mistaken for. The absorbed bump is still
+			// counted, by the IncRiotRetry above, which is what
+			// LolstatsRiotRateLimited reads; only a 429 that ends the call -
+			// the key's Retry-After outlasting the budget, or the last attempt
+			// - is the operator's warning.
+			if !suspended && attempt < c.opts.MaxAttempts {
+				c.log.Debug("riot rate limited; waiting out Riot's retry-after",
+					"method", e.method, "attempt", attempt, "retry_after", wait.String())
+			} else {
+				c.log.Warn("riot rate limited",
+					"method", e.method, "attempt", attempt, "retry_after", wait.String())
+			}
 			if suspended {
 				// The wait is longer than a single call may spend. Sleeping
 				// until the call's own deadline and then reporting the deadline
