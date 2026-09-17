@@ -63,6 +63,7 @@ func (s *buildState) computeCells() error {
 	s.cells = cells
 	s.opts.Log.Info("cells computed",
 		"total", cells.Total, "published", len(cells.Cells), "suppressed", cells.Suppressed,
+		"published_rows", cells.SumNPublished, "rows", s.windowStats.ParticipantRows-s.windowStats.RejectedRows,
 		"baseline_win_rate", cells.BaselineWinRate)
 	return nil
 }
@@ -74,6 +75,7 @@ func (s *buildState) checkOutputGates() error {
 	s.counts.CellsPublished = len(s.cells.Cells)
 	s.counts.CellsSuppressed = s.cells.Suppressed
 	s.counts.SumN = s.cells.SumN
+	s.counts.SumNPublished = s.cells.SumNPublished
 	s.counts.ClassifiedRows = s.windowStats.ParticipantRows - s.windowStats.RejectedRows
 	return s.counts.CheckOutput(s.opts.Gates)
 }

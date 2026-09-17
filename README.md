@@ -75,6 +75,7 @@ rather than one at a time.
 | `LOLSTATS_AGG_SCHEMA_VERSION` | `1` | Artifact envelope version. Changing it needs an ADR |
 | `LOLSTATS_AGG_MIN_CELL_N` | `100` | Minimum sample size for a published cell |
 | `LOLSTATS_AGG_MAX_REJECTED_ROWS` | `0` | Participant rows without a champion or a role a build tolerates before it refuses to publish. Deployed as `25`, an allowance measured against position-less rows Riot itself reports |
+| `LOLSTATS_AGG_MIN_CONFIDENT_SHARE` | `0.5` | Share of computable cells that must clear `LOLSTATS_AGG_MIN_CELL_N` for a build to publish. Deployed as `0.15`, a value measured against the live archive's crawl depth |
 | `LOLSTATS_AGG_SOURCE_WINDOW_DAYS` | `14` | Trailing window of raw data a build reads |
 | `LOLSTATS_AGG_BRACKET` | `all` | Bracket segment. `all` in v1 |
 | `LOLSTATS_AGG_QUEUE_ID` | `420` | Ranked solo/duo |

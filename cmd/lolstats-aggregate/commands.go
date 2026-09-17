@@ -35,6 +35,7 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		windowDays  = cfg.Aggregate.SourceWindowDays
 		minCellN    = cfg.Aggregate.MinCellN
 		maxRejected = cfg.Aggregate.MaxRejectedRows
+		minShare    = cfg.Aggregate.MinConfidentShare
 		duckdbBin   string
 		allowMism   bool
 		metricsAddr = cfg.MetricsAddr
@@ -56,6 +57,8 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		"cells with fewer observations are suppressed and counted, never published")
 	fs.IntVar(&maxRejected, "max-rejected-rows", maxRejected,
 		"participant rows without a champion or a role tolerated before the build refuses to publish")
+	fs.Float64Var(&minShare, "min-confident-share", minShare,
+		"share of computable cells that must survive suppression for the build to publish, >0 and <=1")
 	fs.StringVar(&duckdbBin, "duckdb-bin", "",
 		"pinned duckdb client, empty means $LOLSTATS_DUCKDB_BIN or PATH")
 	fs.BoolVar(&allowMism, "duckdb-allow-mismatch", false,
@@ -88,10 +91,12 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 	}
 
 	// The gates are built from the floor here rather than left to Build's
-	// default, because the default would discard the operator's allowance for
-	// rows Riot itself reports as position-less.
+	// default, because the default would discard every operator input: the
+	// allowance for rows Riot itself reports as position-less, and the share
+	// of cells that has to clear the floor for the archive's current depth.
 	gates := aggregate.DefaultGateConfig(minCellN)
 	gates.MaxRejectedRows = maxRejected
+	gates.MinConfidentShare = minShare
 
 	result, buildErr := aggregate.Build(ctx, aggregate.BuildOptions{
 		RawRoot:    rawRoot,

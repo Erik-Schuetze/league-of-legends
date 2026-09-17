@@ -102,3 +102,19 @@ data:
   # The excluded rows are never assigned a guessed role; every run logs
   # rejected_rows and the effective allowance.
   LOLSTATS_AGG_MAX_REJECTED_ROWS: "25"
+
+  # The publish gate refuses to replace the live artifact when most of the
+  # window's computable champion/role cells fall below min_cell_n. A real
+  # window always has a long tail of one-off pairs (a champion played once in
+  # an off-role), so the share above the floor tracks how deeply the patch the
+  # window ends on has been crawled rather than whether the pipeline is
+  # healthy. Measured over EUW/420 at min_cell_n=100: 19.3% of cells at 34,780
+  # classified rows (2026-09-04..09-17), 12.1% at 21,620 (the last four days
+  # alone) and 2.1% at 8,770 (patch 16.17 pinned) - the crawler's recent days
+  # are denser than its older ones, so the share rises as a patch fills up.
+  # 0.15 publishes the tier list the archive can support today while still
+  # stopping a build whose window is materially thinner than the last one.
+  # RAISE THIS toward the 0.5 default as the archive matures; the run logs
+  # published/suppressed cells and the rows the published cells hold, so the
+  # measurement is one log line away.
+  LOLSTATS_AGG_MIN_CONFIDENT_SHARE: "0.15"
