@@ -87,6 +87,7 @@ func NewRenderer(loader *Loader, siteURL string) (*Renderer, error) {
 		"wholePercent":  WholePercent,
 		"utcStamp":      UTCStampAny,
 		"windowLabel":   WindowLabel,
+		"shortCommit":   ShortCommit,
 		"roleLabel":     RoleLabel,
 		"roleSlug":      RoleSlugString,
 		"tierRank":      TierRank,
