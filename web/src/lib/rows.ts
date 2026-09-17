@@ -56,7 +56,7 @@ export function tierValue(cell: { n: number; tier?: string }): CellValue {
 export function columnAvailabilityNote(minCellN: number, suppressedCells: number | null): string {
   const suppressed =
     suppressedCells && suppressedCells > 0
-      ? ` ${integer(suppressedCells)} further cells were withheld by the aggregator for being below the threshold.`
+      ? ` ${integer(suppressedCells)} further cells were withheld for being below the threshold.`
       : '';
   return `A rate is published only when its cell has at least n = ${integer(minCellN)} games; thinner cells read "${WITHHELD}" and show their count only.${suppressed}`;
 }

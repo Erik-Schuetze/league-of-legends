@@ -8,10 +8,15 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "prebuild": "npm run check:fixtures",
+    "build": "npm run check:islands && astro build",
+    "postbuild": "npm run check:fixtures:render",
     "preview": "astro preview",
     "check": "astro check",
     "typecheck": "tsc --noEmit",
+    "check:fixtures": "node scripts/check-fixture-consistency.mjs",
+    "check:fixtures:render": "node scripts/check-fixture-render.mjs",
+    "check:islands": "node scripts/check-island-contract.mjs",
     "data:champions": "node scripts/fetch-ddragon.mjs",
     "data:fonts": "node scripts/fetch-fonts.mjs",
     "data:fixtures": "node scripts/make-fixtures.mjs"

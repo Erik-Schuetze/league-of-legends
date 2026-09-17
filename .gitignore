@@ -1,6 +1,10 @@
 # Build artifacts
 /bin/
 /dist/
+# `make build` writes to bin/; a binary at the repo root is always a stray
+# artifact from a manual `go build ./cmd/...` and must never be committed.
+/lolstats-aggregate
+/lolstats-ingest
 
 # Verbose agent output. Kept out of the repository on purpose: it is evidence
 # for a single task, not part of the project's history.

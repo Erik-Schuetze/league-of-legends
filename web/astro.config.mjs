@@ -5,13 +5,65 @@ import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'astro/config';
 
-// The canonical host is an open decision (backlog.md: "Site name and domain"),
-// and it has to exist before Riot can verify riot.txt, so it is configuration
-// rather than a constant: the build derives canonical URLs, sitemap.xml and
-// robots.txt from LOLSTATS_SITE_URL. The placeholder is a reserved TLD, so a
-// build that forgets to set it is obviously wrong in the output rather than
-// quietly pointing at somebody else's domain.
-const site = process.env.LOLSTATS_SITE_URL ?? 'https://lolstats.example.invalid';
+// The canonical host has to exist before Riot can verify riot.txt, so it is
+// configuration rather than a constant: the build derives canonical URLs,
+// sitemap.xml and robots.txt from LOLSTATS_SITE_URL, and web/src/lib/legal.ts
+// derives the address the legal pages print from the same variable.
+//
+// A missing variable must not produce a publicly-wrong canonical, so this build
+// does not publish a placeholder under any circumstances:
+//
+//   * unset or blank - it publishes DEFAULT_SITE_URL, the address this
+//     deployment is served from, and says on stdout that the default was used.
+//     The value is the same one legal.ts falls back to, so the canonicals and
+//     the address the legal pages print cannot disagree.
+//   * set but unusable - not an absolute http(s) URL, a reserved hostname such
+//     as *.invalid, or carrying a path/query/fragment: the build throws, and a
+//     failed build publishes nothing at all.
+const DEFAULT_SITE_URL = 'https://lol.erik-schuetze.dev';
+
+/** Reserved for documentation and testing (RFC 2606, RFC 6761): never a real deployment. */
+const RESERVED_HOST = /^(?:localhost|(?:.*\.)?(?:invalid|test|example)|(?:.*\.)?example\.(?:com|net|org))$/i;
+
+/** @param {string} raw */
+function resolveSiteUrl(raw) {
+  const configured = raw.trim();
+  if (configured === '') {
+    console.log(
+      `[site] LOLSTATS_SITE_URL is not set; publishing ${DEFAULT_SITE_URL}, the address this deployment is served from. ` +
+        'Set LOLSTATS_SITE_URL to publish a different origin.',
+    );
+    return DEFAULT_SITE_URL;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error(
+      `LOLSTATS_SITE_URL=${JSON.stringify(configured)} is not an absolute URL. Set it to the origin the site is served ` +
+        `from, for example ${DEFAULT_SITE_URL}.`,
+    );
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`LOLSTATS_SITE_URL=${configured} is not an http(s) origin, so it cannot be a canonical host.`);
+  }
+  if (RESERVED_HOST.test(parsed.hostname)) {
+    throw new Error(
+      `LOLSTATS_SITE_URL=${configured} names the reserved host ${parsed.hostname}. Publishing it would put a wrong ` +
+        `canonical on every page, so this build refuses it; use ${DEFAULT_SITE_URL} or the real deployment origin.`,
+    );
+  }
+  if (parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '') {
+    throw new Error(
+      `LOLSTATS_SITE_URL=${configured} carries a path, query or fragment. It must be an origin alone, such as ` +
+        `${DEFAULT_SITE_URL}.`,
+    );
+  }
+  return parsed.origin;
+}
+
+const site = resolveSiteUrl(process.env.LOLSTATS_SITE_URL ?? '');
 
 /**
  * Riot's site verification, which is the one file in the output that is not a

@@ -70,10 +70,10 @@ func writeDoc(root, relPath string, doc any) error {
 		return err
 	}
 	target := filepath.Join(root, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), publishedDirPerm); err != nil { //nolint:gosec // G301: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
 		return fmt.Errorf("create directory for %s: %w", relPath, err)
 	}
-	if err := os.WriteFile(target, buf, 0o644); err != nil { //nolint:gosec // published artifacts are world readable.
+	if err := os.WriteFile(target, buf, publishedFilePerm); err != nil { //nolint:gosec // G306: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
 		return fmt.Errorf("write %s: %w", relPath, err)
 	}
 	return nil

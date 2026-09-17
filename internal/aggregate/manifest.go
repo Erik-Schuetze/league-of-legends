@@ -31,6 +31,10 @@ import (
 // Layer 2 is why the manifest is cheap to repair: the tree is the source of
 // truth, and tierlist.json carries the envelope the manifest entry needs.
 
+// manifestTmpPrefix starts the name of a manifest being swapped into place. It
+// leads with a dot so a directory listing makes clear it is not the manifest.
+const manifestTmpPrefix = ".incoming"
+
 // ManifestError is returned when the live manifest cannot be read. It is a hard
 // failure: overwriting an unreadable manifest with one that knows about a single
 // partition would silently drop every other partition the site serves.
@@ -48,8 +52,22 @@ func (e *ManifestError) Unwrap() error { return e.Err }
 // UpdateManifest merges the partition just published into the manifest on disk
 // and returns the document that should be written.
 //
+// The merge is driven by the tree, not by the caller: every partition directory
+// under aggRoot that the manifest does not already list is discovered and added,
+// and an entry the manifest already has is kept as it stands rather than
+// rebuilt from the artifacts. That precedence matters - a partition records its
+// build run id and its git sha, which no artifact carries, so a rebuild must
+// preserve them instead of blanking the bookkeeping the site displays.
+//
+// The zero Partition means the caller published nothing and is only re-indexing
+// what is already on disk, which is what the `manifest` subcommand does. It must
+// not become an entry: a partition with an empty patch is not addressable and
+// would show up as a phantom in every reader.
+//
 // It does not write: publish.go writes it, so that the manifest is swapped in
-// only after every partition directory is already in place.
+// only after every partition directory is already in place. Callers that are not
+// publishing a partition directory write the result with WriteManifest.
+//
 // ReadManifest returns the manifest a published tree carries.
 //
 // An absent manifest is an error rather than an empty value: a tree without one
@@ -101,7 +119,11 @@ func UpdateManifest(aggRoot string, partition aggmodel.Partition, source aggmode
 		}
 	}
 
-	known[partitionKey(partition)] = partition
+	// A caller that published nothing passes the zero Partition and only wants
+	// the tree re-indexed, so it adds no entry of its own.
+	if partition.Patch != "" {
+		known[partitionKey(partition)] = partition
+	}
 
 	manifest := aggmodel.Manifest{
 		Schema:      aggmodel.SchemaVersion,
@@ -115,6 +137,45 @@ func UpdateManifest(aggRoot string, partition aggmodel.Partition, source aggmode
 	sortPartitions(manifest.Partitions)
 	manifest.Latest = latestOf(manifest.Partitions, partition)
 	return manifest, nil
+}
+
+// WriteManifest swaps a rebuilt manifest into a live tree in one rename(2).
+//
+// The document lands under a temporary name first and is then renamed over
+// v1/manifest.json, so a reader sees either the complete old document or the
+// complete new one. Nothing is ever written in place: a truncated manifest is
+// worse than a stale one, because every reader follows it to the artifacts.
+//
+// The temporary name is served by nothing in practice - it exists for
+// microseconds and nothing links to it - and the mode is set explicitly rather
+// than left to the umask, because this write replaces a file that is already
+// being served and must not narrow who can read it.
+func WriteManifest(aggRoot string, manifest aggmodel.Manifest) error {
+	live := filepath.Join(aggRoot, filepath.FromSlash(aggmodel.ManifestPath))
+	buf, err := marshalDoc(manifest)
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(filepath.Dir(live), fmt.Sprintf("%s-%d-%d.json", manifestTmpPrefix, os.Getpid(), time.Now().UnixNano()))
+	if err := os.WriteFile(tmp, buf, publishedFilePerm); err != nil {
+		return fmt.Errorf("write manifest: %w", err)
+	}
+	if err := os.Chmod(tmp, publishedFilePerm); err != nil {
+		removeTmp(tmp)
+		return fmt.Errorf("set manifest mode: %w", err)
+	}
+	if err := os.Rename(tmp, live); err != nil {
+		removeTmp(tmp)
+		return fmt.Errorf("swap manifest into %s: %w", aggmodel.ManifestPath, err)
+	}
+	return nil
+}
+
+// removeTmp drops a temporary manifest that did not make it into place. The
+// error is dropped: the caller is already returning a more useful one, and a
+// stray dotfile is not worth replacing it with.
+func removeTmp(path string) {
+	_ = os.Remove(path)
 }
 
 // mergeSource refuses to let a tree hold artifacts from two different sources.
@@ -140,7 +201,9 @@ func partitionKey(p aggmodel.Partition) string {
 //
 // `latest` is a single field while the newest patch can exist for several
 // regions, so the rule is: the newest patch wins, and this build wins any tie,
-// because it is the one whose freshness the caller just established.
+// because it is the one whose freshness the caller just established. A caller
+// that published nothing passes the zero partition and wins nothing, so a tree
+// re-indexed from disk reports the newest partition the tree actually holds.
 func latestOf(partitions []aggmodel.Partition, built aggmodel.Partition) aggmodel.Partition {
 	if len(partitions) == 0 {
 		return built
@@ -151,7 +214,7 @@ func latestOf(partitions []aggmodel.Partition, built aggmodel.Partition) aggmode
 			best = p
 		}
 	}
-	if comparePatch(built.Patch, best.Patch) >= 0 {
+	if built.Patch != "" && comparePatch(built.Patch, best.Patch) >= 0 {
 		return built
 	}
 	return best
@@ -178,7 +241,9 @@ func sortPartitions(partitions []aggmodel.Partition) {
 // readManifestFile parses the manifest. A missing file is reported as fs.ErrNotExist
 // so the caller can distinguish "first build" from "corrupt".
 func readManifestFile(path string) (aggmodel.Manifest, error) {
-	raw, err := os.ReadFile(path)
+	// The path is the aggregate root from configuration plus the frozen
+	// manifest name; there is no user-controlled component in it.
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: operator-configured aggregate root.
 	if err != nil {
 		return aggmodel.Manifest{}, err
 	}

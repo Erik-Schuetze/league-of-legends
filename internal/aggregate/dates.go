@@ -32,22 +32,6 @@ func parseDate(date string) (time.Time, error) {
 	return parsed, nil
 }
 
-// validateWindow reports whether a window is well formed.
-func validateWindow(window aggmodel.Window) error {
-	from, err := parseDate(window.From)
-	if err != nil {
-		return fmt.Errorf("window from: %w", err)
-	}
-	to, err := parseDate(window.To)
-	if err != nil {
-		return fmt.Errorf("window to: %w", err)
-	}
-	if to.Before(from) {
-		return fmt.Errorf("window to %s precedes from %s", window.To, window.From)
-	}
-	return nil
-}
-
 // windowForEnd returns the window of the given number of days ending on end,
 // inclusive of both ends: a 14 day window ending 2026-09-17 starts 2026-09-04.
 //
@@ -68,14 +52,6 @@ func windowForEnd(end string, days int) (aggmodel.Window, error) {
 	}
 	from := to.AddDate(0, 0, -(days - 1))
 	return aggmodel.Window{From: from.Format(dateLayout), To: to.Format(dateLayout)}, nil
-}
-
-// windowContains reports whether a YYYY-MM-DD date falls inside the window.
-func windowContains(window aggmodel.Window, date string) bool {
-	if date == "" {
-		return false
-	}
-	return date >= window.From && date <= window.To
 }
 
 // comparePatch orders two major.minor patch strings numerically, so that 16.9

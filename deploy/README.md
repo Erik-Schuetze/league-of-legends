@@ -89,8 +89,26 @@ What "no Riot key" actually means, because the answer is not uniform:
   and `discover-seeds` failing nightly until the Secret exists. Nothing else
   depends on either of them, and installing the Secret - with no manifest change
   and no restart of anything - is the fix.
+- **And the public site serves a labelled preview, not real statistics.** With
+  no key the archive stays empty, so `site-build` renders the checked-in demo
+  fixtures and every page carries the preview banner; no crawled data is
+  published. That is what
+  `docs/decisions/ADR-010-public-preview-posture.md` and plan risk R2 require
+  while a production key application is pending, and it is one key in
+  `base/config.yaml`: `LOLSTATS_AGG_FIXTURES: "only"`. When the key is approved
+  and the archive has produced a published snapshot, change that value to
+  `"off"` - "render `LOLSTATS_AGG_ROOT` and never substitute fixtures" - and the
+  next `site-build` serves real aggregate data. While it stays `"only"`, a real
+  snapshot on the volume would be ignored by the build.
 - The `backfill` job is suspended and stays that way; it is a manual tool, so a
   missing key only matters on the day someone runs it.
+- `static-sync` is suspended too, for a different reason: the subcommand exists
+  and works (it mirrors public Data Dragon and was measured to exit 0 with 5
+  documents archived), but while the build runs with `LOLSTATS_AGG_FIXTURES=only`
+  it renders the committed fixtures and ignores the volume, so the static tree
+  this job writes would not be rendered. Remove the single `suspend: true` line
+  from `base/jobs/static-sync.yaml` when the build moves to real ingestion
+  (`AGG_FIXTURES=off`); nothing else changes.
 
 If the requirement is that `lolstats-ingest` itself be green with no key, that is
 a change in `cmd/lolstats-ingest` (an idle mode that serves metrics), not a
@@ -148,9 +166,11 @@ frontier size, pipeline staleness, and build duration, cell and failure counts.
 kubectl kustomize deploy/overlays/homelab
 ```
 
-CI builds the three images and runs the Go and Astro checks, but it does not
-render these manifests, so this command - plus a read of the rendered output -
-is the check that matters before a change to this directory is pushed.
+CI builds the three images and runs the Go and Astro checks, including the
+DuckDB-dependent build tests (the `verify` job installs the pinned DuckDB client
+and runs `make test-build`, which fails on a skip), but it does not render these
+manifests, so this command - plus a read of the rendered output - is the check
+that matters before a change to this directory is pushed.
 
 ## Open TODOs
 
@@ -158,10 +178,15 @@ is the check that matters before a change to this directory is pushed.
   first tags exist. When they do, replace each one with `tag@sha256:...` (plan
   section 12, R13) at the reference in `base/` and in `overlays/homelab`, which
   is where the tag lives. A tag can be re-pushed; a digest cannot.
-- **`static-sync` has no implementation yet.** Plan section 5.2 lists the job;
-  `lolstats-ingest` has no `static-sync` subcommand at the time of writing, so the
-  job will exit non-zero until it does. It is scheduled anyway so that the
-  schedule itself is not the thing left to do later.
+- **`static-sync` is implemented and deliberately not armed.** Plan section 5.2
+  lists the job, and `lolstats-ingest` carries the `static-sync` subcommand: it
+  mirrors the public Data Dragon CDN and was measured to exit 0 with 5 documents
+  archived, needing no Riot key. It keeps its schedule - the schedule itself is
+  not the thing left to do later - and it is **suspended**, because with
+  `LOLSTATS_AGG_FIXTURES=only` the site build renders the committed fixtures, so
+  the static tree this job writes is not rendered; arming it would only spend a
+  nightly run on data nothing reads. Delete the `suspend: true` line in
+  `base/jobs/static-sync.yaml` when the build moves to real ingestion.
 - **`site-build` writes into the volume layout above.** It renders into a staging
   directory and renames it onto `/var/lib/lolstats/site`. If the frontend's build
   output directory changes, this job changes with it.
@@ -294,17 +319,38 @@ kubectl -n lolstats exec deploy/lolstats-web -- cat /var/lib/lolstats/backups/po
 ```
 
 Runbooks: `docs/runbooks/restore-postgres.md`, `docs/runbooks/restore-raw.md`,
-`docs/runbooks/rebuild-aggregates.md`, `docs/runbooks/key-rotation.md`, plus the
-pre-existing `ingest-down.md`.
+`docs/runbooks/rebuild-aggregates.md`, `docs/runbooks/site-integrity.md` (the
+served-response integrity check and the cache-handler defect it exists for),
+`docs/runbooks/key-rotation.md`,
+`docs/runbooks/enable-alert-delivery.md` (the opt-in Alertmanager procedure), plus
+the pre-existing `ingest-down.md`.
 
 The restore **drill** is `scripts/backup-verify.sh`, which is the evidence behind
-the launch gate "Postgres and the raw archive have both been restored from backup
-in a test". It dumps a real database, restores into a fresh throwaway one,
-compares table count, column definitions, index definitions and every table's row
-count, and then proves the comparison can fail by deleting one row and asserting
-a mismatch. `make backup-verify` runs it against a throwaway Postgres in Docker;
-`make backup-verify-cluster` runs it against the cluster's Postgres using a
-database named `lolstats_verify_<epoch>` that it drops afterwards.
+the Postgres half of the launch gate "Postgres and the raw archive have both been
+restored from backup in a test". It dumps a real database, restores into a fresh
+throwaway one, compares table count, column definitions, index definitions and
+every table's row count, and then proves the comparison can fail by deleting one
+row and asserting a mismatch. `make backup-verify` runs it against a throwaway
+Postgres in Docker; `make backup-verify-cluster` runs it against the cluster's
+Postgres using a database named `lolstats_verify_<epoch>` that it drops
+afterwards.
+
+The raw-archive half of the same gate is `scripts/archive-verify.sh`, run by
+`make archive-verify`. It builds a synthetic raw archive in the layout
+`internal/raw` documents, initialises a restic repository with the image
+`deploy/base/jobs/backup-archive.yaml` pins, backs up with that job's own flags,
+proves a wrong password cannot open the repository, runs the job's Sunday branch
+(`forget --prune` plus `check --read-data-subset=2%`) and then `check
+--read-data`, restores into an empty directory and compares archive and restore
+by sha256 manifest. It then proves the comparison can fail - a changed byte, an
+extra file, a missing file - before asserting the archive and the restore match.
+Like `backup-verify` it needs no cluster and no credentials, and everything it
+writes stays in `.agent-artifacts/archive-verify/`.
+
+Neither drill is the whole gate on its own, and neither is a substitute for the
+runbooks: the drills prove the *format* survives a round trip, while restoring
+what is actually on the cluster's data volume is a human run of
+`docs/runbooks/restore-postgres.md` and `docs/runbooks/restore-raw.md`.
 
 ## Alerts
 
@@ -328,14 +374,14 @@ Twelve rules in four groups:
 | | `LolstatsCrawlStalled` | the same, `> 6h` | critical | 30m |
 | | `LolstatsFrontierNotDraining` | frontier non-empty and `increase(lolstats_matches_persisted_total[1h]) == 0` | critical | 30m |
 | | `LolstatsIngestMetricsAbsent` | the ingest Deployment wants replicas and its metrics are not there | critical | 10m |
-| `lolstats-build` | `LolstatsBuildNotScheduled` | `time() - kube_cronjob_status_last_schedule_time > 26h` | critical | 30m |
+| `lolstats-build` | `LolstatsBuildNotScheduled` | `kube_cronjob_status_last_schedule_time` **or** `kube_cronjob_next_schedule_time` more than 26h in the past | critical | 30m |
 | | `LolstatsBuildJobFailed` | `kube_job_status_failed > 0` for an `lolstats-aggregate-*` job | critical | 5m |
-| | `LolstatsBuildStuck` | `kube_job_status_active > 0` for more than 5h | warning | 30m |
+| | `LolstatsBuildStuck` | `kube_job_status_active > 0` for more than 5h | warning | 5h |
 | | `LolstatsBuildFailures` | `increase(lolstats_build_failures_total[6h]) > 0` - **inert, see below** | critical | 10m |
 | `lolstats-riot-api` | `LolstatsRiotRateLimited` | `429` above 5% of requests over 15m | warning | 15m |
 | | `LolstatsRiotAuthFailures` | `403` above 1% of requests over 15m | warning | 15m |
 | | `LolstatsRiotKeyRevoked` | `403` above 0.01/s **and** `2xx` at zero | critical | 10m |
-| `lolstats-riot-key` | `LolstatsRiotKeyOld` | `lolstats_riot_key_age_seconds > 12h` | warning | 30m |
+| `lolstats-riot-key` | `LolstatsRiotKeyOld` | `lolstats_riot_key_age_seconds > 12h` - **inert, see below** | warning | 30m |
 
 Every rule has `for:`, a `severity`, a `summary`, a `description` naming the next
 command or runbook, and two extra annotations - `empty_means` (what an empty
@@ -358,12 +404,29 @@ Two honest caveats, both recorded in the rule file itself:
   never scraped - only the long-running `lolstats-ingest` Service has a
   ServiceMonitor. The rule is kept because it will start working the day the
   aggregate metrics have somewhere to come from, and the three kube-state-metrics
-  rules above cover the same question in the meantime.
-- **`LolstatsRiotKeyOld` is not an expiry clock.**
-  `lolstats_riot_key_age_seconds` is the time since *this process* first saw the
-  key currently configured; it resets to `0` on every restart and is `0` when no
-  key is configured. A key that was already 20 hours old at pod start will never
-  trip it. A real expiry alert needs a metric derived from the key's own
+  rules above cover the same question in the meantime. Making it scrapable is a
+  deployment change, not a code change: either put a Service in front of the
+  Job's metrics port (`LOLSTATS_METRICS_ADDR`, `:9090`, alive only while a build
+  runs) with a ServiceMonitor that selects it, or have the aggregate push to a
+  gateway that is scraped instead. Both need a manifest that does not exist yet;
+  this Prometheus is configured only by ServiceMonitors (`serviceMonitorSelector:
+  {}`, no extra scrape configuration), so neither option is config-free.
+- **`LolstatsRiotKeyOld` cannot fire either, and the cause is a code defect
+  rather than a deployment gap.** `lolstats_riot_key_age_seconds` is registered
+  by the ingest worker - which *is* scraped - but nothing ever writes it:
+  `internal/crawl/worker.go` refreshes it from inside an assertion that the
+  fetcher implements `Age() (time.Duration, bool)`, while the value the ingest
+  binary passes there is a `*riot.Client`, whose only age surface is
+  `KeyProvider.Age() time.Duration` - one result, not the two the assertion asks
+  for - so the assertion never succeeds and the gauge is scraped as a constant
+  `0`. The unit test that covers this path passes only because its fake fetcher
+  implements the two-value form (`internal/crawl/fakes_test.go`), which is why
+  CI does not catch it. Fixing that assertion belongs to the ingestion
+  workstream, and would still not turn this into an expiry clock:
+  `lolstats_riot_key_age_seconds` counts from when *this process* first saw the
+  key currently configured, so it resets to `0` on every restart and is `0` when
+  no key is configured - a key that was already 20 hours old at pod start never
+  trips it. A real expiry alert needs a metric derived from the key's own
   `expires_at`; `LOLSTATS_RIOT_API_KEY_EXPIRES_AT` is parsed by `internal/config`
   and consumed by nothing, so that is a code change owned by the ingestion
   workstream, not a rule. Until then, the observable symptom of an expiry is a
@@ -383,8 +446,19 @@ only place to see them is the Prometheus UI - `/alerts` and `/api/v1/alerts` on
 `kubectl -n monitoring port-forward svc/prometheus 9090:9090`. "The operator is
 told when something breaks" is therefore an **unmet gate** until an Alertmanager
 exists with a receiver, and it is recorded as unmet rather than papered over with
-rules that fire into the void. The rules were still written and validated, so
-that the day Alertmanager exists the alerting is already correct.
+rules that fire into the void. The rules were still written, and their syntax
+checked with `promtool check rules` run against the `spec.groups` block extracted
+from the manifest (`promtool` cannot read a `PrometheusRule` directly); there is
+no committed `promtool test rules` case for them and no CI job, so a later edit is
+re-checked by reading. That way, the day an Alertmanager exists, the alerting is
+already in place - with the two rules above that cannot fire recorded as such
+rather than counted as coverage.
+
+The Alertmanager and the receiver for it are an **opt-in** bundle in
+`homecluster/monitoring/alertmanager/`, deliberately not applied by ArgoCD because
+activating it also edits the shared `Prometheus` CR and rolls the StatefulSet that
+serves every workload's metrics. `docs/runbooks/enable-alert-delivery.md` is the
+three-step procedure, with its rollback.
 
 ### Dashboards
 

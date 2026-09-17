@@ -11,8 +11,10 @@
 //	demo      write a deterministic simulated artifact set, labelled as demo data
 //
 // The raw archive is read by a pinned DuckDB process rather than by a linked
-// library: no DuckDB Go binding builds with CGO_ENABLED=0, and this binary
-// ships in a static image. See docs/aggregation.md and ADR-006.
+// library: no DuckDB Go binding builds with CGO_ENABLED=0. This binary is
+// static, but the DuckDB CLI it execs is a glibc binary, which is why the
+// runtime image is the `cc` distroless base rather than `static`. See
+// docs/aggregation.md and ADR-007.
 package main
 
 import (
@@ -145,7 +147,10 @@ func serveMetrics(ctx context.Context, log *slog.Logger, addr string, metrics *o
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	listener, err := net.Listen("tcp", addr)
+	// ListenConfig rather than net.Listen so the accept loop observes the same
+	// context as the build it serves: a metrics endpoint that outlived its
+	// process would keep a port bound for the next CronJob.
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		log.Warn("metrics endpoint not started", "addr", addr, "error", err)
 		return func() {}
@@ -236,7 +241,7 @@ func statusLine(stdout io.Writer, sub, status string, fields ...any) {
 	b.WriteString(status)
 	for i := 0; i+1 < len(fields); i += 2 {
 		b.WriteString(" ")
-		b.WriteString(fmt.Sprint(fields[i]))
+		_, _ = fmt.Fprint(&b, fields[i])
 		b.WriteString("=")
 		b.WriteString(quoteField(fields[i+1]))
 	}

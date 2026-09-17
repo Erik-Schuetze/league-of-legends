@@ -85,6 +85,12 @@ type BuildOptions struct {
 	DuckDBBin            string
 	AllowVersionMismatch bool
 
+	// DuckDB carries the engine's hard resource bounds. The zero value is the
+	// conservative default rather than "no bound", because DuckDB's own default
+	// is derived from the host's RAM and not from the pod's cgroup limit; see
+	// DuckDBSettings and DefaultDuckDBMemoryLimit.
+	DuckDB DuckDBSettings
+
 	// GitSHA is recorded in the manifest and the audit row so a published
 	// number has a revision behind it.
 	GitSHA string
@@ -175,13 +181,28 @@ func Build(ctx context.Context, opts BuildOptions) (result BuildResult, err erro
 	}
 
 	generatedAt := opts.Now().UTC()
+	// The root is created explicitly, and it is created served. In deployment it
+	// is /var/lib/lolstats/agg, a subdirectory of the shared PVC rather than a
+	// mount point, so whichever job touches the volume first creates it - and
+	// creating it private would deny the site-build job (uid 1000) traversal to
+	// everything below it, failing the nightly site build while this job passed.
+	// os.MkdirAll would otherwise create it with the staging mode as a side
+	// effect. The staging directory inside it stays private: only this process
+	// reads a partial build. See perms.go.
+	if err := os.MkdirAll(opts.AggRoot, publishedDirPerm); err != nil { //nolint:gosec // G301: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
+		return result, fmt.Errorf("create aggregate root: %w", err)
+	}
 	staging := filepath.Join(opts.AggRoot, fmt.Sprintf("%s%d-%d", stagingPrefix, os.Getpid(), generatedAt.UnixNano()))
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	// Private: the half-built partition is read by this process alone, so the
+	// served modes would only widen it for no reader. See perms.go.
+	if err := os.MkdirAll(staging, privateDirPerm); err != nil {
 		return result, fmt.Errorf("create staging directory: %w", err)
 	}
 	// Staging is removed on every path out, success included: the published
 	// tree is the only output, and a leftover staging directory inside the
-	// aggregate root would be served by nothing and understood by nobody.
+	// aggregate root would be served by nothing and understood by nobody. It
+	// is private for the same reason the trash directory is - a half-built
+	// partition must not be readable at a path a client could guess.
 	defer func() {
 		if removeErr := os.RemoveAll(staging); removeErr != nil {
 			opts.Log.Warn("could not remove staging directory", "path", staging, "error", removeErr)

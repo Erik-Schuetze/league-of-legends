@@ -28,6 +28,188 @@ short. "Breaking" means something that used to work no longer does.
 - `docs/decisions/ADR-001` to `ADR-004`.
 - `fixtures/` - hand-authored sample payloads with their provenance.
 
+### Fixed
+
+- Demo fixture data published contradictory numbers. `web/scripts/make-fixtures.mjs`
+  drew each number independently, so the tier list, champion page,
+  champion-by-role page and matchup matrix disagreed about the same
+  (patch, champion, role) cell, matchup matrices named champions no tier list
+  published, and 16.17 linked to champion pages whose 16.18 snapshot held no
+  games. The generator now replays one simulated corpus of games and derives
+  every view as a projection of it, so tier lists, champion pages, role pages
+  and matrices agree by construction and the previous window only keeps
+  champions the newest snapshot also publishes.
+- Demo fixture data shipped cells a real build would drop: cells with `n = 0`
+  carrying a tier, pick and ban rate, and matchup pairs below `min_cell_n`. The
+  generator now applies the publication policy - no games means no cell, below
+  the floor means withheld and counted - and build rows carry a win rate that is
+  their own `wins / n` rather than an independently drawn number.
+- `web/scripts/check-fixture-consistency.mjs` - reconciles the fixture tree
+  across views (tier list, champion artifact, matchup axis and pairs, manifest
+  counts) and fails on any cell below the floor or without games.
+- `web/scripts/check-fixture-render.mjs` - reconciles a built site instead of the
+  JSON: every tier-list link resolves to a champion page that publishes the same
+  cell, every matchup role board is the tier list's champion set, and no
+  rendered cell is below the floor.
+- The demo generator published a manifest it did not back, so the tree failed the
+  project's own verifier with 175 problems. It applied `.slice(0, 40)` to the
+  champion detail artifacts, so 16.18 advertised 80 champions with 40 files and
+  16.17 advertised 40 with none, and it carried the artifact envelope's `schema`
+  and `source` into the manifest's `partitions[]`, which the Partition schema does
+  not declare. It now writes one `champions/<id>.json` per champion that has a
+  published cell in each partition, and its windows are days (`YYYY-MM-DD`), not
+  instants, as the contract states. `verify` reports ok, 0 problems.
+- Both fixture guards were blind to a missing champion artifact, because they only
+  listed the artifacts that were on disk. `check-fixture-consistency.mjs` now
+  requires one artifact per listed champion id and no unlisted file, requires the
+  file name to be the champion id the site reads it by, and reports unreadable
+  JSON as a named failure instead of falling out of a read as an uncaught
+  `SyntaxError`; `check-fixture-render.mjs` checks the same closure on the tree it
+  renders and fails when a champion page does not render the detail artifact the
+  tree ships for it.
+- Both guards were manual-only, so a tree that did not back its manifest could
+  still ship: a site built from such a tree renders fewer champions than the
+  manifest advertises and neither the build nor CI noticed. `web/package.json`
+  now runs the tree check as `prebuild` and the rendered check as `postbuild`, so
+  `npm run build` - the command CI's `verify` job and the cluster's nightly
+  site-build Job both run - fails before publishing. `check-fixture-render.mjs`
+  defaults to `web/dist` and `web/src/fixtures/v1`, derived from its own
+  location, so it needs no flags wherever it runs.
+- The built site made provenance claims the data could not support. In the demo
+  and no-data states, 1038 champion pages still said "The numbers come from
+  Riot's MATCH-V5 match feed", `/about` described an ingestion and aggregation
+  pipeline and an archived append-only MATCH-V5 record while nothing had been
+  ingested, and 121 pages emitted JSON-LD with
+  `measurementTechnique: "Aggregated from Riot MATCH-V5 match records"` over
+  synthetic fixtures. Every provenance sentence, heading, structured-data claim
+  and empty-state explanation is now written from the manifest's `source`, so the
+  demo state says the numbers are illustrative and that no Riot match data has
+  been ingested, the no-data state claims no numbers at all, and only the
+  `riot-match-v5` state describes MATCH-V5. `web/src/lib/seo.ts` throws rather
+  than emit a Dataset `measurementTechnique` in any other state, so a page that
+  forgets the state fails the build.
+- The footer served a paraphrase of the non-endorsement notice on all 1063 pages
+  while the frozen sentence from `web/src/lib/legal.ts` reached only 4. Both
+  footers now render `NON_ENDORSEMENT_TEXT` itself, so the published sentence is
+  byte-for-byte the approved one everywhere.
+- `scripts/compliance-check.sh` could not see that drift. Check 6 now fails when a
+  built page states the non-endorsement notice in wording other than the frozen
+  sentence, when any built page carries no notice at all, and when either
+  editable footer stops importing `NON_ENDORSEMENT_TEXT`; check 8 now fails on a
+  reserved placeholder hostname whether or not `LOLSTATS_SITE_URL` is set, and
+  requires every canonical, the sitemap and `robots.txt` to name one origin.
+  Each scan's work directory is now named after its process, so two concurrent
+  gate runs can no longer delete each other's tally files and report "0 of 0
+  pages"; every check re-creates that directory before writing to it, and a run
+  that cannot re-create it fails with that reason instead of reporting a clean
+  result.
+- A build with `LOLSTATS_SITE_URL` unset shipped `https://lolstats.example.invalid`
+  in all 1063 canonicals and the sitemap. `web/astro.config.mjs` now publishes
+  `https://lol.erik-schuetze.dev`, the address this deployment is served from,
+  and logs that it did, and it refuses a reserved hostname or a relative URL with
+  a build error rather than publishing a wrong canonical.
+- The tier list, champion and matchup pages attributed withheld cells to "the
+  aggregator" even in the demo and no-data states, where no aggregation has run
+  over the numbers on the page. The sentences now state the publication
+  threshold and what the artifact omits, which is true in all three states, so
+  no page asserts an aggregation step that produced the data it is showing.
+- `scripts/compliance-check.sh` reads its build from `web/dist`. A reviewer who
+  has to check a specific data state can now point it at a snapshot with
+  `LOLSTATS_DIST`, which changes only which files are read, never a rule.
+
+- A raw archive that could not be written put the crawl into an unbounded hot
+  loop: the archive failure was requeued with the same jittered delay and the
+  attempt ceiling was never consulted, so 200 rows were re-fetched 34 and 35
+  times with `-max-attempts 3` in force and 6860 requeues were logged in two
+  minutes against a read-only archive volume. An archive failure now advances
+  the attempt budget like any other failure, so the row reaches the ceiling and
+  is dead-lettered with the `archive` cause intact, the batch stops as soon as
+  its writes fail, and the archive-then-database order is unchanged: a failed
+  archive write still leaves `matches` untouched.
+- A `Retry-After` longer than the per-call timeout was classified as a shutdown
+  and requeued with no delay at all: `Retry-After: 90` against the 10s per-call
+  timeout surfaced as `DeadlineExceeded`, the row was logged "job released
+  before shutdown" during a run in which no shutdown happened, and eight rows
+  were released exactly 10.01s apart - the documented route to a suspended key.
+  The 429 now reaches the worker as a rate limit with its `Retry-After` intact
+  whether or not the wait outlives the call, and the row is parked until that
+  instant, so the wait is real rather than misclassified.
+- A dead letter was revived without limit: the queue's conflict clause reset
+  `attempts` to 0, so a poison match id that always answers 500 went
+  dead -> pending -> claimed -> dead on every rediscovery and cost a fresh
+  attempt budget each time (10 -> 20 -> 30 origin requests over three walks for
+  one match that can never succeed), with no bound and no visible change in the
+  database state. The revival is now counted and bounded
+  (`fetch_queue.revivals`, three per row, `0003_revival_budget`), so a
+  permanently failing row is retired instead of paying for a Riot call per walk,
+  while an explicit `maintain -replay-dead-letters` still returns dead letters
+  to the queue, which is how work retired during a key outage is recovered.
+- Recovery after a `SIGKILL` depended on the hourly `maintain` cron: the rows a
+  killed worker had claimed stayed `claimed`, an unassisted restart recovered
+  none of them, the crawl could not resume until `maintain` ran, and its 15m
+  grace on an hourly schedule put a crash up to ~75 minutes behind. A starting
+  worker now reclaims claims older than the same 15m grace before its first
+  poll, so a restart resumes on its own; claims younger than the grace are left
+  alone, because a claim that fresh can belong to a live peer.
+- A graceful `TERM` stranded the rest of the claimed batch: the row in flight
+  was released, the nineteen rows of a twenty-row batch that had not started
+  were not, so a plain `SIGTERM` left up to `-job-batch` rows invisible to every
+  worker until the claim grace expired. Shutdown now hands the unstarted rows
+  back before the loop exits, and the half of the batch that was already
+  archived is finished rather than abandoned: the writer refuses a flush on a
+  cancelled context, so that final flush - and only it, plus the update that
+  closes the rows it made durable - runs on a context that outlives the stop.
+  A batch whose flush fails for a real reason is still left claimed, where a
+  boot's reclaim picks it up, and a shutdown that lands while a row at the
+  attempt ceiling is being fetched releases it for retry rather than retiring it
+  against its will.
+
+- The matchup heatmap announced a measurement on its diagonal. The cell where a
+  champion meets itself on both axes says in its `aria-label` that it is "the
+  same champion in both axes", but the detail line the runtime writes above the
+  matrix read the cell's `data-n="0"` placeholder and reported "win rate over 0
+  games, percentage points versus even" for every matchup board (5 of 5 routes,
+  by hover and by arrow key), so the page stated a win rate it cannot back. The
+  diagonal is now answered as not applicable - recognised by position and by the
+  `.self` class, before any number is read - at the single place the detail text
+  is composed, so hover, tap, `focusin`, the arrow keys and `Home`/`End` all say
+  that a champion is never matched against itself and never name a rate or a
+  delta, and the server-rendered `aria-label` now says the same. The cell still
+  prints no number, so the no-JavaScript page is unchanged.
+- A click on a table's sort control was dead at five scroll offsets.
+  `header.ds-navbar` is fixed at 51px, so at scrollY 550-590 on every table route
+  a click at the centre of `[data-ti-dir]` landed on the bar and did nothing at
+  all: the direction, the first row and the URL were unchanged (a swallowed click
+  does not navigate either). Two surfaces inside the bar covered what they did not
+  paint - the bar's own translucent frame, and the Matchups disclosure `summary`,
+  whose `::after` caret carries a leading space that extended its box a whole
+  character past the label. The bar frame is now `pointer-events: none` with every
+  interactive or opaque surface inside it re-enabling itself, the caret is placed
+  out of flow at `calc(100% + 0.6em)` so the summary's box stops at its label, and
+  the document scroller carries `scroll-padding-top` while fragments, links,
+  buttons, `summary`, tabstops and form fields carry `scroll-margin-top`. What the
+  change achieved is narrower than "the dead clicks are gone": the bar's inert
+  frame no longer takes a click anywhere, and the disclosure's hit area is now
+  exactly what it paints - its box plus the caret glyph - so the covered part of
+  the control shrank from the whole bar to that box. It cannot make a control that
+  a reader has manually scrolled under the fixed bar clickable at the pixels the
+  disclosure covers, because that `summary` is interactive, it is legitimately on
+  top there, and the control is not sticky (the only `position: fixed` element in
+  `web/src` is `Nav.astro`). Independent verification measured 84 scroll offsets
+  across the band in both sort states: 27 offsets have part of the control covered
+  (scrollY 555-581; 52-61 of its 110 px in `desc` and 52-61 of its 102 px in
+  `asc`), no offset leaves it wholly covered, and a click at a covered offset
+  aimed at a pixel the bar does not cover is delivered and toggles the direction
+  in both states. A centre click is delivered in `desc`, but in `asc` the label is
+  8px narrower and its centre (x 463) lands inside the disclosure box, so that
+  click opens the Matchups menu instead. The claim that a centre click toggles the
+  direction at all 199 sampled offsets was not tested at those offsets at all: the
+  measurement sampled the control's centre pixel only, only in the state the page
+  loads in, and ran its click test only at the first offset at which that single
+  pixel found an occluder - of which it found none. The bar's paint and layout are
+  unchanged: the closed bar is pixel-identical to the previous build (0 differing
+  pixels at scrollY 0/560/570/580) and the caret's ink does not move.
+
 ### Notes
 
 - The ingest `worker` subcommand starts, serves metrics and shuts down cleanly,

@@ -1,13 +1,16 @@
 import type { Window } from '../types/agg';
 import { integer } from './format';
-import type { SiteData } from './site';
+import type { DataState, SiteData } from './site';
 
 // Structured data, built from the same values the page renders.
 //
 // The rules applied here are the rules applied everywhere else in this site:
 // a structured-data statement is only emitted when the artifact supports it.
 // With no published snapshot there is no Dataset to describe, so the page
-// claims a WebPage and nothing more.
+// claims a WebPage and nothing more - and a machine-readable provenance claim is
+// worse than a prose one, because nothing in the page bounds how it is read.
+// `jsonLdDataset` therefore refuses to describe anything but a live snapshot,
+// and each call site renders the node only when the state is `live`.
 
 export interface JsonLd {
   '@context': 'https://schema.org';
@@ -62,9 +65,27 @@ export interface DatasetInput {
   sampleSize: number;
   /** What each row measures, in the reader's terms. */
   variables: Array<{ name: string; unit: string }>;
+  /** The build's data state. A `Dataset` of Riot match records only exists in the live state. */
+  state: DataState;
 }
 
+/**
+ * A schema.org Dataset, which is a claim about where the numbers came from and
+ * therefore only supportable by an ingested snapshot.
+ *
+ * The guard is a build-time throw rather than a state-conditional sentence:
+ * `measurementTechnique` reading "Aggregated from Riot MATCH-V5 match records"
+ * over synthetic fixtures is exactly the false provenance claim this site exists
+ * not to make, and a build that would publish one should stop instead. Call sites
+ * render this node only when `state === 'live'`.
+ */
 export function jsonLdDataset(input: DatasetInput): JsonLd {
+  if (input.state !== 'live') {
+    throw new Error(
+      `jsonLdDataset: refusing to describe the "${input.state}" data state as a Dataset of Riot match records. ` +
+        'Only a snapshot the manifest declares as riot-match-v5 may carry this node; render the page without it instead.',
+    );
+  }
   return {
     '@context': 'https://schema.org',
     '@type': 'Dataset',

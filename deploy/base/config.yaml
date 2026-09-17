@@ -31,3 +31,54 @@ data:
   # path.
   LOLSTATS_RAW_ROOT: "/var/lib/lolstats/raw"
   LOLSTATS_AGG_ROOT: "/var/lib/lolstats/agg"
+
+  # The public origin of the site, used for canonical URLs, sitemap.xml and
+  # robots.txt. It is declared here rather than left to the build's default so
+  # that the hostname the release publishes is visible in the deployed
+  # configuration: a missing value is not an error, because the build falls
+  # back to this same hostname and logs that it did, whereas a reserved or
+  # relative value is refused loudly at build time. Declaring it makes the
+  # intent explicit instead of implicit in code.
+  LOLSTATS_SITE_URL: "https://lol.erik-schuetze.dev"
+
+  # Documented operator switch, not a permanent override. It only means
+  # anything to the Astro build in site-build; the Go binaries read their own
+  # variables and ignore it, and they still read the real aggregate root above.
+  #
+  # `only` makes the site render the checked-in demo fixtures and label every
+  # page as a preview. It is set that way right now because there is no
+  # approved Riot production key, so ingestion cannot run, the archive stays
+  # empty and a build against LOLSTATS_AGG_ROOT alone would publish the no-data
+  # state instead of the clearly-labelled preview ADR-010 and plan risk R2
+  # require. No crawled data is published either way.
+  #
+  # FLIP TO REAL DATA: once the key is approved and the archive has produced a
+  # published snapshot, change the value below to "off" - "off" means "render
+  # the configured LOLSTATS_AGG_ROOT and never substitute fixtures". "auto" is
+  # the build's default and behaves like "off" here, because an explicitly
+  # configured root is never silently substituted (web/src/lib/artifacts.ts).
+  LOLSTATS_AGG_FIXTURES: "only"
+
+  # The DuckDB resource bounds the nightly aggregate Job runs under. They are
+  # declared here because the value that matters is the one the deployed pod
+  # gets: DuckDB sizes its own default memory limit from the *host's* RAM, so a
+  # pod with no explicit limit is a pod that believes it has the whole node and
+  # gets OOM-killed against the 3 Gi limit in jobs/aggregate.yaml.
+  #
+  # 1GiB is a third of that 3 Gi limit. The rest of the cgroup is the Go
+  # runtime (GOMEMLIMIT=2GiB), the page cache and DuckDB's non-buffer
+  # allocations - a limit equal to the pod limit is still a kill. Raising this
+  # is a decision about the pod's memory limit, not a tweak.
+  LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT: "1GiB"
+  # Matches the Job's 2-CPU limit. Unset, DuckDB takes the node's core count
+  # (10 on the measured node) and every extra thread carries its own state.
+  LOLSTATS_AGG_DUCKDB_THREADS: "2"
+  # Where a statement spills when it does not fit in the limit above. This is
+  # the aggregate Job's emptyDir; the root filesystem is read-only, so a
+  # spill directory anywhere else would fail the build at open. Declared
+  # rather than left to $TMPDIR so that the mounted volume the spill lands on
+  # is visible in the deployed configuration.
+  LOLSTATS_AGG_DUCKDB_TEMP_DIR: "/tmp"
+  # DuckDB's own default here is "90% of available disk space", which on this
+  # node is the whole disk shared with every other workload.
+  LOLSTATS_AGG_DUCKDB_MAX_TEMP_SIZE: "10GiB"

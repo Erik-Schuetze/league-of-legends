@@ -18,7 +18,18 @@
 //     mailbox is the kind of claim that survives review and then turns out to be
 //     untrue.
 
-import type { DataState } from './site';
+import type { DataState, SiteData } from './site';
+import { integer } from './format';
+
+/**
+ * The provenance facts a sentence about the numbers is allowed to depend on.
+ *
+ * Deliberately narrower than SiteData: a sentence about where the numbers came
+ * from may look at the state, the declared source and whether that source is one
+ * this site recognises, and at nothing else. Taking the whole SiteData would
+ * invite a page to describe a snapshot that is not there.
+ */
+export type ProvenanceFacts = Pick<SiteData, 'state' | 'source' | 'sourceRecognised'>;
 
 /** The approved non-endorsement sentence. Do not reword without a compliance change. */
 export const NON_ENDORSEMENT_TEXT = 'This project is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.';
@@ -36,7 +47,7 @@ export const FREE_TIER_TEXT = 'Every page on this site is free and ungated: ther
 export const NO_RATING_TEXT = 'This site does not compute, store or display an MMR, ELO or any other skill rating, and does not offer a calculator for one.';
 
 /** The no-data-broker sentence. Riot's General Policies forbid the broker role explicitly. */
-export const NO_BROKER_TEXT = 'This site publishes derived aggregate statistics only. It does not resell Riot data, does not expose the raw archive it ingests, and publishes no per-player record, account, summoner name or match history.';
+export const NO_BROKER_TEXT = 'This site publishes derived aggregate statistics only. It does not resell Riot data, does not serve the raw Riot API responses behind its aggregates, and publishes no per-player record, account, summoner name or match history.';
 
 /**
  * The operator, and the controller of the little personal data this site does
@@ -195,18 +206,142 @@ export const VERSION_LINE = `Effective ${EFFECTIVE_DATE_LABEL}. Last updated ${L
 export const CONTACT_ROUTE = `Questions about these pages, about the data, or about your rights under the GDPR go to ${CONTACT_EMAIL}. That mailbox is the contact route rather than a postal address, because the operator is a private individual.`;
 
 /**
+ * How the build's own artifacts describe their origin, clause-shaped so a
+ * sentence can splice it in.
+ *
+ * It reads the manifest rather than asserting a value, so a manifest that
+ * declares nothing (or something this site does not recognise) is reported as
+ * exactly that instead of being rounded to "demo".
+ */
+function declaredSourceClause(facts: ProvenanceFacts): string {
+  // No-data means no manifest was found, so there is nothing to quote back. Saying
+  // "the manifest declares no source" would imply a manifest this build never read.
+  if (facts.state === 'no-data') {
+    return 'this build read no aggregate manifest at all';
+  }
+  if (facts.sourceRecognised) {
+    return `the aggregate manifest this build read declares its source as "${facts.source ?? ''}"`;
+  }
+  return facts.source === null || facts.source === ''
+    ? 'the aggregate manifest this build read declares no source at all'
+    : `the aggregate manifest this build read declares the unrecognised source "${facts.source}", so its numbers are unverified`;
+}
+
+/**
  * Where the numbers on this build come from, in the reader's terms. Derived from
  * the build's data state rather than from a flag, so that a page cannot claim
  * ingested match data while the manifest says the snapshot is a preview.
+ *
+ * Nothing here asserts ingestion unless the manifest declares the source the
+ * aggregate build writes for crawled match data, which is the only state in
+ * which there is something to attribute to Riot.
  */
-export function dataSourceSentence(state: DataState): string {
-  switch (state) {
+export function dataSourceSentence(facts: ProvenanceFacts): string {
+  switch (facts.state) {
     case 'live':
       return 'The statistics are this project\'s own aggregates of ranked solo-queue match records fetched from Riot\'s MATCH-V5 API under a registered Riot API key. They measure a sample of that data, and they are not Riot\'s own figures.';
     case 'demo':
-      return 'This build publishes no Riot match data. Its numbers are a labelled preview generated to exercise the layout, and the aggregate manifest this build read declares its source as "demo".';
+      return `This build publishes no Riot match data: ${declaredSourceClause(facts)}, so every number it shows is illustrative preview data generated to exercise the layout. Nothing on this build is a measurement of a real game.`;
     case 'no-data':
       return 'This build publishes no Riot match data because no aggregate snapshot exists yet. The statistics routes render an explicit empty state rather than numbers.';
+  }
+}
+
+/**
+ * The "how this page is computed" paragraph every statistics page carries.
+ *
+ * It is state-conditional for the same reason dataSourceSentence is: the method
+ * is worth describing in all three states, but the provenance clause in front of
+ * it is only true in one of them. In the demo and no-data states the paragraph
+ * says so instead of borrowing the live wording.
+ */
+export function computedFromSentence(facts: ProvenanceFacts, minCellN: number | null): string {
+  const threshold = minCellN === null ? 'the publication threshold' : `n = ${integer(minCellN)}`;
+  const method =
+    `Win rate is wins divided by games in this cell; the 95% interval is reported so that a small sample cannot look ` +
+    `like a precise one, and cells below ${threshold} games are withheld rather than published.`;
+
+  switch (facts.state) {
+    case 'live':
+      return (
+        `The numbers come from Riot's MATCH-V5 match feed, aggregated per patch and per queue, and this page was ` +
+        `rendered from the published aggregate artifact at build time. ${method}`
+      );
+    case 'demo':
+      return (
+        `No Riot match data has been ingested for this build: ${declaredSourceClause(facts)}, so the numbers on this ` +
+        `page are a preview of the layout rather than a measurement of anything. The arithmetic below is the real ` +
+        `arithmetic, applied to illustrative figures. ${method}`
+      );
+    case 'no-data':
+      return (
+        'This build publishes no numbers at all, so there is nothing on this page measured from match data. When a ' +
+        `snapshot exists, win rate is wins divided by games in the cell, the 95% interval is reported so that a small ` +
+        `sample cannot look like a precise one, and cells below the publication threshold are withheld rather than published.`
+      );
+  }
+}
+
+/** The heading that paragraph sits under, which is not a claim that anything was computed yet. */
+export function computedHeading(facts: ProvenanceFacts): string {
+  return facts.state === 'no-data'
+    ? 'How these pages are produced'
+    : 'How this page is computed';
+}
+
+/**
+ * The sentence a rate-bearing page appends when the rates it is showing are not
+ * measurements of real games.
+ *
+ * The tier-list and matchup pages describe their tables as "measured over the
+ * source window", which is a provenance claim in prose: true of a live snapshot,
+ * and not true of a labelled preview. In the live state this is empty, so the
+ * live wording is the live wording and nothing is weakened for it.
+ */
+export function previewNumbersSentence(facts: ProvenanceFacts): string {
+  switch (facts.state) {
+    case 'live':
+      return '';
+    case 'demo':
+      return 'This build is a labelled preview: the rates and sample sizes below are illustrative values generated to exercise the layout, not measurements of real games.';
+    case 'no-data':
+      return 'No aggregate snapshot has been published yet, so this build has no rates to show.';
+  }
+}
+
+/**
+ * The pipeline description, in the tense the state allows.
+ *
+ * The five steps in docs/data-sources.md are what produces a live snapshot. In
+ * the demo and no-data states the same steps are what *will* produce one, and
+ * the page has to say that rather than describe intent as accomplishment.
+ */
+export function pipelineLeadIn(facts: ProvenanceFacts): string {
+  return facts.state === 'live'
+    ? 'Five steps, in order, produced the snapshot this build rendered. The pipeline is deliberately boring, because every interesting shortcut here would be a way to publish a wrong number.'
+    : `Five steps, in order. No run of this pipeline has produced anything for this build - ${declaredSourceClause(facts)} - so this is the method the numbers will come from, not a description of an ingestion that has happened. The pipeline is deliberately boring, because every interesting shortcut here would be a way to publish a wrong number.`;
+}
+
+/** Whether this build can describe an ingestion that actually happened. */
+export function ingestedMatchData(facts: ProvenanceFacts): boolean {
+  return facts.state === 'live';
+}
+
+/**
+ * Which of the five pipeline steps have actually run for this build.
+ *
+ * The steps themselves describe a method, and a method can be described in any
+ * state; what must not be left implicit is whether any of it has produced the
+ * page the reader is looking at.
+ */
+export function pipelineStatusSentence(facts: ProvenanceFacts): string {
+  switch (facts.state) {
+    case 'live':
+      return 'Every step above ran for the snapshot this build rendered, and the build record printed on this page is its receipt.';
+    case 'demo':
+      return `None of the five steps has run for this build: ${declaredSourceClause(facts)}, so these pages were rendered from illustrative fixtures rather than from pipeline output.`;
+    case 'no-data':
+      return 'None of the five steps has run for this build, so there is no snapshot and no number anywhere on this site; the steps above are the method that will produce the first one.';
   }
 }
 

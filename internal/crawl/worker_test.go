@@ -206,6 +206,10 @@ func TestProcessJobFailureHandling(t *testing.T) {
 		maxAttem   int
 		wantStatus string
 		wantCause  bool
+		// checkAttempts asserts the attempt count after the failure, which is
+		// how a global condition is told apart from this row's own failure.
+		checkAttempts bool
+		wantAttempts  int
 	}{
 		{
 			name:       "transient failure requeues",
@@ -220,10 +224,36 @@ func TestProcessJobFailureHandling(t *testing.T) {
 			wantCause:  true,
 		},
 		{
-			name:       "circuit breaker open requeues rather than burning rows",
-			fetchErr:   riot.ErrCircuitOpen,
-			wantStatus: "retry",
-			wantCause:  true,
+			name:          "circuit breaker open hands the row back without burning it",
+			fetchErr:      riot.ErrCircuitOpen,
+			attempts:      2,
+			wantStatus:    "retry",
+			wantCause:     true,
+			checkAttempts: true,
+			wantAttempts:  2,
+		},
+		{
+			// A refused key is a global condition. Before the fix this row
+			// reached the ceiling and was retired for an outage that was not
+			// its fault.
+			name:          "a refused key does not dead-letter at the attempt ceiling",
+			fetchErr:      &riot.StatusError{Method: "match", Status: 403},
+			attempts:      1,
+			maxAttem:      2,
+			wantStatus:    "retry",
+			wantCause:     true,
+			checkAttempts: true,
+			wantAttempts:  1,
+		},
+		{
+			name:          "401 is treated like 403",
+			fetchErr:      &riot.StatusError{Method: "match", Status: 401},
+			attempts:      1,
+			maxAttem:      2,
+			wantStatus:    "retry",
+			wantCause:     true,
+			checkAttempts: true,
+			wantAttempts:  1,
 		},
 		{
 			name:       "a purge is permanent",
@@ -277,6 +307,16 @@ func TestProcessJobFailureHandling(t *testing.T) {
 			if tc.wantCause && h.store.jobCause("EUW1_1") == "" {
 				t.Fatal("no cause recorded on the row")
 			}
+			if tc.checkAttempts {
+				job := h.store.jobFor("EUW1_1")
+				if job == nil {
+					t.Fatal("the row vanished from the queue")
+				}
+				if job.item.Attempts != tc.wantAttempts {
+					t.Fatalf("attempts = %d, want %d: the row paid for someone else's failure",
+						job.item.Attempts, tc.wantAttempts)
+				}
+			}
 			if h.store.matchCount() != 0 {
 				t.Fatal("a failed fetch must not be recorded as retained")
 			}
@@ -316,9 +356,36 @@ func TestTransientFailureSchedulesTheRetryInTheFuture(t *testing.T) {
 	}
 }
 
-// Shutdown is not a verdict on the row: the claim is released immediately so
-// the next process does not wait out the claim window.
-func TestCancelledFetchReleasesTheRowImmediately(t *testing.T) {
+// A shutdown is not a verdict on the row: the claim is released immediately so
+// the next process does not wait out the claim window. A cancellation from the
+// row's own call, with the run still going, is a different thing and has to be
+// scheduled like the retry it is.
+func TestCancelledFetchReleasesTheRowImmediatelyWhenTheRunIsStopping(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := newHarness(t, nil)
+	h.fetcher.errors["match:EUW1_1"] = fmt.Errorf("fetch: %w", context.Canceled)
+	h.store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_1"})
+	h.fetcher.onFetch = func(string) { cancel() }
+
+	if _, err := h.worker.Step(ctx); err != nil && ctx.Err() == nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if got := h.store.jobStatus("EUW1_1"); got != "retry" {
+		t.Fatalf("job status = %q, want retry: a cancelled row must not stay claimed", got)
+	}
+	if got := h.store.notBefore("EUW1_1"); !got.Equal(testBaseTime()) {
+		t.Fatalf("not_before = %s, want the instant the run stopped", got)
+	}
+}
+
+// The negative control for the test above: the same cancelled call in a run
+// that is still going - a per-call timeout, which the client reports as its own
+// deadline - must be pulled back on the retry schedule. Releasing it at "now"
+// is what turned eight rows of the verification run into an immediate retry
+// loop against a suspended key.
+func TestCancelledFetchInALiveRunIsScheduled(t *testing.T) {
 	h := newHarness(t, nil)
 	h.fetcher.errors["match:EUW1_1"] = fmt.Errorf("fetch: %w", context.Canceled)
 	h.store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_1"})
@@ -327,10 +394,10 @@ func TestCancelledFetchReleasesTheRowImmediately(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 	if got := h.store.jobStatus("EUW1_1"); got != "retry" {
-		t.Fatalf("job status = %q, want retry: a cancelled row must not stay claimed", got)
+		t.Fatalf("job status = %q, want retry", got)
 	}
-	if got := h.store.notBefore("EUW1_1"); !got.Equal(testBaseTime()) {
-		t.Fatalf("not_before = %s, want now", got)
+	if got := h.store.notBefore("EUW1_1"); !got.After(testBaseTime()) {
+		t.Fatalf("not_before = %s, want a future instant: nothing is shutting down", got)
 	}
 }
 
@@ -384,6 +451,82 @@ func TestFlushFailureSurfacesAsAStepError(t *testing.T) {
 
 	if _, err := h.worker.Step(context.Background()); err == nil {
 		t.Fatal("Step swallowed an archive flush failure")
+	}
+}
+
+// A row that reads 'done' is never offered again, so it may only be closed
+// once its payload is a renamed part on disk. Completing the batch before the
+// flush would turn a crash or a failed flush into silent data loss: the queue
+// would look healthy while the archive holds nothing.
+func TestFlushFailureLeavesEveryBatchedRowUnDone(t *testing.T) {
+	h := newHarness(t, func(o *WorkerOptions) { o.JobBatch = 5 })
+	ids := []string{"EUW1_1", "EUW1_2", "EUW1_3"}
+	for _, id := range ids {
+		h.serveFixture(t, id)
+		h.store.forceEnqueue(contract.QueueItem{MatchID: id})
+	}
+	h.writer.failFlush = errors.New("read-only file system")
+
+	if _, err := h.worker.Step(context.Background()); err == nil {
+		t.Fatal("Step swallowed an archive flush failure")
+	}
+
+	if h.writer.writeCount() != len(ids) {
+		t.Fatalf("archive writes = %d, want %d: the batch must be written before it is flushed",
+			h.writer.writeCount(), len(ids))
+	}
+	for _, id := range ids {
+		if got := h.store.jobStatus(id); got != "retry" {
+			t.Fatalf("job %s status = %q, want retry: a row whose payload never became durable must not be closed (done would lose it forever)", id, got)
+		}
+		if got := h.store.jobCause(id); got != "archive flush: read-only file system" {
+			t.Fatalf("job %s cause = %q, want the flush failure", id, got)
+		}
+		if got := h.store.notBefore(id); !got.After(testBaseTime()) {
+			t.Fatalf("job %s not_before = %s, want a future instant", id, got)
+		}
+	}
+}
+
+// The happy path keeps one flush per batch: the fix must not turn a batch into
+// a flush per row.
+func TestBatchFlushesOnceAndThenCompletesEveryRow(t *testing.T) {
+	h := newHarness(t, func(o *WorkerOptions) { o.JobBatch = 5 })
+	ids := []string{"EUW1_1", "EUW1_2", "EUW1_3"}
+	for _, id := range ids {
+		h.serveFixture(t, id)
+		h.store.forceEnqueue(contract.QueueItem{MatchID: id})
+	}
+
+	if _, err := h.worker.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if got := h.writer.flushCount(); got != 1 {
+		t.Fatalf("flushes = %d, want 1 for a batch of %d", got, len(ids))
+	}
+	for _, id := range ids {
+		if got := h.store.jobStatus(id); got != "done" {
+			t.Fatalf("job %s status = %q, want done once the flush published the part", id, got)
+		}
+		if got := h.store.logCount("complete "); got != len(ids) {
+			t.Fatalf("CompleteJob calls = %d, want one per row (%d)", got, len(ids))
+		}
+	}
+}
+
+// A completion failure is surfaced, not swallowed: the payload is durable by
+// then, so the next pass re-fetches and the DO NOTHING insert collapses it.
+func TestCompleteJobFailureAfterTheFlushIsSurfaced(t *testing.T) {
+	h := newHarness(t, nil)
+	h.serveFixture(t, "EUW1_1")
+	h.store.failComplete = errTestStoreDown
+	h.store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_1"})
+
+	if _, err := h.worker.Step(context.Background()); err == nil {
+		t.Fatal("Step swallowed a control-plane failure while completing a durable row")
+	}
+	if h.writer.flushCount() != 1 {
+		t.Fatal("the row was completed before the archive was flushed")
 	}
 }
 

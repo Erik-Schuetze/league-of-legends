@@ -167,8 +167,16 @@ func Demo(opts DemoOptions) (DemoResult, error) {
 		return DemoResult{}, err
 	}
 
+	// The demo root is served too - the point of the demo tree is that a
+	// frontend reads it exactly as it reads a published one - so it is created
+	// traversable, for the same reason build does it explicitly. See perms.go.
+	if err := os.MkdirAll(opts.OutDir, publishedDirPerm); err != nil { //nolint:gosec // G301: the demo tree is read by whatever uid serves or renders it, which is not necessarily the uid that wrote it; see perms.go.
+		return DemoResult{}, fmt.Errorf("create demo root: %w", err)
+	}
 	staging := filepath.Join(opts.OutDir, fmt.Sprintf("%s%d-%d", stagingPrefix, os.Getpid(), generatedAt.UnixNano()))
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	// Private like the build's staging directory: nothing under it is read
+	// before it is renamed into place. See perms.go.
+	if err := os.MkdirAll(staging, privateDirPerm); err != nil {
 		return DemoResult{}, fmt.Errorf("create demo staging directory: %w", err)
 	}
 	defer func() {
@@ -298,7 +306,7 @@ func writeDemoNotice(outDir string, seed int64, generatedAt time.Time) error {
 		fmt.Sprintf("%q instead. See docs/decisions/ADR-005-demo-data-provenance.md.", aggmodel.SourceRiotMatchV5),
 		"",
 	}, "\n")
-	return os.WriteFile(filepath.Join(outDir, DemoNoticeFile), []byte(notice), 0o644)
+	return os.WriteFile(filepath.Join(outDir, DemoNoticeFile), []byte(notice), publishedFilePerm) //nolint:gosec // G306: served next to the demo tree so an operator reading the volume cannot miss it; see perms.go.
 }
 
 // demoTallies is the simulated replacement for what DuckDB would have returned.
