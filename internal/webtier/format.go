@@ -91,6 +91,20 @@ func WindowLabel(from, to string) string {
 	return IsoDate(from) + " to " + IsoDate(to)
 }
 
+// commitPrefixLength is how much of a build row's commit the site prints, from
+// the reference build's git_sha.slice(0, 12).
+const commitPrefixLength = 12
+
+// ShortCommit is that slice. A commit shorter than the prefix is printed whole
+// rather than padded, which is what String.prototype.slice does and what the
+// published manifest's "unknown" therefore renders as.
+func ShortCommit(commit string) string {
+	if len(commit) <= commitPrefixLength {
+		return commit
+	}
+	return commit[:commitPrefixLength]
+}
+
 // PlusMinus renders the 95% confidence half-width in percentage points.
 func PlusMinus(halfWidth float64, digits int) string {
 	return "+/- " + fixed(halfWidth*100, digits) + " pp"
