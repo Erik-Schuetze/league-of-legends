@@ -95,6 +95,11 @@ EXIT_NOTE=""
 
 k() { kubectl -n "$NS" "$@"; }
 
+# A listener already on the port makes the readiness probe below pass even when
+# this script's own forward failed to bind, so every sample would be taken
+# through a forward the script does not own and cannot clean up.
+port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+
 sha256_of() { python3 -c 'import hashlib,sys;sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; }
 
 # The tier understands `Cache-Control: no-cache`, and the HTML cache policy is
@@ -169,8 +174,19 @@ wait_for_delete() { # $1 = pod name
 # Cleanup. Registered before anything is created.
 # ---------------------------------------------------------------------------
 cleanup() {
-  local pf
-  for pf in $PORTFORWARDS; do kill "$pf" >/dev/null 2>&1; done
+  local pf pid port i
+  for pf in $PORTFORWARDS; do
+    pid="${pf%%:*}"; port="${pf##*:}"
+    kill "$pid" >/dev/null 2>&1
+    # A forward that outlives the run makes the next run's readiness probe
+    # succeed against a listener the next run does not own, so do not leave one.
+    for i in $(seq 1 20); do port_busy "$port" || break; sleep 0.25; done
+    if port_busy "$port"; then
+      kill -9 "$pid" >/dev/null 2>&1
+      sleep 0.5
+    fi
+    port_busy "$port" && note "127.0.0.1:$port is still listening after killing $pid; free it before re-running"
+  done
   if [ "$KEEP_PROBE" = "0" ]; then
     for p in $PODS_CREATED; do
       k delete pod "$p" --wait=false >/dev/null 2>&1
@@ -769,9 +785,12 @@ pod_names() { pod_table | cut -f1 | tr '\n' ' '; }
 
 pf_start() { # $1 = target, $2 = local port, $3 = remote port
   local log="$WORKDIR/port-forward-$2.log"
+  # Refuse rather than reap: whatever holds the port may belong to another lane,
+  # and a foreign forward there would make every readiness check below pass.
+  port_busy "$2" && die "127.0.0.1:$2 is already listening; a forward that is not ours would make every readiness probe pass. Free the port, then re-run"
   k port-forward "$1" "$2:$3" >"$log" 2>&1 &
   local pid=$!
-  PORTFORWARDS="$PORTFORWARDS $pid"
+  PORTFORWARDS="$PORTFORWARDS $pid:$2"
   local i
   for i in $(seq 1 40); do
     curl -fsS -m 3 -o /dev/null "http://127.0.0.1:$2/" 2>/dev/null && { note "port-forward $1 -> 127.0.0.1:$2"; return 0; }
