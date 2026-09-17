@@ -366,9 +366,12 @@ func (w *Worker) drainQueue(ctx context.Context) (int, error) {
 	return processed, nil
 }
 
-// completeDetached closes one row on a context that outlives the stop. It is
-// only ever called after a successful flush, so the row it closes is already
-// durable in the archive.
+// completeDetached closes one row on a context that outlives the stop.
+//
+// Both of its callers close a row whose payload is durable in the archive: the
+// batch loop closes the rows it has just flushed, and a row that was already
+// archived under a previous version of the crawl is closed by the known-match
+// path, whose payload the pass that inserted its `matches` row flushed.
 func (w *Worker) completeDetached(ctx context.Context, id int64) error {
 	if ctx.Err() == nil {
 		return w.deps.Store.CompleteJob(ctx, id)
@@ -421,6 +424,28 @@ func (w *Worker) processJob(ctx context.Context, item contract.QueueItem) (bool,
 	defer cancel()
 
 	started := w.deps.Now()
+
+	// A match the control plane already holds is already in the archive, and
+	// the archive has no key: walking it again appends a second copy of a
+	// payload that is already stored, which the upsert's ON CONFLICT DO NOTHING
+	// cannot collapse because it only governs the `matches` row. The row is
+	// closed instead, because the work it describes is finished.
+	//
+	// A `matches` row implies the payload reached a renamed part. The insert
+	// happens inside the batch and the flush at the end of it, so the row can
+	// exist while its part is still buffered - but only for a row of the same
+	// batch, and the batch closes that row only after the flush and hands every
+	// row of it back if the flush fails. So a row closed here is never closed
+	// ahead of the payload it describes.
+	if w.alreadyArchived(ctx, item) {
+		if err := w.completeDetached(ctx, item.ID); err != nil {
+			return false, fmt.Errorf("complete known match %s: %w", item.MatchID, err)
+		}
+		w.deps.Log.Debug("match already archived; row closed without a fetch",
+			"match_id", item.MatchID, "job_id", item.ID)
+		return false, nil
+	}
+
 	dto, _, err := w.deps.Fetcher.MatchWithPayload(jobCtx, item.MatchID)
 	if err != nil {
 		return false, w.handleFetchFailure(ctx, item, err)
@@ -437,9 +462,14 @@ func (w *Worker) processJob(ctx context.Context, item contract.QueueItem) (bool,
 	}
 	record := MatchRecordFromMeta(meta, raw.MatchPartitionURI(writerRoot(w.deps.Writer), meta))
 	if _, err := w.deps.Store.UpsertMatch(ctx, record); err != nil {
-		// Leaving the row claimed means the retry re-fetches and the
-		// INSERT ... DO NOTHING collapses it to one row, which is the
-		// idempotency the design rests on.
+		// The payload is durable, so the row is left claimed rather than
+		// closed: a row that reads 'done' is never offered again, and closing
+		// it here would leave an archived match with no `matches` row - the
+		// record the next walk consults before it decides to fetch. The retry
+		// waits for the control plane to come back and pays for it with one
+		// re-fetch, which appends a second archive record: the archive has no
+		// key, so only the aggregate's de-duplication by match id keeps that
+		// copy out of a published number.
 		return false, fmt.Errorf("upsert match %s: %w", item.MatchID, err)
 	}
 	w.widen(ctx, dto, meta)
@@ -449,6 +479,34 @@ func (w *Worker) processJob(ctx context.Context, item contract.QueueItem) (bool,
 		"patch", meta.Patch,
 		"elapsed", w.deps.Now().Sub(started).String())
 	return true, nil
+}
+
+// alreadyArchived reports whether the control plane already holds this match.
+//
+// `matches` is the crawl's own record of what it has finished, and it is only
+// inserted after the payload has been written to the archive, so a row in it
+// means the payload is stored. The archive itself cannot be asked: it is
+// append-only parquet with no key, which is why the duplicate this check
+// prevents had nothing to collapse it.
+//
+// The interface is optional, like the other store surfaces the loop discovers
+// by assertion, so a test or a caller can drive the worker with a store that
+// does not implement it. A store that cannot answer is treated as "no": the
+// question decides whether to skip a fetch, and answering it wrongly in that
+// direction costs one duplicate archive record, while treating a failure as
+// "yes" would drop the fetch of a match that may not be stored at all.
+func (w *Worker) alreadyArchived(ctx context.Context, item contract.QueueItem) bool {
+	known, ok := w.deps.Store.(KnownMatchChecker)
+	if !ok {
+		return false
+	}
+	exists, err := known.MatchExists(ctx, item.MatchID)
+	if err != nil {
+		w.deps.Log.Warn("could not check whether the match is already archived; fetching it",
+			"match_id", item.MatchID, "job_id", item.ID, "err", err)
+		return false
+	}
+	return exists
 }
 
 // handleFetchFailure decides between retrying and giving up on a queue row.

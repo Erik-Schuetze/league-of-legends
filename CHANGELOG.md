@@ -163,6 +163,31 @@ short. "Breaking" means something that used to work no longer does.
   boot's reclaim picks it up, and a shutdown that lands while a row at the
   attempt ceiling is being fetched releases it for retry rather than retiring it
   against its will.
+- Re-walking a match the control plane already held appended a second record
+  for it to the raw archive, which has no key and so could not collapse it: the
+  live crawl path never asked the `matches` table, whose row is written after
+  the payload is archived, whether the match was already stored (the backfill
+  path has asked since it was written). A second archive record is a second game
+  in every count taken over the archive, so the aggregate published inflated
+  rates beside a de-duplicated sample size. The worker now closes a row whose
+  match is already recorded without fetching it, so the second record is not
+  written in the first place. A store that cannot answer the question is treated
+  as "not archived" and the row is fetched, because the answer only decides
+  whether a fetch is skipped: one duplicate record costs a wrong number, while
+  treating a control-plane outage as "already stored" would drop the fetch of a
+  match that may not be archived at all.
+- The aggregate published a win rate, pick rate and ban rate counted over a
+  duplicated archive population next to an `n` counted over distinct matches:
+  `matches_used` was `count(DISTINCT match_id)` while the feature rows, the cell
+  tallies and the rate denominators were `count(*)`, so a match archived twice
+  produced cells of `n=11` for a nine-match window and a pick rate of 0.6111
+  over the same nine games - a published rate its own stated sample size does
+  not support, and one a reader cannot detect. The spill of the raw archive is
+  now one row per match, keeping the first record in part order, which is the
+  copy the `matches` table holds; every statement that reads the archive agrees
+  by construction rather than by each one remembering to count distinct. A
+  payload whose match id cannot be read keeps a key of its own, so a malformed
+  row is still counted and still fails the build closed.
 
 - The matchup heatmap announced a measurement on its diagonal. The cell where a
   champion meets itself on both axes says in its `aria-label` that it is "the

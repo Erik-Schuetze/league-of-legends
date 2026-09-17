@@ -52,11 +52,20 @@ much as seventy-five minutes behind. The boot pass hands back at most 1000 rows
 or by `maintain`. `maintain` is still the periodic safety net, and it logs
 `maintain: reclaimed abandoned claims`.
 
+A reclaimed row whose match is already in `matches` is closed without a fetch:
+the row's work is finished, and fetching it again would append a second record to
+an archive that has no key. The worker logs `match already archived; row closed
+without a fetch` at debug level for each one. A match the control plane cannot be
+asked about is fetched as usual, so a store outage costs a duplicate record
+rather than a skipped match.
+
 `-claim-grace` moves the window for both. It should stay comfortably above the
 client timeout (`DefaultJobTimeout`, 25s): a short grace reclaims claims that are
-still being worked, which duplicates work rather than losing it - the archive
-and the `match_id` upsert both make the duplicate harmless, but it spends
-rate-limit budget twice.
+still being worked, which duplicates work rather than losing it - a worker closes
+a row whose match is already in `matches` without fetching it, and the aggregate
+reads the archive one row per match, so a duplicate cannot move a published
+number - but it spends rate-limit budget twice and appends a record to an archive
+that has no key.
 
 A graceful `TERM` does not leave claims behind for either pass: the worker stops
 claiming, releases the rows of the batch it had not started, and schedules the
