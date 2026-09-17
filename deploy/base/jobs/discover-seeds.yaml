@@ -117,6 +117,17 @@ spec:
                       # job that does not need one, and so this job fails with
                       # its own clear message instead of a pod that never starts.
                       optional: true
+                # The development key expires every 24 hours and only the
+                # operator knows when; when they record it (RIOT_API_KEY_EXPIRES_AT
+                # in the same Secret) this job refuses to start rather than
+                # spend its Riot budget on a key that is already dead. Optional,
+                # so an undeclared deadline changes nothing.
+                - name: LOLSTATS_RIOT_API_KEY_EXPIRES_AT
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-riot
+                      key: RIOT_API_KEY_EXPIRES_AT
+                      optional: true
               resources:
                 requests:
                   cpu: 100m

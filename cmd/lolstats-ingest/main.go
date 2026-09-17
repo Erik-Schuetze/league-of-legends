@@ -193,6 +193,53 @@ func keyWarning(log *slog.Logger, keys *riot.KeyProvider) {
 		"env", riot.EnvAPIKey, "env_file", riot.EnvAPIKeyFile)
 }
 
+// requireKeyNotExpired refuses to start key-spending work on a key whose
+// declared deadline has passed.
+//
+// The check belongs here, before the store is opened and before the first
+// request, because that is the whole point of declaring the deadline. A
+// scheduled job that starts, spends its startup on connections and its first
+// calls on refusals, and then fails with "rate limited" or "unexpected status
+// 403" has told the operator almost nothing; this exits 1 with the expiry, the
+// fix, and nothing else.
+//
+// An undeclared deadline is not an error. Most deployments do not know their
+// key's expiry and a Riot production key does not have one; there the first 401
+// is what reports a dead key, and it already reports it as a failed job. The
+// log line says so, so that "the pipeline did not notice" is never the
+// operator's conclusion.
+func requireKeyNotExpired(log *slog.Logger, cfg config.Config) error {
+	expiry := riot.NewKeyExpiry(cfg.Riot.KeyExpiresAt)
+	now := time.Now()
+	if err := expiry.Check(now); err != nil {
+		log.Error("refusing to start: the declared Riot key expiry has passed",
+			"err", err, "expired_at", expiry.At())
+		return err
+	}
+	remaining, declared := expiry.Remaining(now)
+	if !declared {
+		log.Info("no declared Riot key expiry: a dead key is reported by Riot refusing it",
+			"hint", "set LOLSTATS_RIOT_API_KEY_EXPIRES_AT to fail before the first refused call",
+			"key_age_warning_after", crawl.KeyWarnAge.String())
+		return nil
+	}
+	log.Info("Riot API key expiry declared",
+		"expires_at", expiry.At(), "remaining", remaining.Truncate(time.Second).String())
+	if remaining < keyExpiryWarnLead {
+		// A development key is rotated daily, so a rotation notice is only
+		// useful while there is still time in the working day to act on it.
+		log.Warn("Riot API key expires soon: rotate it before the next scheduled run",
+			"expires_at", expiry.At(), "remaining", remaining.Truncate(time.Second).String())
+	}
+	return nil
+}
+
+// keyExpiryWarnLead is how long before a declared expiry the warning starts. It
+// is the same lead the crawl worker uses for a key that is merely old - the two
+// notices describe the same event from different information, and an operator
+// who sees both should not have to work out which one is later.
+const keyExpiryWarnLead = crawl.KeyWarnAge
+
 // service is the pair of background components every long-running subcommand
 // needs: the health/metrics listener and the signal-scoped context.
 type service struct {
@@ -324,6 +371,9 @@ func runWorker(args []string, stderr io.Writer) int {
 
 	keys := riot.NewKeyProvider()
 	keyWarning(log, keys)
+	if err := requireKeyNotExpired(log, cfg); err != nil {
+		return fail(stderr, "worker", err)
+	}
 	client, err := newRiotClient(cfg, log, metrics, keys)
 	if err != nil {
 		return fail(stderr, "worker", err)
@@ -339,6 +389,11 @@ func runWorker(args []string, stderr io.Writer) int {
 			Log:     log,
 			Metrics: metrics,
 			Clock:   riot.RealClock{},
+			// The loop re-checks this every pass. A worker that started with a
+			// valid declaration must not keep crawling once the deadline it was
+			// given has passed, which is the one expiry a long-running process
+			// can notice without asking Riot.
+			KeyExpiry: riot.NewKeyExpiry(cfg.Riot.KeyExpiresAt),
 		},
 		Queue:         *queue,
 		JobBatch:      *jobBatch,
@@ -355,7 +410,7 @@ func runWorker(args []string, stderr io.Writer) int {
 		return fail(stderr, "worker", err)
 	}
 
-	svc := &service{cfg: cfg, log: log, metrics: metrics, ready: readiness(ctrl, keys)}
+	svc := &service{cfg: cfg, log: log, metrics: metrics, ready: readiness(ctrl, keys, cfg)}
 	failed, srv := svc.serve(ctx)
 	go func() {
 		if lerr := <-failed; lerr != nil {
@@ -376,8 +431,10 @@ func runWorker(args []string, stderr io.Writer) int {
 }
 
 // readiness reports what the probes and a human both want to know: is the
-// database reachable, and is a key present. It never reports the key itself.
-func readiness(ctrl *store.Store, keys *riot.KeyProvider) func(context.Context) map[string]any {
+// database reachable, and can the crawler still use its key. It never reports
+// the key itself.
+func readiness(ctrl *store.Store, keys *riot.KeyProvider, cfg config.Config) func(context.Context) map[string]any {
+	expiry := riot.NewKeyExpiry(cfg.Riot.KeyExpiresAt)
 	return func(probeCtx context.Context) map[string]any {
 		body := map[string]any{"ok": true, "store": "ok"}
 		pingCtx, cancel := context.WithTimeout(probeCtx, 3*time.Second)
@@ -387,11 +444,24 @@ func readiness(ctrl *store.Store, keys *riot.KeyProvider) func(context.Context) 
 		}
 		_, hasKey := keys.Key()
 		body["riot_key"] = hasKey
+		now := time.Now()
+		switch expired := expiry.Check(now); {
+		case expired != nil:
+			// A declared expiry is a fact, so readiness reports it as one: the
+			// worker exits on it, and a probe that said "ok" while the process
+			// was refusing to crawl would be the probe lying.
+			body["ok"] = false
+			body["crawling"] = "disabled: " + expired.Error()
+		case !hasKey:
+			body["crawling"] = "disabled: no Riot API key"
+		}
 		if hasKey {
 			body["riot_key_source"] = keys.Source()
 			body["riot_key_age_seconds"] = int(keys.Age().Seconds())
-		} else {
-			body["crawling"] = "disabled: no Riot API key"
+		}
+		if remaining, declared := expiry.Remaining(now); declared {
+			body["riot_key_expires_at"] = expiry.At().Format(time.RFC3339)
+			body["riot_key_expires_in_seconds"] = int(remaining.Seconds())
 		}
 		return body
 	}
@@ -435,6 +505,9 @@ func runDiscoverSeeds(args []string, stderr io.Writer) int {
 	if _, ok := keys.Key(); !ok {
 		log.Error("seeding cannot run without a Riot API key")
 		return 1
+	}
+	if err := requireKeyNotExpired(log, cfg); err != nil {
+		return fail(stderr, "discover-seeds", err)
 	}
 	client, err := newRiotClient(cfg, log, metrics, keys)
 	if err != nil {
@@ -585,6 +658,9 @@ func runBackfill(args []string, stderr io.Writer) int {
 	if _, ok := keys.Key(); !ok {
 		log.Error("backfill cannot run without a Riot API key")
 		return 1
+	}
+	if err := requireKeyNotExpired(log, cfg); err != nil {
+		return fail(stderr, "backfill", err)
 	}
 	client, err := newRiotClient(cfg, log, metrics, keys)
 	if err != nil {

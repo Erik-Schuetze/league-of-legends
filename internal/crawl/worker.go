@@ -18,12 +18,25 @@ import (
 // runs unattended on a development key, and the cost of an idle pass is one
 // query while the cost of a burst is the rest of the day's budget.
 const (
-	DefaultJobBatch       = 20
-	DefaultFrontierBatch  = 20
-	DefaultHistoryCount   = 20
-	DefaultMaxAttempts    = 8
-	DefaultJobTimeout     = 25 * time.Second
-	DefaultRetryBase      = 30 * time.Second
+	DefaultJobBatch      = 20
+	DefaultFrontierBatch = 20
+	DefaultHistoryCount  = 20
+	DefaultMaxAttempts   = 8
+	// DefaultJobTimeout bounds one row's fetch, retries included, and it has to
+	// outlast the slowest call the Riot client will make for that row: one
+	// attempt (riot.DefaultTimeout) plus the wait the client is willing to pay
+	// inside the call when Riot asks to be left alone
+	// (riot.DefaultRetryWaitBudget). A deadline shorter than that would cut a
+	// throttled row off mid-wait and requeue it without the wait ever being
+	// paid, which is the defect the retry budget exists to remove - only moved
+	// one level up. The pair is pinned by
+	// TestJobTimeoutOutlastsTheClientsSlowestCall.
+	DefaultJobTimeout = riot.DefaultTimeout + riot.DefaultRetryWaitBudget + 20*time.Second
+	// DefaultRetryBase is how long a released row waits before its next claim.
+	// It is deliberately on the order of one Riot rate-limit window: the row
+	// left the queue because the key was throttled, so retrying it sooner is
+	// only a way to be throttled again.
+	DefaultRetryBase      = 15 * time.Second
 	DefaultRetryMax       = 30 * time.Minute
 	DefaultPollInterval   = 15 * time.Second
 	DefaultReportInterval = 60 * time.Second
@@ -198,6 +211,19 @@ func (w *Worker) Run(ctx context.Context) error {
 		"max_attempts", w.opts.MaxAttempts,
 		"claim_grace", w.opts.ClaimGrace.String())
 
+	if remaining, declared := w.deps.KeyExpiry.Remaining(w.deps.Now()); declared && remaining > 0 {
+		if remaining < KeyWarnAge {
+			// The declared deadline is the one expiry the operator told us
+			// about, so it is the one worth warning about with hours to spare
+			// rather than at 401.
+			w.deps.Log.Warn("Riot API key expires soon",
+				"expires_at", w.deps.KeyExpiry.At(), "remaining", remaining.String())
+		} else {
+			w.deps.Log.Info("Riot API key expiry declared",
+				"expires_at", w.deps.KeyExpiry.At(), "remaining", remaining.String())
+		}
+	}
+
 	if err := w.recoverClaims(ctx); err != nil {
 		w.deps.Log.Warn("could not reclaim abandoned claims at startup", "err", err)
 	}
@@ -206,6 +232,32 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		if ctx.Err() != nil {
 			return w.shutdown(ctx)
+		}
+		if err := w.keyExpiryError(); err != nil {
+			// A key whose declared deadline has passed is dead: every call
+			// from here is a refusal, and every refusal is a request spent on
+			// nothing. Stopping is the loud half of "fail loudly on an expired
+			// key" - the process exits non-zero with the reason, the supervisor
+			// (a Deployment restart loop or a failed CronJob) records it, and
+			// the last snapshot on the shelf stays exactly as it was rather
+			// than being refreshed from an archive nobody is adding to.
+			//
+			// This is the one exit the idle-on-a-missing-key rule does not
+			// cover, and the difference is what is known. A missing key may
+			// appear at any moment in the watched file, so the loop idles for
+			// it; a declared expiry is a statement that the key is gone, and
+			// idling on it would hide a pipeline that needs an operator.
+			w.deps.Log.Error("Riot API key expired; refusing to crawl",
+				"err", err,
+				"expired_at", w.deps.KeyExpiry.At(),
+				"hint", "rotate the key in secret/lolstats-riot or the configured key file, then restart")
+			// The archive is flushed on the way out. A stop that skipped the
+			// flush would drop the payloads in the open part file, which is
+			// the one thing every other exit path in this loop takes care of.
+			if serr := w.shutdown(ctx); serr != nil {
+				return errors.Join(err, serr)
+			}
+			return err
 		}
 		if w.keyless() {
 			if err := w.Clock().Sleep(ctx, w.opts.PollInterval); err != nil {
@@ -877,6 +929,12 @@ func (w *Worker) shutdown(ctx context.Context) error {
 	}
 	w.deps.Log.Info("crawl worker stopped")
 	return nil
+}
+
+// keyExpiryError reports the declared key deadline once it has passed. The zero
+// value declares nothing and always returns nil.
+func (w *Worker) keyExpiryError() error {
+	return w.deps.KeyExpiry.Check(w.deps.Now())
 }
 
 // keyless reports whether the crawler should idle because there is no key.

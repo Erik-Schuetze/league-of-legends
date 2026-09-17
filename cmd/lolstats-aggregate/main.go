@@ -231,6 +231,84 @@ func (e environment) auditor(aggRoot string) (aggregate.Auditor, error) {
 	return aggregate.StoreAuditor{Store: opened, Log: e.log}, nil
 }
 
+// crawlInputAge reports how old the newest payload in the control plane is.
+//
+// This is the aggregate's only view of whether the crawl is alive, and it is
+// the answer to a question the archive cannot answer: an archive that has not
+// grown is not a quiet night, it is a pipeline that stopped. The control plane
+// knows, because every fetch writes fetched_at - so the nightly build asks
+// before it publishes, and a crawl that stopped (an expired key, a worker
+// that will not start) fails the job loudly and leaves the published snapshot
+// exactly as it was instead of refreshing it from a frozen archive.
+//
+// The connection is opened for this one question and closed again. The build's
+// own connection is owned by the shared aggregate package as an opaque
+// Auditor, and widening that interface would be a change to shared code for a
+// flag in this binary; one dial against a local postgres is the cheaper trade.
+func (e environment) newestFetchedAt(ctx context.Context) (time.Time, bool, error) {
+	if e.cfg.Postgres.DSN == "" {
+		return time.Time{}, false, nil
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, e.cfg.Postgres.ConnTimeout)
+	defer cancel()
+	opened, err := store.Open(dialCtx, store.Options{
+		DSN:         e.cfg.Postgres.DSN,
+		MaxConns:    int(e.cfg.Postgres.MaxConns),
+		ConnTimeout: e.cfg.Postgres.ConnTimeout,
+		Region:      e.cfg.Riot.Region,
+		Metrics:     e.metrics,
+	})
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	defer func() {
+		if cerr := opened.Close(); cerr != nil {
+			e.log.Warn("closing the crawl-freshness connection failed", "error", cerr)
+		}
+	}()
+	return opened.NewestFetchedAt(ctx)
+}
+
+// requireFreshCrawl is the aggregate's half of "never publish a half-crawled
+// snapshot as complete".
+//
+// The build reads the archive, and the archive cannot say whether the crawl
+// writing it is still alive: a stopped crawler and a quiet patch look identical
+// on disk. The control plane can, so the check is a query against fetched_at
+// rather than a scan of the tree, and it fails closed - no DSN is a warning for
+// a developer machine, but a DSN that cannot answer, or a table with nothing
+// recent in it, stops the build. Publishing last night's cells as this
+// morning's snapshot is the one outcome worth stopping for, and "the check
+// could not run" is not a reason to publish.
+func (e environment) requireFreshCrawl(ctx context.Context, maxAge time.Duration) error {
+	if e.cfg.Postgres.DSN == "" {
+		e.log.Warn("no POSTGRES_DSN: the crawl freshness check cannot run",
+			"crawl_max_age", maxAge.String())
+		return nil
+	}
+	newest, ok, err := e.newestFetchedAt(ctx)
+	if err != nil {
+		return fmt.Errorf("checking crawl freshness: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("refusing to publish: the control plane has no fetched payload at all, " +
+			"so this build would publish an archive that nothing is feeding")
+	}
+	age := time.Since(newest)
+	e.log.Info("crawl freshness",
+		"newest_fetched_at", newest.UTC().Format(time.RFC3339),
+		"age", age.Truncate(time.Second).String(),
+		"crawl_max_age", maxAge.String())
+	if age > maxAge {
+		return fmt.Errorf(
+			"refusing to publish: the newest crawled payload is %s old (%s), beyond the %s budget: "+
+				"the crawl has stopped - check the Riot key and the ingest worker - and the published "+
+				"snapshot is left untouched rather than refreshed from a frozen archive",
+			age.Truncate(time.Second), newest.UTC().Format(time.RFC3339), maxAge)
+	}
+	return nil
+}
+
 // statusLine is the one-line summary every subcommand prints to stdout. The
 // CronJob's log is the only place an operator looks after a failed night, so
 // the counts are on the same line as the outcome.
