@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/fs"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -280,4 +281,97 @@ func rowFor(t *testing.T, page string, marker string) string {
 		t.Fatalf("the row carrying %s is not closed", marker)
 	}
 	return page[start : start+end]
+}
+
+// liveSnapshotShape reproduces the one shape the checked-in fixture hides: a
+// manifest whose newest partition lists more champion ids in its index than the
+// cells it published cover. The demo tree has 80 ids and 80 champions with a
+// cell, so "cells published: 141 across N champions" cannot tell the two apart;
+// the published snapshot has 173 ids and 120 champions, where it can.
+func liveSnapshotShape(t *testing.T) string {
+	t.Helper()
+	root := copyFixtureTree(t)
+	manifest := filepath.Join(root, "v1", "manifest.json")
+	document := readJSONDocument(t, manifest)
+	latest, ok := document["latest"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s carries no latest partition", manifest)
+	}
+	champions, ok := latest["champions"].([]any)
+	if !ok {
+		t.Fatalf("%s latest partition carries no champions array", manifest)
+	}
+	for id := 1; len(champions) < 173; id++ {
+		champions = append(champions, json.Number(strconv.Itoa(id)))
+	}
+	latest["champions"] = champions
+	writeJSONDocument(t, manifest, document)
+	return root
+}
+
+// TestAboutCountsPublishedChampionsNotTheIndex pins the champion count on
+// /about to the champions the published cells cover. The reference build reads
+// that count off the manifest's champion index, which is correct on the demo
+// tree by coincidence and wrong on the published snapshot: 130 cells across 173
+// champions is a sentence the artifact contradicts, and a page that shows live
+// cells while overstating how many champions they cover is the honesty failure
+// this tier exists to avoid.
+func TestAboutCountsPublishedChampionsNotTheIndex(t *testing.T) {
+	t.Parallel()
+	root := liveSnapshotShape(t)
+	_, live := newTestServer(t, Options{
+		AggRoot:      root,
+		FixturesMode: FixturesOff,
+		DataDir:      fixtureDataDir(),
+	})
+
+	page := get(t, live, "/about").text()
+	if !strings.Contains(page, "Aggregated cells published: 141 across 80champions") {
+		t.Errorf("/about does not count the champions the cells cover: %s", excerpt(page, "Aggregated cells published"))
+	}
+	if strings.Contains(page, "across 173") {
+		t.Errorf("/about counts the manifest's champion index instead of the published cells: %s",
+			excerpt(page, "Aggregated cells published"))
+	}
+}
+
+// TestAboutFailsClosedWhenItCannotCountChampions is the other half: the count
+// comes from the tier list, so a tier that cannot read it must not print a
+// number it does not have. The published snapshot is the only thing that makes
+// the count differ from the manifest's index, so the failure has to be loud
+// rather than a 200 carrying the index length.
+func TestAboutFailsClosedWhenItCannotCountChampions(t *testing.T) {
+	t.Parallel()
+	root := copyFixtureTree(t)
+	artifact := filepath.Join(root, "v1", "p", "16.18", "EUW", "420", "all", "tierlist.json")
+	if err := os.Remove(artifact); err != nil {
+		t.Fatalf("remove %s: %v", artifact, err)
+	}
+	_, live := newTestServer(t, Options{
+		AggRoot:      root,
+		FixturesMode: FixturesOff,
+		DataDir:      fixtureDataDir(),
+	})
+
+	resp := get(t, live, "/about")
+	if resp.status != http.StatusServiceUnavailable {
+		t.Fatalf("/about status = %d, want %d", resp.status, http.StatusServiceUnavailable)
+	}
+	if page := resp.text(); !strings.Contains(page, `data-fault="artifact"`) {
+		t.Errorf("the 503 page does not name the artifact fault: %s", firstLine(page))
+	}
+}
+
+// excerpt returns the served text around a marker, so a failure message shows
+// the sentence that was actually rendered rather than the whole page.
+func excerpt(text string, marker string) string {
+	index := strings.Index(text, marker)
+	if index < 0 {
+		return firstLine(text)
+	}
+	end := index + 160
+	if end > len(text) {
+		end = len(text)
+	}
+	return text[index:end]
 }

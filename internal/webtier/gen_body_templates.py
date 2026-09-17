@@ -43,9 +43,22 @@ PAGES = {
          '(the window of match timestamps the aggregation covered, not the time it ran)</li>'),
         ('<li>Snapshot generated 2026-09-15 04:10 UTC (the time the aggregate build ran)</li>',
          '<li>Snapshot generated {{ utcStamp .Partition.GeneratedAt }} (the time the aggregate build ran)</li>'),
+        # "across N champions" is the number of champions the published cells
+        # cover, not len(partition.champions): that list is the partition's
+        # champion index, and the two are only equal by coincidence on the demo
+        # fixture (80 = 80). The live snapshot publishes 130 cells across 120
+        # champions while its index lists 173 ids, and "130 cells across 173
+        # champions" is a sentence the artifact contradicts. The port reads the
+        # count off the tier list, which is what the reference build meant.
+        #
+        # The missing space between the count and "champions" is the reference
+        # build's own output - web/dist/about/index.html prints "141 across
+        # 80champions" - so it is reproduced rather than corrected: parity with
+        # the served bytes is this port's contract, and the typo belongs to
+        # web/src/pages/about.astro.
         ('<li>Aggregated cells published: 141 across 80champions; cells withheld for being below the sample threshold: 3</li>',
          '<li>Aggregated cells published: {{ integer .Partition.CellsPublished }} across '
-         '{{ integer (len .Partition.Champions) }}champions; cells withheld for being below the sample threshold: '
+         '{{ integer .ChampionsPublished }}champions; cells withheld for being below the sample threshold: '
          '{{ integer .Partition.SuppressedCells }}</li>'),
         ('<li>Publication threshold: a win, pick or ban rate is published only for a cell holding at least n = 500 games</li>',
          '<li>Publication threshold: a win, pick or ban rate is published only for a cell holding at least '
