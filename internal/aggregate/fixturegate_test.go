@@ -353,6 +353,88 @@ func TestFixtureRoleFallback(t *testing.T) {
 	}
 }
 
+// TestFixtureToleratedRejection pins what an operator-allowance buys and what it
+// does not.
+//
+// The live archive contains rows Riot reports as position-less (teamPosition ""
+// with individualPosition "Invalid", its literal sentinel, in remakes). The
+// gate's escape hatch lets a measured number of those through instead of
+// refusing to publish, but the row still must not be guessed into a role, and
+// the reconciliation of published rows against classified rows must still hold
+// with the tolerated row counted as unclassified. A fix that made the gate
+// green by inventing a role would fail the cell assertions here.
+func TestFixtureToleratedRejection(t *testing.T) {
+	t.Parallel()
+
+	const (
+		team   = 100
+		seat   = 0
+		heroID = 24
+	)
+
+	rawRoot := archiveOf(t, fixtureMatches()[0], func(doc map[string]any) {
+		participant := payloadParticipant(t, doc, team, seat)
+		// Exactly the shape the live archive holds for a remake: the assigned
+		// position is empty and the detected position is Riot's sentinel.
+		participant["teamPosition"] = ""
+		participant["individualPosition"] = "Invalid"
+	})
+
+	aggRoot := t.TempDir()
+	opts := fixtureBuildOptions(t, aggRoot, rawRoot)
+	opts.MinCellN = 1
+	opts.Gates = DefaultGateConfig(1)
+	opts.Gates.MaxRejectedRows = 1
+
+	result, err := Build(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("a tolerated rejection still failed the build: %v", err)
+	}
+	if result.Counts.RejectedRows != 1 {
+		t.Fatalf("rejected_rows = %d, want 1", result.Counts.RejectedRows)
+	}
+	if result.Counts.ClassifiedRows != result.Counts.ParticipantRows-1 {
+		t.Errorf("classified_rows = %d of %d participant rows, want exactly the rejected row removed",
+			result.Counts.ClassifiedRows, result.Counts.ParticipantRows)
+	}
+	if result.Counts.SumN != result.Counts.ClassifiedRows {
+		t.Errorf("cells hold %d rows, want %d: the tolerated row must not appear in a cell",
+			result.Counts.SumN, result.Counts.ClassifiedRows)
+	}
+	if got := championRolesIn(result, heroID); len(got) != 0 {
+		t.Errorf("champion %d was classified as %v from a position-less row, want no cell", heroID, got)
+	}
+	if result.Counts.CellsPublished == 0 {
+		t.Error("no cell survived min_cell_n=1: a tolerated rejection must still publish the rest of the window")
+	}
+}
+
+// TestGateRejectedRowAllowanceIsExact pins the boundary of the allowance: the
+// count is a ceiling, not a threshold.
+func TestGateRejectedRowAllowanceIsExact(t *testing.T) {
+	t.Parallel()
+
+	counts := GateCounts{ArchiveRows: 10, MatchesUsed: 5, ParticipantRows: 10, RejectedRows: 2}
+	cases := []struct {
+		allowed int
+		wantErr bool
+	}{
+		{0, true},
+		{1, true},
+		{2, false},
+		{3, false},
+	}
+
+	for _, tc := range cases {
+		cfg := DefaultGateConfig(1)
+		cfg.MaxRejectedRows = tc.allowed
+		err := counts.CheckInput(cfg)
+		if gotErr := errors.Is(err, ErrRejectedRows); gotErr != tc.wantErr {
+			t.Errorf("allowed = %d: ErrRejectedRows = %v (%v), want %v", tc.allowed, gotErr, err, tc.wantErr)
+		}
+	}
+}
+
 // TestFixtureRoleFallbackOnTheDetectedField pins the fallback against the real
 // archive rather than against an edited payload.
 //

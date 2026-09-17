@@ -35,6 +35,16 @@ func (s *buildState) checkInputGates() error {
 		RejectedRows:    s.windowStats.RejectedRows,
 		ClassifiedRows:  s.windowStats.ParticipantRows - s.windowStats.RejectedRows,
 	}
+	// A tolerated rejection is exactly the kind of thing that must not be
+	// silent: the published rates are computed without those rows, so the count
+	// and the allowance belong in the run's log next to the rates they affect.
+	if s.windowStats.RejectedRows > 0 {
+		s.opts.Log.Warn("participant rows lack a champion or a role",
+			"rejected_rows", s.windowStats.RejectedRows,
+			"participant_rows", s.windowStats.ParticipantRows,
+			"allowed", s.opts.Gates.MaxRejectedRows,
+			"reason", "Riot reported no usable position; the rows are excluded from every cell")
+	}
 	return s.counts.CheckInput(s.opts.Gates)
 }
 

@@ -308,7 +308,7 @@ host - has since been fixed in `internal/aggregate/engine.go`: every statement i
 with `memory_limit`, `threads`, a spill `temp_directory` and `max_temp_directory_size`,
 the spill directory is probed at open so an unwritable one fails loudly, and the CLI runs
 `-bail` so a rejected `SET` cannot fall back to the host default. `deploy/base/config.yaml`
-ships `LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT: 1GiB`, `THREADS: "2"`, `TEMP_DIR: /tmp`,
+ships `LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT: 2GiB`, `THREADS: "2"`, `TEMP_DIR: /tmp`,
 `MAX_TEMP_SIZE: 10GiB`, and the pod is `readOnlyRootFilesystem: true` with an `emptyDir`
 at `/tmp`. **The fix is real and it is in force.** It also did not settle the gate, and
 this sub-section is a re-run of the gate rather than a review of the fix: what follows is
