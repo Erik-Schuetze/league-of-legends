@@ -21,7 +21,7 @@ base/                     what the service is
   storage/pvc.yaml        the RWX data volume
   postgres/               independent Postgres: StatefulSet, Service, PVC
   ingest/                 the long-running worker
-  jobs/                   the scheduled jobs
+  jobs/                   the scheduled jobs, and the PreSync migration hook
   web/                    Caddy config, Deployment, Service
   network/                default-deny and the exceptions to it
 overlays/homelab/         what is different about this cluster
@@ -113,6 +113,101 @@ What "no Riot key" actually means, because the answer is not uniform:
 If the requirement is that `lolstats-ingest` itself be green with no key, that is
 a change in `cmd/lolstats-ingest` (an idle mode that serves metrics), not a
 change here.
+
+## Migrations
+
+The schema comes from `sql/migrations/`, is applied by
+`lolstats-ingest migrate up`, and is applied **from this directory** by
+`base/jobs/migrate.yaml` - an ArgoCD `PreSync` hook. Nothing else creates a
+table: there is no `schema.sql` to load by hand and no init script on the
+Postgres pod, so a cluster whose `lolstats` database has no `schema_migrations`
+table has simply never run the hook.
+
+### Why a PreSync hook
+
+Two properties are wanted at once, and only this shape gives both.
+
+**Ordering.** A PreSync hook runs to completion before ArgoCD applies anything
+else in this directory, so no workload can start against a schema that is behind
+the binary. The alternative - an initContainer on the workloads that touch
+Postgres - orders startup just as well, but it has to be replicated into the
+ingest Deployment and all seven job templates, and it makes a Postgres that is
+briefly unreachable into a crash-loop of every workload rather than one failed
+hook that says what went wrong.
+
+**Not being a Job.** `batch/v1` Jobs are effectively immutable: once the
+controller has run one, an edit to its pod template is rejected by the API
+server. A plain Job in this tree would leave ArgoCD reporting a permanent diff
+the first time the migration command, image or resources changed, and - the
+worse half - an *unchanged* Job does not run again on a later sync. The hook
+carries `argocd.argoproj.io/hook-delete-policy: BeforeHookCreation`, so ArgoCD
+deletes the previous hook Job before creating the new one. A changed spec
+therefore applies cleanly and an unchanged one still re-runs. It is `PreSync`
+with `BeforeHookCreation` and deliberately *not* `HookSucceeded`, because a Job
+that is deleted on success is gone before the operator can read its logs, and it
+would still be the immutable object ArgoCD tries to re-create on the next sync.
+
+**Re-running every sync is safe and cheap.** `internal/store/migrate.go` takes a
+session advisory lock (`pg_advisory_lock`, key `0x10646c6f6c73` - `lols`) for
+the whole run, so the hook cannot interleave with itself, with another hook, or
+with the imperative `make migrate` below. It keeps a `schema_migrations` ledger
+of `(version, name, sha256 checksum, applied_at)`, it re-verifies each applied
+checksum before running anything and refuses to proceed on a mismatch, and it
+commits each migration body atomically with its ledger row. A run with nothing
+new to do is one round trip and logs `migrations up: schema is already current`.
+It is forward-only: there is no `migrate down`, so rolling back means writing a
+new migration.
+
+### The proof
+
+Run in the `lolstats` namespace on 2026-09-17, starting from a database with
+zero rows in `pg_tables`:
+
+```
+$ kubectl -n lolstats exec deploy/lolstats-ingest -- /lolstats-ingest migrate up
+{"level":"INFO","msg":"migrations up: schema updated","versions":[1,2,3]}
+
+$ kubectl -n lolstats exec lolstats-postgres-0 -- psql -U lolstats -d lolstats -tAc \
+    "select tablename from pg_tables where schemaname='public' order by 1"
+build_runs crawl_frontier crawl_seeds fetch_queue matches schema_migrations source_toggles
+
+$ kubectl -n lolstats exec deploy/lolstats-ingest -- /lolstats-ingest migrate up
+{"level":"INFO","msg":"migrations up: schema is already current"}
+$ # same seven tables, ledger still (1,'init'),(2,'ingest'),(3,'revival_budget')
+```
+
+The same thing through the hook, which is what a sync does:
+
+```
+$ kubectl kustomize deploy/overlays/homelab | \
+    awk 'BEGIN{RS="\n---\n"} /name: lolstats-migrate/' | kubectl apply -f -
+job.batch/lolstats-migrate created
+$ kubectl -n lolstats wait --for=condition=Complete job/lolstats-migrate --timeout=300s
+job.batch/lolstats-migrate condition met
+$ kubectl -n lolstats logs job/lolstats-migrate
+{"level":"INFO","msg":"migrations up: schema is already current"}
+```
+
+### Running it now, without a sync
+
+`make migrate` applies the hook Job on its own, for the case where the schema
+has to move *now* rather than at the next sync. The hook is an ordinary Job
+object when it is applied by hand, it is idempotent, and applying it twice is a
+no-op - `ttlSecondsAfterFinished: 86400` removes it a day later. Because
+ArgoCD skips resources it has classified as hooks when it is not running that
+phase, a hand-applied hook is not tracked by the Application either; it will not
+be pruned and it must be deleted if it is no longer wanted.
+
+### Adding a migration
+
+Put the `.sql` file in `sql/migrations/`, where the naming (
+`NNNN_name.up.sql`) and the checksum ledger are enforced by
+`internal/store/migrate.go`, and note the trigger problem: the `.sql` files are
+embedded in the *image*, not copied from this repository by ArgoCD, so adding
+one produces no diff in this Application's rendered manifests and therefore no
+sync. The hook re-runs on any sync the change does produce, and the thing that
+produces one today is the `latest` re-pull; once the images are pinned by digest
+(see Open TODOs) it is the digest bump that ships the new binary.
 
 ## Data
 

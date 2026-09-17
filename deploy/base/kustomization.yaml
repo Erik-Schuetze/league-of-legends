@@ -10,6 +10,12 @@ resources:
   - namespace.yaml
   - config.yaml
 
+  # The PreSync hook that puts the schema on the floor before any of the rest of
+  # this is applied. It is listed first because it is the first thing that runs,
+  # not because order matters to kustomize. See the file itself, and
+  # deploy/README.md section Migrations.
+  - jobs/migrate.yaml
+
   # The two volumes. The file archive is shared and lives on the overlay's RWX
   # storage class; Postgres gets its own block volume.
   - storage/pvc.yaml
