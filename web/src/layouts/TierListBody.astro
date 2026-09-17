@@ -1,0 +1,207 @@
+---
+// The body of a tier-list page, shared by /tier-list/<role> and
+// /patch/<version>/tier-list/<role> so the two routes cannot drift: the same
+// artifact, the same filtering, the same table, the same notices.
+//
+// The tier list is published as one artifact per partition and filtered by role
+// here, which is why the role is a view of a snapshot rather than a snapshot of
+// its own. The table is server-rendered in full by whichever component is
+// available, so the page reads correctly with JavaScript disabled.
+
+import EmptyState from './EmptyState.astro';
+import FallbackDataTable from './fallback/DataTable.astro';
+import JsonLd from './JsonLd.astro';
+import PatchSwitcher from './PatchSwitcher.astro';
+import SampleSizeNotice from './fallback/SampleSizeNotice.astro';
+import TierBadge from './fallback/TierBadge.astro';
+import type { Role, StaticChampion, TierList } from '../types/agg';
+import { utcStamp, windowLabel } from '../lib/format';
+import { cellAvailability } from '../lib/artifacts';
+import { componentOr, optionalComponent } from '../lib/components';
+import { roleLabel, roleSlug } from '../lib/roles';
+import { championLinks, columnAvailabilityNote, tierListColumns, tierListRows } from '../lib/rows';
+import { emptyReason, type Snapshot } from '../lib/page';
+import { jsonLdDataset } from '../lib/seo';
+
+interface Props {
+  snap: Snapshot;
+  role: Role;
+  tierList: TierList | null;
+  url: string;
+}
+
+const { snap, role, tierList, url } = Astro.props;
+const slug = roleSlug(role);
+const label = roleLabel(role);
+const partition = snap.partition;
+const minCellN = tierList?.min_cell_n ?? partition?.min_cell_n ?? 0;
+const suppressedCells = tierList?.suppressed_cells ?? partition?.suppressed_cells ?? null;
+
+// docs/contracts.md section 3 gives TableIsland to the tier-list routes. It is
+// an .astro component, so it renders on the server and needs no client
+// directive to be readable; when it is not on disk, DataTable renders the same
+// rows from the same values.
+const TableIsland = await optionalComponent('TableIsland');
+const DataTable = await componentOr('DataTable', FallbackDataTable);
+
+const allCells = tierList ? tierList.cells.filter((cell) => cell.role === role) : [];
+
+// A cell that holds no games has no win rate and therefore no tier that means
+// anything, so it is not ranked here and counted out loud instead. Ranking it
+// would print a grade next to n = 0, which is a claim the snapshot cannot back.
+const measured = allCells.filter((cell) => Number.isFinite(cell.n) && cell.n > 0);
+const unmeasured = allCells.length - measured.length;
+
+const published = measured.filter((cell) => cellAvailability(cell, minCellN) === 'published');
+const cellGames = published.reduce((total, cell) => total + cell.n, 0);
+
+const table = tierList && unmeasured > 0 ? { ...tierList, cells: measured } : tierList;
+
+const rows = table ? tierListRows(measured, snap.site, minCellN, false) : [];
+const columns = tierListColumns(false);
+
+// Only champions this build can name get a link, so a champion missing from the
+// static data cannot produce a link to a page that would not exist.
+const linkedChampions: StaticChampion[] = [];
+const seen = new Set<number>();
+for (const cell of measured) {
+  const champion = snap.site.championById.get(cell.champion_id);
+  if (champion && !seen.has(champion.id)) {
+    seen.add(champion.id);
+    linkedChampions.push(champion);
+  }
+}
+
+const hasSample = table !== null && measured.length > 0;
+---
+
+<article>
+  <h1>{label} tier list{partition ? `, patch ${partition.patch}` : ''}</h1>
+  <p>
+    {
+      partition
+        ? `Every champion that was played in ${label.toLowerCase()} during the source window below, with the number of games each rate was measured over.`
+        : `This page will show every champion played in ${label.toLowerCase()} as soon as a snapshot is published.`
+    }
+  </p>
+
+  {
+    partition ? (
+      <p>
+        Patch <strong>{partition.patch}</strong> &middot; {partition.region} &middot; queue {partition.queue} &middot;
+        bracket {partition.bracket} &middot; source window{' '}
+        {windowLabel(partition.source_window.from, partition.source_window.to)} &middot; generated{' '}
+        {utcStamp(partition.generated_at)}
+      </p>
+    ) : null
+  }
+
+  <h2>Patch</h2>
+  <PatchSwitcher patches={snap.patches} role={slug} active={snap.patch} />
+
+  {
+    hasSample ? (
+      <>
+        <SampleSizeNotice n={cellGames} minCellN={minCellN} suppressedCells={suppressedCells} role={role} />
+        <p>
+          n above is the sum of the game counts of the published cells in this table, so it counts matches rather than
+          players: champions whose cells fall below the threshold are withheld by the aggregator and are not counted in
+          it.
+        </p>
+        {TableIsland ? (
+          <TableIsland
+            tierList={table}
+            champions={snap.site.champions}
+            role={role}
+            initialSortKey="win_rate"
+            initialSortDir="desc"
+          />
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            caption={`${label} tier list, patch ${snap.patch}`}
+            initialSortKey="win_rate"
+            initialSortDir="desc"
+            emptyMessage={`No champion has a published cell in ${label.toLowerCase()} in this snapshot.`}
+          />
+        )}
+        <p>{columnAvailabilityNote(minCellN, suppressedCells)}</p>
+        {
+          unmeasured > 0 ? (
+            <p>
+              {unmeasured === 1 ? 'One cell' : `${unmeasured} cells`} in this snapshot {unmeasured === 1 ? 'holds' : 'hold'}{' '}
+              no games yet (n = 0), so {unmeasured === 1 ? 'it is' : 'they are'} not ranked here: a grade beside an empty
+              cell would be a claim the snapshot cannot support. Their champion pages report no sample rather than a rate.
+            </p>
+          ) : null
+        }
+        <p>
+          Tier order is derived from win and pick rate together; the letters are a reading aid, not an official ranking.{' '}
+          <TierBadge tier="S+" /> marks the strongest cells in a snapshot.
+        </p>
+
+        <h2>Champion pages in {label.toLowerCase()}</h2>
+        <ul class="fallback-champion-links">
+          {
+            championLinks(linkedChampions, slug).map((link) => (
+              <li>
+                <a href={link.href}>{link.name}</a>
+              </li>
+            ))
+          }
+        </ul>
+      </>
+    ) : (
+      <EmptyState
+        title={partition ? `No ${label.toLowerCase()} cells published` : 'No sample yet'}
+        body={
+          partition
+            ? `The snapshot for patch ${partition.patch} has no tier list artifact for this selection, so this page shows nothing rather than an estimate.`
+            : emptyReason(snap)
+        }
+        minCellN={partition?.min_cell_n ?? null}
+      />
+    )
+  }
+
+  <h2>What this table is</h2>
+  <p>
+    Each row is one champion in {label.toLowerCase()}, measured over the source window above and only over matches in
+    ranked solo queue in the {partition?.region ?? 'published'} region. Win rate is wins divided by games played in that
+    role; pick rate is how often the champion was chosen for the role; ban rate is how often it was unavailable. The 95%
+    interval is printed next to each rate because a rate over a few hundred games and the same rate over tens of
+    thousands are different claims.
+  </p>
+
+  {
+    tierList && partition ? (
+      <JsonLd
+        value={jsonLdDataset({
+          url,
+          name: `${label} tier list, League of Legends patch ${partition.patch}`,
+          description:
+            `Per-champion win, pick and ban rates for ${label.toLowerCase()} in ${partition.region} ranked solo queue, ` +
+            `patch ${partition.patch}, measured over ${windowLabel(partition.source_window.from, partition.source_window.to)}.`,
+          patch: partition.patch,
+          sourceWindow: partition.source_window,
+          generatedAt: partition.generated_at,
+          minCellN,
+          sampleSize: cellGames,
+          variables: [
+            { name: 'games played (n)', unit: 'games' },
+            { name: 'win rate', unit: 'win rate' },
+            { name: 'pick rate', unit: 'pick rate' },
+            { name: 'ban rate', unit: 'ban rate' },
+            { name: '95% confidence half-width', unit: 'percentage points' },
+          ],
+        })}
+      />
+    ) : null
+  }
+
+  <p>
+    <a href="/">All roles</a> &middot; <a href={`/matchups/${slug}`}>{label} matchups</a> &middot;{' '}
+    <a href="/about">How these numbers are produced</a>
+  </p>
+</article>

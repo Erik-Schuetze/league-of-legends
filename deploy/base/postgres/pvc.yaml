@@ -1,0 +1,22 @@
+# Postgres keeps its own volume: it is a database, not a file share, and it
+# wants low-latency block storage rather than an NFS mount. 5 Gi is generous
+# for a control plane that holds match ids, a crawl frontier and a job queue -
+# no match payload and no aggregate ever lands here.
+#
+# Same reasoning as the data volume for `Delete=false`: losing this volume
+# loses crawl state that is expensive to rebuild, and no manifest accident
+# should be able to do that.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lolstats-postgres-data
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+  labels:
+    app.kubernetes.io/component: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

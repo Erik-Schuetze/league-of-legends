@@ -1,0 +1,1560 @@
+{
+  "schema": 1,
+  "source": "demo",
+  "patch": "16.18",
+  "region": "EUW",
+  "queue": 420,
+  "bracket": "all",
+  "generated_at": "2026-09-15T04:10:00Z",
+  "source_window": {
+    "from": "2026-09-08T00:00:00Z",
+    "to": "2026-09-14T23:59:59Z"
+  },
+  "min_cell_n": 500,
+  "suppressed_cells": 2,
+  "role": "MID",
+  "champions": [
+    1,
+    3,
+    5,
+    7,
+    9,
+    11,
+    13,
+    15,
+    17,
+    19,
+    21,
+    23,
+    25,
+    27,
+    29,
+    31,
+    33,
+    35,
+    37,
+    39
+  ],
+  "cells": [
+    {
+      "champion_id": 1,
+      "opponent_id": 3,
+      "n": 1562,
+      "wins": 856,
+      "win_rate": 0.5480153649167734,
+      "ci95_half_width": 0.0247
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 5,
+      "n": 1226,
+      "wins": 665,
+      "win_rate": 0.5424143556280587,
+      "ci95_half_width": 0.0279
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 7,
+      "n": 1338,
+      "wins": 729,
+      "win_rate": 0.5448430493273543,
+      "ci95_half_width": 0.0267
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 9,
+      "n": 1002,
+      "wins": 540,
+      "win_rate": 0.5389221556886228,
+      "ci95_half_width": 0.0309
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 11,
+      "n": 973,
+      "wins": 414,
+      "win_rate": 0.42548818088386436,
+      "ci95_half_width": 0.0311
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 13,
+      "n": 861,
+      "wins": 365,
+      "win_rate": 0.42392566782810687,
+      "ci95_half_width": 0.033
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 15,
+      "n": 749,
+      "wins": 316,
+      "win_rate": 0.4218958611481976,
+      "ci95_half_width": 0.0354
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 17,
+      "n": 637,
+      "wins": 267,
+      "win_rate": 0.41915227629513346,
+      "ci95_half_width": 0.0383
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 19,
+      "n": 1421,
+      "wins": 615,
+      "win_rate": 0.4327938071780436,
+      "ci95_half_width": 0.0258
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 21,
+      "n": 444,
+      "wins": 245,
+      "win_rate": 0.5518018018018018,
+      "ci95_half_width": 0.0463
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 23,
+      "n": 332,
+      "wins": 183,
+      "win_rate": 0.5512048192771084,
+      "ci95_half_width": 0.0535
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 25,
+      "n": 668,
+      "wins": 372,
+      "win_rate": 0.5568862275449101,
+      "ci95_half_width": 0.0377
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 27,
+      "n": 556,
+      "wins": 308,
+      "win_rate": 0.5539568345323741,
+      "ci95_half_width": 0.0413
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 29,
+      "n": 3877,
+      "wins": 2114,
+      "win_rate": 0.545266958988909,
+      "ci95_half_width": 0.0157
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 31,
+      "n": 285,
+      "wins": 159,
+      "win_rate": 0.5578947368421052,
+      "ci95_half_width": 0.0577
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 33,
+      "n": 397,
+      "wins": 222,
+      "win_rate": 0.5591939546599496,
+      "ci95_half_width": 0.0488
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 35,
+      "n": 3942,
+      "wins": 2179,
+      "win_rate": 0.5527650938609843,
+      "ci95_half_width": 0.0155
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 37,
+      "n": 173,
+      "wins": 96,
+      "win_rate": 0.5549132947976878,
+      "ci95_half_width": 0.0741
+    },
+    {
+      "champion_id": 1,
+      "opponent_id": 39,
+      "n": 3718,
+      "wins": 2042,
+      "win_rate": 0.5492200107584723,
+      "ci95_half_width": 0.016
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 5,
+      "n": 1877,
+      "wins": 841,
+      "win_rate": 0.44805540756526374,
+      "ci95_half_width": 0.0225
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 7,
+      "n": 1765,
+      "wins": 787,
+      "win_rate": 0.44589235127478755,
+      "ci95_half_width": 0.0232
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 9,
+      "n": 2549,
+      "wins": 1170,
+      "win_rate": 0.4590035307963907,
+      "ci95_half_width": 0.0193
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 11,
+      "n": 3566,
+      "wins": 1907,
+      "win_rate": 0.5347728547392036,
+      "ci95_half_width": 0.0164
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 13,
+      "n": 3678,
+      "wins": 1974,
+      "win_rate": 0.5367047308319739,
+      "ci95_half_width": 0.0161
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 15,
+      "n": 3342,
+      "wins": 1775,
+      "win_rate": 0.5311190903650509,
+      "ci95_half_width": 0.0169
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 17,
+      "n": 3454,
+      "wins": 1841,
+      "win_rate": 0.5330052113491603,
+      "ci95_half_width": 0.0166
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 19,
+      "n": 133,
+      "wins": 72,
+      "win_rate": 0.5413533834586466,
+      "ci95_half_width": 0.0847
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 21,
+      "n": 2324,
+      "wins": 999,
+      "win_rate": 0.42986230636833045,
+      "ci95_half_width": 0.0201
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 23,
+      "n": 2436,
+      "wins": 1052,
+      "win_rate": 0.4318555008210181,
+      "ci95_half_width": 0.0197
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 25,
+      "n": 2100,
+      "wins": 895,
+      "win_rate": 0.4261904761904762,
+      "ci95_half_width": 0.0212
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 27,
+      "n": 2212,
+      "wins": 947,
+      "win_rate": 0.428119349005425,
+      "ci95_half_width": 0.0206
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 29,
+      "n": 1876,
+      "wins": 792,
+      "win_rate": 0.42217484008528783,
+      "ci95_half_width": 0.0224
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 31,
+      "n": 2165,
+      "wins": 939,
+      "win_rate": 0.43371824480369514,
+      "ci95_half_width": 0.0209
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 33,
+      "n": 2053,
+      "wins": 886,
+      "win_rate": 0.43156356551388214,
+      "ci95_half_width": 0.0214
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 35,
+      "n": 1941,
+      "wins": 834,
+      "win_rate": 0.42967542503863987,
+      "ci95_half_width": 0.022
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 37,
+      "n": 1829,
+      "wins": 783,
+      "win_rate": 0.42810278840896665,
+      "ci95_half_width": 0.0227
+    },
+    {
+      "champion_id": 3,
+      "opponent_id": 39,
+      "n": 1717,
+      "wins": 732,
+      "win_rate": 0.4263249854397204,
+      "ci95_half_width": 0.0234
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 7,
+      "n": 1487,
+      "wins": 680,
+      "win_rate": 0.45729657027572296,
+      "ci95_half_width": 0.0253
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 9,
+      "n": 1599,
+      "wins": 735,
+      "win_rate": 0.4596622889305816,
+      "ci95_half_width": 0.0244
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 11,
+      "n": 1506,
+      "wins": 918,
+      "win_rate": 0.6095617529880478,
+      "ci95_half_width": 0.0246
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 13,
+      "n": 1394,
+      "wins": 847,
+      "win_rate": 0.6076040172166427,
+      "ci95_half_width": 0.0256
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 15,
+      "n": 1730,
+      "wins": 1061,
+      "win_rate": 0.6132947976878613,
+      "ci95_half_width": 0.0229
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 17,
+      "n": 1618,
+      "wins": 990,
+      "win_rate": 0.6118665018541409,
+      "ci95_half_width": 0.0237
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 19,
+      "n": 1954,
+      "wins": 1206,
+      "win_rate": 0.617195496417605,
+      "ci95_half_width": 0.0216
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 21,
+      "n": 1571,
+      "wins": 970,
+      "win_rate": 0.6174411203055379,
+      "ci95_half_width": 0.024
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 23,
+      "n": 1459,
+      "wins": 898,
+      "win_rate": 0.6154900616860863,
+      "ci95_half_width": 0.025
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 25,
+      "n": 1347,
+      "wins": 827,
+      "win_rate": 0.6139569413511508,
+      "ci95_half_width": 0.026
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 27,
+      "n": 1235,
+      "wins": 755,
+      "win_rate": 0.611336032388664,
+      "ci95_half_width": 0.0272
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 29,
+      "n": 1588,
+      "wins": 611,
+      "win_rate": 0.38476070528967254,
+      "ci95_half_width": 0.0239
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 31,
+      "n": 387,
+      "wins": 194,
+      "win_rate": 0.5012919896640827,
+      "ci95_half_width": 0.0498
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 33,
+      "n": 499,
+      "wins": 251,
+      "win_rate": 0.503006012024048,
+      "ci95_half_width": 0.0439
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 35,
+      "n": 611,
+      "wins": 308,
+      "win_rate": 0.5040916530278232,
+      "ci95_half_width": 0.0396
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 37,
+      "n": 723,
+      "wins": 366,
+      "win_rate": 0.5062240663900415,
+      "ci95_half_width": 0.0364
+    },
+    {
+      "champion_id": 5,
+      "opponent_id": 39,
+      "n": 3820,
+      "wins": 1886,
+      "win_rate": 0.493717277486911,
+      "ci95_half_width": 0.0159
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 9,
+      "n": 1973,
+      "wins": 1223,
+      "win_rate": 0.6198682209832742,
+      "ci95_half_width": 0.0214
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 11,
+      "n": 2888,
+      "wins": 1595,
+      "win_rate": 0.5522853185595568,
+      "ci95_half_width": 0.0181
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 13,
+      "n": 3000,
+      "wins": 1663,
+      "win_rate": 0.5543333333333333,
+      "ci95_half_width": 0.0178
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 15,
+      "n": 3112,
+      "wins": 1731,
+      "win_rate": 0.5562339331619537,
+      "ci95_half_width": 0.0175
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 17,
+      "n": 3224,
+      "wins": 1799,
+      "win_rate": 0.5580024813895782,
+      "ci95_half_width": 0.0171
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 19,
+      "n": 3336,
+      "wins": 1868,
+      "win_rate": 0.5599520383693045,
+      "ci95_half_width": 0.0168
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 21,
+      "n": 1646,
+      "wins": 736,
+      "win_rate": 0.4471445929526124,
+      "ci95_half_width": 0.024
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 23,
+      "n": 1758,
+      "wins": 790,
+      "win_rate": 0.44937428896473264,
+      "ci95_half_width": 0.0233
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 25,
+      "n": 1870,
+      "wins": 844,
+      "win_rate": 0.45133689839572194,
+      "ci95_half_width": 0.0226
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 27,
+      "n": 1982,
+      "wins": 898,
+      "win_rate": 0.4530776992936428,
+      "ci95_half_width": 0.0219
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 29,
+      "n": 1198,
+      "wins": 527,
+      "win_rate": 0.43989983305509184,
+      "ci95_half_width": 0.0281
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 31,
+      "n": 1487,
+      "wins": 671,
+      "win_rate": 0.4512441156691325,
+      "ci95_half_width": 0.0253
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 33,
+      "n": 1375,
+      "wins": 618,
+      "win_rate": 0.44945454545454544,
+      "ci95_half_width": 0.0263
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 35,
+      "n": 1711,
+      "wins": 778,
+      "win_rate": 0.4547048509643483,
+      "ci95_half_width": 0.0236
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 37,
+      "n": 1599,
+      "wins": 724,
+      "win_rate": 0.4527829893683552,
+      "ci95_half_width": 0.0244
+    },
+    {
+      "champion_id": 7,
+      "opponent_id": 39,
+      "n": 1039,
+      "wins": 461,
+      "win_rate": 0.4436958614051973,
+      "ci95_half_width": 0.0302
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 11,
+      "n": 1452,
+      "wins": 850,
+      "win_rate": 0.5853994490358126,
+      "ci95_half_width": 0.0253
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 13,
+      "n": 1340,
+      "wins": 782,
+      "win_rate": 0.5835820895522388,
+      "ci95_half_width": 0.0264
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 15,
+      "n": 1228,
+      "wins": 714,
+      "win_rate": 0.5814332247557004,
+      "ci95_half_width": 0.0276
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 17,
+      "n": 1116,
+      "wins": 647,
+      "win_rate": 0.5797491039426523,
+      "ci95_half_width": 0.029
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 19,
+      "n": 1004,
+      "wins": 580,
+      "win_rate": 0.5776892430278885,
+      "ci95_half_width": 0.0306
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 21,
+      "n": 2581,
+      "wins": 1143,
+      "win_rate": 0.4428516079039132,
+      "ci95_half_width": 0.0192
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 23,
+      "n": 2469,
+      "wins": 1089,
+      "win_rate": 0.44106925880923453,
+      "ci95_half_width": 0.0196
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 25,
+      "n": 2805,
+      "wins": 1253,
+      "win_rate": 0.4467023172905526,
+      "ci95_half_width": 0.0184
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 27,
+      "n": 2693,
+      "wins": 1198,
+      "win_rate": 0.44485703676197547,
+      "ci95_half_width": 0.0188
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 29,
+      "n": 3029,
+      "wins": 1364,
+      "win_rate": 0.4503136348629911,
+      "ci95_half_width": 0.0177
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 31,
+      "n": 2422,
+      "wins": 1082,
+      "win_rate": 0.4467382328654005,
+      "ci95_half_width": 0.0198
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 33,
+      "n": 2534,
+      "wins": 1137,
+      "win_rate": 0.44869771112865037,
+      "ci95_half_width": 0.0194
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 35,
+      "n": 2198,
+      "wins": 974,
+      "win_rate": 0.44313011828935395,
+      "ci95_half_width": 0.0208
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 37,
+      "n": 2310,
+      "wins": 1027,
+      "win_rate": 0.4445887445887446,
+      "ci95_half_width": 0.0203
+    },
+    {
+      "champion_id": 9,
+      "opponent_id": 39,
+      "n": 2870,
+      "wins": 1304,
+      "win_rate": 0.4543554006968641,
+      "ci95_half_width": 0.0182
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 13,
+      "n": 856,
+      "wins": 436,
+      "win_rate": 0.5093457943925234,
+      "ci95_half_width": 0.0335
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 15,
+      "n": 520,
+      "wins": 262,
+      "win_rate": 0.5038461538461538,
+      "ci95_half_width": 0.043
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 17,
+      "n": 632,
+      "wins": 319,
+      "win_rate": 0.504746835443038,
+      "ci95_half_width": 0.039
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 19,
+      "n": 296,
+      "wins": 148,
+      "win_rate": 0.5,
+      "ci95_half_width": 0.057
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 21,
+      "n": 1986,
+      "wins": 1216,
+      "win_rate": 0.6122860020140987,
+      "ci95_half_width": 0.0214
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 23,
+      "n": 2098,
+      "wins": 1289,
+      "win_rate": 0.6143946615824595,
+      "ci95_half_width": 0.0208
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 25,
+      "n": 1762,
+      "wins": 1073,
+      "win_rate": 0.6089670828603859,
+      "ci95_half_width": 0.0228
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 27,
+      "n": 1874,
+      "wins": 1144,
+      "win_rate": 0.6104589114194237,
+      "ci95_half_width": 0.0221
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 29,
+      "n": 2434,
+      "wins": 1509,
+      "win_rate": 0.6199671322925226,
+      "ci95_half_width": 0.0193
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 31,
+      "n": 2145,
+      "wins": 1305,
+      "win_rate": 0.6083916083916084,
+      "ci95_half_width": 0.0207
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 33,
+      "n": 2033,
+      "wins": 1234,
+      "win_rate": 0.6069847515986228,
+      "ci95_half_width": 0.0212
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 35,
+      "n": 2369,
+      "wins": 1451,
+      "win_rate": 0.6124947235120304,
+      "ci95_half_width": 0.0196
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 37,
+      "n": 2257,
+      "wins": 1378,
+      "win_rate": 0.6105449712007089,
+      "ci95_half_width": 0.0201
+    },
+    {
+      "champion_id": 11,
+      "opponent_id": 39,
+      "n": 2593,
+      "wins": 1598,
+      "win_rate": 0.6162745854222907,
+      "ci95_half_width": 0.0187
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 15,
+      "n": 548,
+      "wins": 260,
+      "win_rate": 0.4744525547445255,
+      "ci95_half_width": 0.0418
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 17,
+      "n": 436,
+      "wins": 206,
+      "win_rate": 0.4724770642201835,
+      "ci95_half_width": 0.0469
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 19,
+      "n": 772,
+      "wins": 369,
+      "win_rate": 0.47797927461139894,
+      "ci95_half_width": 0.0352
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 21,
+      "n": 2051,
+      "wins": 1011,
+      "win_rate": 0.4929302779132131,
+      "ci95_half_width": 0.0216
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 23,
+      "n": 1939,
+      "wins": 952,
+      "win_rate": 0.49097472924187724,
+      "ci95_half_width": 0.0223
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 25,
+      "n": 1827,
+      "wins": 894,
+      "win_rate": 0.48932676518883417,
+      "ci95_half_width": 0.0229
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 27,
+      "n": 1715,
+      "wins": 836,
+      "win_rate": 0.48746355685131193,
+      "ci95_half_width": 0.0237
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 29,
+      "n": 1603,
+      "wins": 778,
+      "win_rate": 0.48533998752339363,
+      "ci95_half_width": 0.0245
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 31,
+      "n": 3235,
+      "wins": 1970,
+      "win_rate": 0.6089644513137558,
+      "ci95_half_width": 0.0168
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 33,
+      "n": 3347,
+      "wins": 2045,
+      "win_rate": 0.610994920824619,
+      "ci95_half_width": 0.0165
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 35,
+      "n": 3011,
+      "wins": 1823,
+      "win_rate": 0.6054466954500166,
+      "ci95_half_width": 0.0175
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 37,
+      "n": 3123,
+      "wins": 1896,
+      "win_rate": 0.6071085494716618,
+      "ci95_half_width": 0.0171
+    },
+    {
+      "champion_id": 13,
+      "opponent_id": 39,
+      "n": 2787,
+      "wins": 1677,
+      "win_rate": 0.6017222820236814,
+      "ci95_half_width": 0.0182
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 17,
+      "n": 3847,
+      "wins": 1791,
+      "win_rate": 0.46555757733298675,
+      "ci95_half_width": 0.0158
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 19,
+      "n": 3959,
+      "wins": 1851,
+      "win_rate": 0.467542308663804,
+      "ci95_half_width": 0.0155
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 21,
+      "n": 2664,
+      "wins": 1585,
+      "win_rate": 0.59496996996997,
+      "ci95_half_width": 0.0186
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 23,
+      "n": 2776,
+      "wins": 1657,
+      "win_rate": 0.5969020172910663,
+      "ci95_half_width": 0.0182
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 25,
+      "n": 2888,
+      "wins": 1729,
+      "win_rate": 0.5986842105263158,
+      "ci95_half_width": 0.0179
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 27,
+      "n": 3000,
+      "wins": 1802,
+      "win_rate": 0.6006666666666667,
+      "ci95_half_width": 0.0175
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 29,
+      "n": 2216,
+      "wins": 1302,
+      "win_rate": 0.5875451263537906,
+      "ci95_half_width": 0.0205
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 31,
+      "n": 2823,
+      "wins": 1669,
+      "win_rate": 0.5912150194828197,
+      "ci95_half_width": 0.0181
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 33,
+      "n": 2711,
+      "wins": 1598,
+      "win_rate": 0.5894503873109553,
+      "ci95_half_width": 0.0185
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 35,
+      "n": 2599,
+      "wins": 1527,
+      "win_rate": 0.5875336667949211,
+      "ci95_half_width": 0.0189
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 37,
+      "n": 2487,
+      "wins": 1456,
+      "win_rate": 0.5854443104141536,
+      "ci95_half_width": 0.0194
+    },
+    {
+      "champion_id": 15,
+      "opponent_id": 39,
+      "n": 3271,
+      "wins": 1958,
+      "win_rate": 0.5985937022317334,
+      "ci95_half_width": 0.0168
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 19,
+      "n": 1450,
+      "wins": 668,
+      "win_rate": 0.4606896551724138,
+      "ci95_half_width": 0.0257
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 21,
+      "n": 937,
+      "wins": 417,
+      "win_rate": 0.4450373532550694,
+      "ci95_half_width": 0.0318
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 23,
+      "n": 825,
+      "wins": 366,
+      "win_rate": 0.44363636363636366,
+      "ci95_half_width": 0.0339
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 25,
+      "n": 1161,
+      "wins": 522,
+      "win_rate": 0.4496124031007752,
+      "ci95_half_width": 0.0286
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 27,
+      "n": 1049,
+      "wins": 469,
+      "win_rate": 0.4470924690181125,
+      "ci95_half_width": 0.0301
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 29,
+      "n": 1385,
+      "wins": 627,
+      "win_rate": 0.4527075812274368,
+      "ci95_half_width": 0.0262
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 31,
+      "n": 1096,
+      "wins": 484,
+      "win_rate": 0.4416058394160584,
+      "ci95_half_width": 0.0294
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 33,
+      "n": 1208,
+      "wins": 536,
+      "win_rate": 0.44370860927152317,
+      "ci95_half_width": 0.028
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 35,
+      "n": 1320,
+      "wins": 588,
+      "win_rate": 0.44545454545454544,
+      "ci95_half_width": 0.0268
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 37,
+      "n": 1432,
+      "wins": 641,
+      "win_rate": 0.4476256983240223,
+      "ci95_half_width": 0.0258
+    },
+    {
+      "champion_id": 17,
+      "opponent_id": 39,
+      "n": 1544,
+      "wins": 693,
+      "win_rate": 0.4488341968911917,
+      "ci95_half_width": 0.0248
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 21,
+      "n": 2254,
+      "wins": 1225,
+      "win_rate": 0.5434782608695652,
+      "ci95_half_width": 0.0206
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 23,
+      "n": 2366,
+      "wins": 1290,
+      "win_rate": 0.5452240067624683,
+      "ci95_half_width": 0.0201
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 25,
+      "n": 2030,
+      "wins": 1096,
+      "win_rate": 0.5399014778325123,
+      "ci95_half_width": 0.0217
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 27,
+      "n": 2142,
+      "wins": 1160,
+      "win_rate": 0.5415499533146592,
+      "ci95_half_width": 0.0211
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 29,
+      "n": 1806,
+      "wins": 968,
+      "win_rate": 0.5359911406423035,
+      "ci95_half_width": 0.023
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 31,
+      "n": 2413,
+      "wins": 1303,
+      "win_rate": 0.5399917115623705,
+      "ci95_half_width": 0.0199
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 33,
+      "n": 2301,
+      "wins": 1238,
+      "win_rate": 0.5380269448066058,
+      "ci95_half_width": 0.0204
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 35,
+      "n": 2637,
+      "wins": 1433,
+      "win_rate": 0.5434205536594615,
+      "ci95_half_width": 0.019
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 37,
+      "n": 2525,
+      "wins": 1368,
+      "win_rate": 0.5417821782178218,
+      "ci95_half_width": 0.0194
+    },
+    {
+      "champion_id": 19,
+      "opponent_id": 39,
+      "n": 1965,
+      "wins": 1046,
+      "win_rate": 0.5323155216284987,
+      "ci95_half_width": 0.0221
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 23,
+      "n": 1933,
+      "wins": 904,
+      "win_rate": 0.4676668391101914,
+      "ci95_half_width": 0.0222
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 25,
+      "n": 2269,
+      "wins": 1074,
+      "win_rate": 0.47333627148523577,
+      "ci95_half_width": 0.0205
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 27,
+      "n": 2157,
+      "wins": 1017,
+      "win_rate": 0.4714881780250348,
+      "ci95_half_width": 0.0211
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 29,
+      "n": 1597,
+      "wins": 738,
+      "win_rate": 0.46211646837820913,
+      "ci95_half_width": 0.0245
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 31,
+      "n": 1292,
+      "wins": 767,
+      "win_rate": 0.5936532507739938,
+      "ci95_half_width": 0.0268
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 33,
+      "n": 1404,
+      "wins": 836,
+      "win_rate": 0.5954415954415955,
+      "ci95_half_width": 0.0257
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 35,
+      "n": 1068,
+      "wins": 630,
+      "win_rate": 0.5898876404494382,
+      "ci95_half_width": 0.0295
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 37,
+      "n": 1180,
+      "wins": 698,
+      "win_rate": 0.5915254237288136,
+      "ci95_half_width": 0.028
+    },
+    {
+      "champion_id": 21,
+      "opponent_id": 39,
+      "n": 844,
+      "wins": 495,
+      "win_rate": 0.5864928909952607,
+      "ci95_half_width": 0.0332
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 25,
+      "n": 2108,
+      "wins": 1001,
+      "win_rate": 0.47485768500948766,
+      "ci95_half_width": 0.0213
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 27,
+      "n": 2220,
+      "wins": 1058,
+      "win_rate": 0.4765765765765766,
+      "ci95_half_width": 0.0208
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 29,
+      "n": 1884,
+      "wins": 888,
+      "win_rate": 0.4713375796178344,
+      "ci95_half_width": 0.0225
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 31,
+      "n": 1579,
+      "wins": 951,
+      "win_rate": 0.6022799240025333,
+      "ci95_half_width": 0.0241
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 33,
+      "n": 1467,
+      "wins": 881,
+      "win_rate": 0.6005453306066802,
+      "ci95_half_width": 0.0251
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 35,
+      "n": 1355,
+      "wins": 811,
+      "win_rate": 0.5985239852398524,
+      "ci95_half_width": 0.0261
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 37,
+      "n": 1243,
+      "wins": 742,
+      "win_rate": 0.5969428801287209,
+      "ci95_half_width": 0.0273
+    },
+    {
+      "champion_id": 23,
+      "opponent_id": 39,
+      "n": 1131,
+      "wins": 673,
+      "win_rate": 0.5950486295313882,
+      "ci95_half_width": 0.0286
+    },
+    {
+      "champion_id": 25,
+      "opponent_id": 27,
+      "n": 3976,
+      "wins": 1620,
+      "win_rate": 0.4074446680080483,
+      "ci95_half_width": 0.0153
+    },
+    {
+      "champion_id": 25,
+      "opponent_id": 29,
+      "n": 879,
+      "wins": 370,
+      "win_rate": 0.42093287827076226,
+      "ci95_half_width": 0.0326
+    },
+    {
+      "champion_id": 25,
+      "opponent_id": 31,
+      "n": 272,
+      "wins": 113,
+      "win_rate": 0.41544117647058826,
+      "ci95_half_width": 0.0586
+    },
+    {
+      "champion_id": 25,
+      "opponent_id": 33,
+      "n": 384,
+      "wins": 161,
+      "win_rate": 0.4192708333333333,
+      "ci95_half_width": 0.0494
+    },
+    {
+      "champion_id": 25,
+      "opponent_id": 35,
+      "n": 496,
+      "wins": 209,
+      "win_rate": 0.4213709677419355,
+      "ci95_half_width": 0.0435
+    },
+    {
+      "champion_id": 25,
+      "opponent_id": 37,
+      "n": 608,
+      "wins": 257,
+      "win_rate": 0.42269736842105265,
+      "ci95_half_width": 0.0393
+    },
+    {
+      "champion_id": 25,
+      "opponent_id": 39,
+      "n": 3705,
+      "wins": 1516,
+      "win_rate": 0.40917678812415653,
+      "ci95_half_width": 0.0158
+    },
+    {
+      "champion_id": 27,
+      "opponent_id": 29,
+      "n": 3230,
+      "wins": 1927,
+      "win_rate": 0.596594427244582,
+      "ci95_half_width": 0.0169
+    },
+    {
+      "champion_id": 27,
+      "opponent_id": 31,
+      "n": 2494,
+      "wins": 1217,
+      "win_rate": 0.4879711307137129,
+      "ci95_half_width": 0.0196
+    },
+    {
+      "champion_id": 27,
+      "opponent_id": 33,
+      "n": 2382,
+      "wins": 1158,
+      "win_rate": 0.48614609571788414,
+      "ci95_half_width": 0.0201
+    },
+    {
+      "champion_id": 27,
+      "opponent_id": 35,
+      "n": 2718,
+      "wins": 1336,
+      "win_rate": 0.4915378955114054,
+      "ci95_half_width": 0.0188
+    },
+    {
+      "champion_id": 27,
+      "opponent_id": 37,
+      "n": 2606,
+      "wins": 1276,
+      "win_rate": 0.4896392939370683,
+      "ci95_half_width": 0.0192
+    },
+    {
+      "champion_id": 27,
+      "opponent_id": 39,
+      "n": 2046,
+      "wins": 983,
+      "win_rate": 0.4804496578690127,
+      "ci95_half_width": 0.0216
+    },
+    {
+      "champion_id": 29,
+      "opponent_id": 31,
+      "n": 1713,
+      "wins": 826,
+      "win_rate": 0.48219497956800933,
+      "ci95_half_width": 0.0237
+    },
+    {
+      "champion_id": 29,
+      "opponent_id": 33,
+      "n": 1825,
+      "wins": 884,
+      "win_rate": 0.4843835616438356,
+      "ci95_half_width": 0.0229
+    },
+    {
+      "champion_id": 29,
+      "opponent_id": 35,
+      "n": 1489,
+      "wins": 713,
+      "win_rate": 0.4788448623237072,
+      "ci95_half_width": 0.0254
+    },
+    {
+      "champion_id": 29,
+      "opponent_id": 37,
+      "n": 1601,
+      "wins": 769,
+      "win_rate": 0.4803247970018738,
+      "ci95_half_width": 0.0245
+    },
+    {
+      "champion_id": 29,
+      "opponent_id": 39,
+      "n": 2161,
+      "wins": 1059,
+      "win_rate": 0.4900509023600185,
+      "ci95_half_width": 0.0211
+    },
+    {
+      "champion_id": 31,
+      "opponent_id": 33,
+      "n": 2103,
+      "wins": 881,
+      "win_rate": 0.4189253447456015,
+      "ci95_half_width": 0.0211
+    },
+    {
+      "champion_id": 31,
+      "opponent_id": 35,
+      "n": 2215,
+      "wins": 932,
+      "win_rate": 0.42076749435665917,
+      "ci95_half_width": 0.0206
+    },
+    {
+      "champion_id": 31,
+      "opponent_id": 37,
+      "n": 2327,
+      "wins": 983,
+      "win_rate": 0.4224323162870649,
+      "ci95_half_width": 0.0201
+    },
+    {
+      "champion_id": 31,
+      "opponent_id": 39,
+      "n": 2439,
+      "wins": 1035,
+      "win_rate": 0.42435424354243545,
+      "ci95_half_width": 0.0196
+    },
+    {
+      "champion_id": 33,
+      "opponent_id": 35,
+      "n": 3494,
+      "wins": 1967,
+      "win_rate": 0.5629650829994276,
+      "ci95_half_width": 0.0164
+    },
+    {
+      "champion_id": 33,
+      "opponent_id": 37,
+      "n": 3382,
+      "wins": 1897,
+      "win_rate": 0.5609107037256061,
+      "ci95_half_width": 0.0167
+    },
+    {
+      "champion_id": 33,
+      "opponent_id": 39,
+      "n": 285,
+      "wins": 164,
+      "win_rate": 0.5754385964912281,
+      "ci95_half_width": 0.0574
+    },
+    {
+      "champion_id": 35,
+      "opponent_id": 37,
+      "n": 1136,
+      "wins": 648,
+      "win_rate": 0.5704225352112676,
+      "ci95_half_width": 0.0288
+    },
+    {
+      "champion_id": 35,
+      "opponent_id": 39,
+      "n": 800,
+      "wins": 452,
+      "win_rate": 0.565,
+      "ci95_half_width": 0.0344
+    },
+    {
+      "champion_id": 37,
+      "opponent_id": 39,
+      "n": 1772,
+      "wins": 1046,
+      "win_rate": 0.590293453724605,
+      "ci95_half_width": 0.0229
+    }
+  ]
+}

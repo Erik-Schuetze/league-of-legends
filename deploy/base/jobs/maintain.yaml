@@ -1,0 +1,83 @@
+# Compaction, retention and source-toggle bookkeeping. Hourly at :20 for two
+# reasons: it keeps the raw tree from accumulating small parts for a whole day,
+# and the offset from the hour means it does not contend with the other cron
+# jobs in the homelab that mostly fire at :00.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: maintain
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: maintain
+spec:
+  schedule: "20 * * * *"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 43200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lolstats
+            app.kubernetes.io/component: maintain
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: maintain
+              # TODO(plan section 10, Phase 1): pin to a digest with the other
+              # workloads once a tag exists.
+              image: ghcr.io/erik-schuetze/league-of-legends:latest
+              command: ["/lolstats-ingest"]
+              args: ["maintain"]
+              envFrom:
+                - configMapRef:
+                    name: lolstats-config
+              env:
+                - name: GOMEMLIMIT
+                  value: 256MiB
+                # The DSN is required and the key is not: maintenance works on
+                # the archive directly, but it also records what it did in
+                # build_runs, and `runMaintain` refuses to start without a
+                # database connection. It has no business calling Riot, so it
+                # does not get a key even when one exists.
+                - name: LOLSTATS_POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: DSN
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/lolstats
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: lolstats-data
+            - name: tmp
+              emptyDir: {}

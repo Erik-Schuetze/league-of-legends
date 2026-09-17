@@ -1,0 +1,141 @@
+# The control plane database. It is deliberately NOT the existing `postgres`
+# namespace on this cluster: that one is someone else's infrastructure with its
+# own credentials and its own lifecycle, and sharing it would mean this project
+# could not be removed, restored or upgraded on its own.
+#
+# Postgres holds only what cannot live in the archive: the crawl frontier, the
+# fetch queue, per-match job state and the build manifest. Match payloads and
+# aggregates never land here - they are files, which is what makes a rebuild
+# from the raw archive possible without a database restore.
+#
+# One replica, because there is no replica to fail over to at this size and a
+# StatefulSet that claims HA it does not have is worse than an honest single
+# writer.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: lolstats-postgres
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: lolstats-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lolstats
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lolstats
+        app.kubernetes.io/component: postgres
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # The uid baked into the official postgres image. It is named here
+        # rather than left to the image so that a base image change shows up as
+        # a permission failure in review rather than as a volume owned by
+        # nobody.
+        runAsUser: 999
+        runAsGroup: 999
+        # fsGroup makes the freshly provisioned volume writable by 999 without
+        # an init container running as root, which the restricted profile would
+        # reject anyway.
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1
+          args:
+            # The entrypoint is kept and told which binary to run, so the init
+            # and password handling it owns still happen.
+            - postgres
+            # The worker and the nightly jobs together never need more than a
+            # handful of connections, and every idle backend is memory on a
+            # shared node.
+            - -c
+            - max_connections=50
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            # PGDATA is a subdirectory of the mount point so that the filesystem
+            # root (which may hold a lost+found directory on a freshly formatted
+            # volume) is never mistaken for the data directory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: lolstats-postgres
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lolstats-postgres
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: lolstats-postgres
+                  key: POSTGRES_DB
+          resources:
+            # The node is a 16 GB N100 mini PC shared with every other service
+            # in the homelab. Postgres is not on the hot path here - the worker
+            # mostly claims rows from a queue - so it gets the smallest slice
+            # that keeps it comfortably ahead of a nightly batch.
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Postgres writes only to PGDATA, /var/run/postgresql (its socket)
+            # and /tmp, all of which are mounted below, so the image filesystem
+            # can be immutable.
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+          # No credentials in the probes on purpose: pg_isready reports whether
+          # the server is accepting connections, and a failed authentication is
+          # still an accepting server. Taking the user and database from the
+          # environment would mean putting a credential-shaped secret into the
+          # pod spec for no gain.
+          startupProbe:
+            # initdb on a shared N100 NVMe takes a few seconds, and a liveness
+            # probe that fires during it would restart the container mid-initdb.
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: lolstats-postgres-data
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

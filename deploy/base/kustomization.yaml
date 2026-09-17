@@ -1,0 +1,59 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The namespace is part of the frozen decisions, so it is fixed here rather than
+# left to the overlay: an overlay that forgets it would silently deploy this
+# stack into whatever namespace the ArgoCD Application happens to point at.
+namespace: lolstats
+
+resources:
+  - namespace.yaml
+  - config.yaml
+
+  # The two volumes. The file archive is shared and lives on the overlay's RWX
+  # storage class; Postgres gets its own block volume.
+  - storage/pvc.yaml
+  - postgres/pvc.yaml
+
+  # The control plane: one StatefulSet, one Service, no external exposure.
+  - postgres/statefulset.yaml
+  - postgres/service.yaml
+
+  # The long-running writer and the metrics Service the ServiceMonitor selects.
+  - ingest/deployment.yaml
+  - ingest/service.yaml
+
+  # The read-only web tier: a ConfigMap holding its Caddyfile, two replicas, and
+  # the ClusterIP Service the shared Caddy in namespace `web` proxies to.
+  - web/caddyfile.yaml
+  - web/deployment.yaml
+  - web/service.yaml
+
+  # Every scheduled unit of work, in the order they run during a night:
+  # aggregate (01:00), discover-seeds (02:10), static-sync (03:10), site-build
+  # (03:40), maintain (hourly), backfill (suspended, manual only).
+  - jobs/aggregate.yaml
+  - jobs/discover-seeds.yaml
+  - jobs/static-sync.yaml
+  - jobs/site-build.yaml
+  - jobs/maintain.yaml
+  - jobs/backfill.yaml
+
+  # ---- additions: operations workstream (backups) ----
+  # Further scheduled work, but described separately because these units
+  # protect the others rather than producing anything: the nightly logical
+  # dump (04:30) and the restic snapshot of the raw archive (05:00). They run
+  # after the window above has closed so that nothing is rewriting the files
+  # they are reading. deploy/README.md, section Backups, is the reference.
+  - backup/config.yaml
+  - jobs/backup-postgres.yaml
+  - jobs/backup-archive.yaml
+  # ---- end additions: operations workstream (backups) ----
+
+  # Default-deny first, then the exceptions, so the intent reads in one pass.
+  - network/default-deny.yaml
+  - network/allow.yaml
+
+# The secrets are deliberately not referenced here: they are created out of band
+# (see deploy/README.md) and only ever referenced by name, so that a real key
+# cannot be committed to this repository by accident.

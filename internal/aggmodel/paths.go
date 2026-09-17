@@ -1,0 +1,174 @@
+package aggmodel
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// The aggregate tree, relative to the aggregate root. Every path a producer
+// writes or a consumer reads is produced by a function in this file: two
+// agents formatting the same template by hand is how a site build and a build
+// step end up disagreeing about where a file is.
+//
+//	v1/manifest.json
+//	v1/p/<patch>/<region>/<queue>/<bracket>/tierlist.json
+//	v1/p/<patch>/<region>/<queue>/<bracket>/champions/<champion_id>.json
+//	v1/p/<patch>/<region>/<queue>/<bracket>/matchups/<role_slug>.json
+//	v1/static/<ddragon_version>/champions.json
+//	v1/static/<ddragon_version>/items.json
+//	v1/static/<ddragon_version>/runes.json
+//	v1/static/<ddragon_version>/summoner-spells.json
+//	v1/static/<ddragon_version>/patches.json
+const (
+	// VersionDir is the top directory of the tree. It is the version in
+	// "agg/v1" and moves only alongside a breaking reader change.
+	VersionDir = "v1"
+
+	// URLPrefix is where the site serves the tree from. Caddy maps it onto
+	// the aggregate root, so the public URL of an artifact is URLPrefix plus
+	// any path this file returns.
+	URLPrefix = "/agg"
+)
+
+// ManifestPath is the tree's entry point.
+const ManifestPath = VersionDir + "/manifest.json"
+
+// patchPattern is a LoL patch in major.minor form, e.g. 16.18. A payload's
+// full game version is longer than this; the patch is the part that groups
+// games for publishing.
+var patchPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
+
+// Seg names one published partition. Its fields are exactly the path elements
+// that appear between `p/` and the artifact name, so grouping them stops a
+// call site from transposing patch and region.
+type Seg struct {
+	Patch   string
+	Region  string
+	Queue   int
+	Bracket Bracket
+}
+
+// Dir returns the partition directory, e.g. v1/p/16.18/EUW/420/all. No
+// trailing slash, so it composes with filepath.Join.
+func (s Seg) Dir() string {
+	return fmt.Sprintf("%s/p/%s/%s/%d/%s", VersionDir, s.Patch, s.Region, s.Queue, s.Bracket)
+}
+
+// TierListPath returns the artifact every tier-list page reads. The page
+// filters this file by role rather than fetching per role, so the two views of
+// the same data cannot drift.
+func (s Seg) TierListPath() string { return s.Dir() + "/tierlist.json" }
+
+// ChampionPath returns the artifact the champion detail page reads.
+func (s Seg) ChampionPath(championID int) string {
+	return fmt.Sprintf("%s/champions/%d.json", s.Dir(), championID)
+}
+
+// MatchupsPath returns the artifact the matchup explorer reads for one role.
+// The role is a URL slug, not the enum value, so the file name and the route
+// segment are the same string.
+func (s Seg) MatchupsPath(role Role) string {
+	return fmt.Sprintf("%s/matchups/%s.json", s.Dir(), role.Slug())
+}
+
+// Validate reports whether the segment can form a valid path. Producing an
+// artifact under a malformed segment is worse than failing the build: it
+// publishes a directory nobody will ever read.
+func (s Seg) Validate() error {
+	var errs []error
+	if !patchPattern.MatchString(s.Patch) {
+		errs = append(errs, fmt.Errorf("patch %q is not major.minor", s.Patch))
+	}
+	if strings.TrimSpace(s.Region) == "" {
+		errs = append(errs, errors.New("region is empty"))
+	}
+	if s.Queue <= 0 {
+		errs = append(errs, fmt.Errorf("queue %d is not a positive id", s.Queue))
+	}
+	if strings.TrimSpace(string(s.Bracket)) == "" {
+		errs = append(errs, errors.New("bracket is empty"))
+	}
+	return errors.Join(errs...)
+}
+
+// StaticDir is the directory holding one Data Dragon version's projection.
+func StaticDir(ddragonVersion string) string {
+	return fmt.Sprintf("%s/static/%s", VersionDir, ddragonVersion)
+}
+
+// StaticChampionsPath is the artifact the frontend resolves champion ids,
+// slugs, names and icons from.
+func StaticChampionsPath(ddragonVersion string) string {
+	return StaticDir(ddragonVersion) + "/champions.json"
+}
+
+// StaticItemsPath is the artifact that resolves item ids to names and icons.
+func StaticItemsPath(ddragonVersion string) string {
+	return StaticDir(ddragonVersion) + "/items.json"
+}
+
+// StaticRunesPath is the artifact that resolves rune ids to names and icons.
+func StaticRunesPath(ddragonVersion string) string {
+	return StaticDir(ddragonVersion) + "/runes.json"
+}
+
+// StaticSummonerSpellsPath is the artifact that resolves summoner spell ids.
+func StaticSummonerSpellsPath(ddragonVersion string) string {
+	return StaticDir(ddragonVersion) + "/summoner-spells.json"
+}
+
+// StaticPatchesPath lists the patches the site knows about, newest first, so
+// the patch switcher is plain links between prerendered snapshots.
+func StaticPatchesPath(ddragonVersion string) string {
+	return StaticDir(ddragonVersion) + "/patches.json"
+}
+
+// ChampionSlug turns a Data Dragon champion key ("MonkeyKing", "MissFortune",
+// "Kai'Sa") into the URL segment used by /champions/<slug>. It is the only
+// slug rule in the project, so a link generated by the frontend and a file
+// named by the static sync job always agree.
+func ChampionSlug(ddragonKey string) string {
+	var b strings.Builder
+	b.Grow(len(ddragonKey))
+	for _, r := range strings.ToLower(ddragonKey) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// PatchFromGameVersion extracts the major.minor patch from a MATCH-V5
+// gameVersion such as "16.18.612.9234". Returning ok=false rather than a
+// best-effort guess is deliberate: a game whose patch cannot be determined
+// must be excluded from a build, not attributed to a patch it may not belong
+// to.
+func PatchFromGameVersion(gameVersion string) (string, bool) {
+	parts := strings.Split(gameVersion, ".")
+	if len(parts) < 2 {
+		return "", false
+	}
+	// Riot has published both "16.18.612.9234" and "16.18" shapes.
+	if _, err := strconv.Atoi(parts[0]); err != nil {
+		return "", false
+	}
+	if _, err := strconv.Atoi(parts[1]); err != nil {
+		return "", false
+	}
+	patch := parts[0] + "." + parts[1]
+	return patch, patchPattern.MatchString(patch)
+}
+
+// WindowFor returns the trailing source window ending at end.
+func WindowFor(end time.Time, days int) Window {
+	from := end.AddDate(0, 0, -days)
+	return Window{
+		From: from.UTC().Format(time.DateOnly),
+		To:   end.UTC().Format(time.DateOnly),
+	}
+}

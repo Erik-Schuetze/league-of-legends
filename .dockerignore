@@ -1,0 +1,18 @@
+# Keep the build context to source only. Everything below is either
+# regenerable, local-only, or irrelevant to `go build`, and shipping it would
+# slow the build and widen the set of bytes the daemon has to look at.
+.git
+.github
+.agent-artifacts
+docs
+deploy
+web
+fixtures
+*.md
+bin
+node_modules
+
+# Secrets never enter a build context, even though nothing here copies them.
+.env
+*.pem
+*.key

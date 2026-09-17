@@ -1,0 +1,51 @@
+---
+// /matchups/<role> - the champion-against-champion matrix for one role.
+//
+// The matrix is server-rendered. The sortable explorer, when the design system
+// ships it, is an enhancement on top of a table that is already complete.
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import MatchupBody from '../../layouts/MatchupBody.astro';
+import type { Role } from '../../types/agg';
+import { ROLES, roleLabel, roleSlug } from '../../lib/roles';
+import { matchupsFor, patchLabel, snapshot, statisticsNoindex } from '../../lib/page';
+import { absoluteUrl } from '../../lib/seo';
+
+export function getStaticPaths() {
+  return ROLES.map((role) => ({ params: { role: roleSlug(role) }, props: { role } }));
+}
+
+interface Props {
+  role: Role;
+}
+
+const { role } = Astro.props;
+const label = roleLabel(role);
+const slug = roleSlug(role);
+
+const snap = snapshot();
+const matchups = matchupsFor(snap, role);
+const url = absoluteUrl(`/matchups/${slug}/`, Astro.site, Astro.url);
+
+const partition = snap.partition;
+const title = partition
+  ? `${label} champion matchups, patch ${partition.patch} - League of Legends - LoL Stats`
+  : `${label} champion matchups - League of Legends - LoL Stats`;
+const description = partition
+  ? `Champion-versus-champion win rates for ${label.toLowerCase()} in ${partition.region} ranked solo queue on ` +
+    `League of Legends patch ${partition.patch}, with the games behind every pair and thin pairs withheld.`
+  : `The ${label.toLowerCase()} champion matchup matrix is not published yet: no aggregate snapshot exists for this ` +
+    `site, so this page renders an explicit empty state.`;
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  patch={patchLabel(snap)}
+  canonical={`/matchups/${slug}/`}
+  generatedAt={snap.generatedAt}
+  active={`/matchups/${slug}`}
+  noindex={statisticsNoindex(snap)}
+>
+  <MatchupBody snap={snap} role={role} matchups={matchups} url={url} />
+</BaseLayout>

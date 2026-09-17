@@ -1,0 +1,33 @@
+# The non-secret half of the runtime configuration. internal/config reads every
+# setting from the environment and treats a Kubernetes ConfigMap as the natural
+# source, so this map is projected into every lolstats pod with envFrom and no
+# value is ever baked into an image.
+#
+# Secrets are deliberately absent: they come from Secrets referenced by name
+# only (see deploy/README.md). Anything credential-shaped - the Riot key, the
+# Postgres DSN - is injected per workload, never here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lolstats-config
+data:
+  LOLSTATS_ENV: "prod"
+  LOLSTATS_LOG_LEVEL: "info"
+  LOLSTATS_LOG_FORMAT: "json"
+
+  # One metrics port for every Go workload, and the port the ServiceMonitor in
+  # homecluster/monitoring/servicemonitors scrapes.
+  LOLSTATS_METRICS_ADDR: ":9090"
+
+  # EUW is the only region v1 ingests. The region is a path element in every
+  # artifact, so it is configuration rather than a constant.
+  LOLSTATS_RIOT_REGION: "EUW"
+  LOLSTATS_RIOT_PLATFORM_ROUTE: "euw1"
+  LOLSTATS_RIOT_REGIONAL_ROUTE: "europe"
+
+  # Both trees live on the one ReadWriteMany volume mounted at
+  # /var/lib/lolstats, which is also where the site build writes and the web
+  # tier serves from. Keeping the roots here means no manifest has to guess a
+  # path.
+  LOLSTATS_RAW_ROOT: "/var/lib/lolstats/raw"
+  LOLSTATS_AGG_ROOT: "/var/lib/lolstats/agg"

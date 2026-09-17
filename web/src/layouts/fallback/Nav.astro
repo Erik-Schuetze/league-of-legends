@@ -1,0 +1,41 @@
+---
+// The page's own implementation of the frozen `Nav` API: role links plus the
+// patch label. Every link is a plain anchor in the served HTML, so the whole
+// site is navigable with JavaScript disabled.
+
+import type { Role } from '../../types/agg';
+import { ROLES, roleLabel, roleSlug } from '../../lib/roles';
+
+interface Props {
+  patch: string;
+  active?: string;
+  roles?: Role[];
+}
+
+const { patch, active, roles = [...ROLES] } = Astro.props;
+---
+
+<nav class="fallback-site-nav" aria-label="Site">
+  <p class="fallback-site-nav__brand"><a href="/">LoL Stats</a> <span class="fallback-site-nav__patch">patch {patch}</span></p>
+  <ul class="fallback-site-nav__list">
+    {
+      roles.map((role) => (
+        <li>
+          <a href={`/tier-list/${roleSlug(role)}`} aria-current={active === `/tier-list/${roleSlug(role)}` ? 'page' : undefined}>
+            {roleLabel(role)} tier list
+          </a>
+        </li>
+      ))
+    }
+    {
+      roles.map((role) => (
+        <li>
+          <a href={`/matchups/${roleSlug(role)}`} aria-current={active === `/matchups/${roleSlug(role)}` ? 'page' : undefined}>
+            {roleLabel(role)} matchups
+          </a>
+        </li>
+      ))
+    }
+    <li><a href="/about" aria-current={active === '/about' ? 'page' : undefined}>About the data</a></li>
+  </ul>
+</nav>

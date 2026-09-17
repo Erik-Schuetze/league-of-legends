@@ -1,0 +1,254 @@
+# restic snapshot of the raw archive (plan decision D3, plan risk R6).
+#
+# The raw archive is the only data here that cannot be regenerated: Riot keeps
+# match payloads for two years and timelines for one, and the archive is what a
+# rebuild reads. It is therefore the one tree that needs a copy older than the
+# mistake that would destroy it.
+#
+# WHAT THIS IS AND IS NOT. `RESTIC_REPOSITORY` defaults to a directory on the
+# same ReadWriteMany volume the archive itself lives on, because no off-site
+# medium exists on this cluster today (plan open question 3 is unanswered). That
+# protects against a bad crawl, an accidental deletion and a corrupted part. It
+# does not protect against the volume, the NFS export, or the node hosting it
+# being lost. Risk R6 is therefore *accepted and unmet* until
+# `RESTIC_REPOSITORY` in deploy/base/backup/config.yaml points somewhere else -
+# an SFTP host, a second machine, an S3 endpoint - at which point the repository
+# also needs its credentials, which are extra keys in the `lolstats-restic`
+# Secret. No manifest changes when that happens. docs/runbooks/restore-raw.md
+# records this in the same words and says what to do when media appears.
+#
+# 05:00 Europe/Berlin: after the nightly window (site-build ends 03:40) and after
+# the 04:30 postgres dump, so the two backups are not competing for the same NFS
+# client and neither is running while the aggregate job rewrites agg/.
+#
+# The image is the official public one, pinned by digest. It runs as 65532 like
+# the rest of the namespace: the restricted profile would reject anything that
+# ran as root, and the image's default user is root.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-archive
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: backup-archive
+spec:
+  schedule: "0 5 * * *"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # A restic backup that failed because the repository was unreachable is
+      # worth exactly one retry and no more; a second failure means a human has
+      # to look, and a failed Job in the history is how they find out.
+      backoffLimit: 1
+      # The first run has to read the whole archive through NFS; every run after
+      # it reads only what changed. Two hours is the ceiling that keeps a stuck
+      # NFS read from holding the job open into the day.
+      activeDeadlineSeconds: 7200
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lolstats
+            app.kubernetes.io/component: backup-archive
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup-archive
+              image: restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              # The image's entrypoint is the restic binary itself; a shell is
+              # needed for the guard below, so it is replaced rather than
+              # appended to.
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  umask 077
+
+                  raw="${LOLSTATS_RAW_ROOT:-/var/lib/lolstats/raw}"
+                  host="${RESTIC_HOST:-lolstats-archive}"
+                  keep_daily="${RESTIC_KEEP_DAILY:-7}"
+                  keep_weekly="${RESTIC_KEEP_WEEKLY:-4}"
+                  keep_monthly="${RESTIC_KEEP_MONTHLY:-6}"
+
+                  # Fail before anything else if the repository password is not
+                  # there. This is the one failure this job must never be quiet
+                  # about: without it restic cannot read the snapshots that
+                  # already exist either, so "the backup is not running" and "the
+                  # backup is not readable" are the same emergency.
+                  if [ -z "${RESTIC_PASSWORD:-}" ]; then
+                    echo "backup-archive: FATAL: RESTIC_PASSWORD is empty or the lolstats-restic Secret does not exist." >&2
+                    echo "backup-archive: The raw archive is the only copy of data that cannot be regenerated;" >&2
+                    echo "backup-archive: no snapshot is being taken and none can be restored until this is fixed." >&2
+                    echo "backup-archive: Create the Secret (this is the only copy of the password - store it off" >&2
+                    echo "backup-archive: this cluster, a lost password makes every existing snapshot unreadable):" >&2
+                    echo "backup-archive:   kubectl -n lolstats create secret generic lolstats-restic \\" >&2
+                    echo "backup-archive:     --from-literal=RESTIC_PASSWORD=\"\$(openssl rand -base64 32)\"" >&2
+                    echo "backup-archive: Runbook: docs/runbooks/restore-raw.md" >&2
+                    exit 1
+                  fi
+
+                  if [ ! -d "$raw" ]; then
+                    echo "backup-archive: FATAL: the raw archive is not at $raw" >&2
+                    exit 1
+                  fi
+
+                  export RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-/tmp/restic-cache}"
+                  export HOME=/tmp
+                  mkdir -p "$RESTIC_CACHE_DIR"
+
+                  # Say out loud which of the two worlds this run is in, so the
+                  # log of a nightly job is itself the evidence for whether the
+                  # copy is off-site. A path is not off-site; a URL might be.
+                  case "$RESTIC_REPOSITORY" in
+                    /*)
+                      echo "backup-archive: NOTE: RESTIC_REPOSITORY=$RESTIC_REPOSITORY is a path on the shared volume."
+                      echo "backup-archive: NOTE: that is a NON-off-site copy - the same NFS export as the archive."
+                      echo "backup-archive: NOTE: plan risk R6 stays accepted and unmet while this is true (docs/runbooks/restore-raw.md)."
+                      mkdir -p "$RESTIC_REPOSITORY"
+                      ;;
+                    *)
+                      echo "backup-archive: repository is remote: $RESTIC_REPOSITORY"
+                      ;;
+                  esac
+
+                  if ! restic cat config >/dev/null 2>&1; then
+                    # Either the repository does not exist yet or the password is
+                    # wrong. Only the first is recoverable by initialising, so the
+                    # error from `cat config` is printed before init is attempted.
+                    echo "backup-archive: restic cannot read a repository at $RESTIC_REPOSITORY:"
+                    restic cat config >/dev/null || true
+                    echo "backup-archive: initialising a new repository there"
+                    restic init
+                  fi
+
+                  # --one-file-system: the tree is inside a single mount and there
+                  # is nothing behind it worth following. --exclude: the writer
+                  # publishes parts by rename, so a file under those suffixes is
+                  # mid-write and must not be snapshotted as if it were content.
+                  set +e
+                  restic backup \
+                    --host "$host" \
+                    --tag raw-archive \
+                    --one-file-system \
+                    --exclude "*.tmp" \
+                    --exclude "*.partial" \
+                    --exclude-caches \
+                    "$raw"
+                  rc=$?
+                  set -e
+                  case "$rc" in
+                    0) : ;;
+                    3)
+                      # restic's documented "warning" status: the snapshot was
+                      # written, but a file changed while it was being read. It is
+                      # expected occasionally on a tree that is being appended to
+                      # and it is not swallowed: it is printed here, and a run that
+                      # reports it repeatedly is a run whose log somebody reads.
+                      echo "backup-archive: WARNING: restic exited 3 - some files changed while they were read." >&2
+                      echo "backup-archive: WARNING: the snapshot exists but is not a perfectly still picture of the tree." >&2
+                      ;;
+                    *)
+                      echo "backup-archive: FATAL: restic backup exited $rc; nothing was protected tonight." >&2
+                      exit "$rc"
+                      ;;
+                  esac
+
+                  # A snapshot has to exist before this job may report success. The
+                  # warning path above is why this check is not redundant: exit 3
+                  # with no snapshot is a failure wearing a warning's clothes.
+                  latest="$(restic snapshots --host "$host" --latest 1 --json | tr -d ' \n')"
+                  case "$latest" in
+                    ''|'[]')
+                      echo "backup-archive: FATAL: no snapshot exists for host $host after a backup run." >&2
+                      exit 1
+                      ;;
+                  esac
+                  echo "backup-archive: latest snapshot: $latest"
+
+                  # Retention and integrity checking only on Sundays. `forget
+                  # --prune` rewrites the repository and `check --read-data`
+                  # reads it back; both are disk work that does not need to
+                  # happen on the night the backup exists to shorten.
+                  if [ "$(date -u +%u)" = "7" ]; then
+                    echo "backup-archive: sunday - applying retention"
+                    restic forget \
+                      --host "$host" \
+                      --keep-daily "$keep_daily" \
+                      --keep-weekly "$keep_weekly" \
+                      --keep-monthly "$keep_monthly" \
+                      --prune
+                    # Reading a sample of the pack files back proves the
+                    # repository is not just listed but decryptable. It is the
+                    # cheap half of a restore drill: docs/runbooks/restore-raw.md
+                    # has the expensive half, which is a real restore.
+                    echo "backup-archive: sunday - reading a sample of the repository back"
+                    restic check --read-data-subset=2%
+                  else
+                    echo "backup-archive: retention is applied on Sundays; nothing to prune tonight"
+                  fi
+
+                  restic snapshots --host "$host" --last
+                  echo "backup-archive: done"
+              envFrom:
+                # The archive root is `LOLSTATS_RAW_ROOT` from lolstats-config,
+                # the same variable the worker and the aggregate build read, so
+                # the tree this job snapshots cannot drift from the tree they
+                # write. The script falls back to the same literal path if the
+                # ConfigMap is missing the key.
+                - configMapRef:
+                    name: lolstats-config
+                - configMapRef:
+                    name: lolstats-backup-config
+              env:
+                # Only the repository location and the cache come from the
+                # ConfigMap above; the password is a Secret and it is referenced
+                # optional just like the Riot key, so a cluster without it still
+                # starts every other workload in this namespace - this job alone
+                # fails, and its failure is the alert. The Kubernetes Secret is
+                # NOT the only copy of this value: a lost password makes every
+                # existing snapshot unreadable, so the operator keeps it
+                # elsewhere too.
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-restic
+                      key: RESTIC_PASSWORD
+                      optional: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  # restic compresses and hashes at most a few files at a time;
+                  # this ceiling exists so a pathological tree cannot make the
+                  # job an OOM candidate on a node that is shared with every
+                  # other service in the homelab.
+                  cpu: "1"
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/lolstats
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: lolstats-data
+            - name: tmp
+              emptyDir: {}

@@ -1,0 +1,401 @@
+---
+import type { Bracket, MatchupCell, Matchups, Role, StaticChampion } from '../types/agg';
+import { cellAvailability, matchupResult } from '../lib/artifacts';
+import { integer, percent } from '../lib/format';
+import { roleLabel, roleSlug } from '../lib/roles';
+
+interface Props {
+  matchups: Matchups;
+  champions: StaticChampion[];
+  role: Role;
+  minCellN: number;
+}
+
+const { matchups, champions, role, minCellN } = Astro.props;
+
+/**
+ * A signed deviation from even, in percentage points, without the unit: the
+ * legend names the unit once, and a matrix of a thousand cells cannot afford to
+ * repeat it. Mirrors `signedPercentPoints` in lib/format, which carries the
+ * unit and is used everywhere the number stands alone.
+ */
+const signedPoints = (deviation: number, digits = 1): string => {
+  const points = deviation * 100;
+  if (Math.abs(points) < 0.05) return '0.0';
+  return `${points > 0 ? '+' : '-'}${Math.abs(points).toFixed(digits)}`;
+};
+
+/**
+ * The colour of a cell is a redundant encoding of the number printed in it:
+ * above even, at even, below even. Nothing here means anything that the signed
+ * number beside it does not also say.
+ */
+const toneOf = (deviation: number): string => {
+  if (deviation >= 0.05) return 'up-strong';
+  if (deviation > 0.005) return 'up';
+  if (deviation <= -0.05) return 'down-strong';
+  if (deviation < -0.005) return 'down';
+  return 'level';
+};
+
+const BRACKET_LABEL: Record<Bracket, string> = {
+  all: 'all ranks',
+  emerald_plus: 'Emerald and above',
+  platinum_plus: 'Platinum and above',
+  diamond_plus: 'Diamond and above',
+  master_plus: 'Master and above',
+};
+
+const championById = new Map(champions.map((champion) => [champion.id, champion]));
+const nameOf = (id: number) => championById.get(id)?.name ?? `Champion ${id}`;
+const hrefOf = (id: number) => {
+  const champion = championById.get(id);
+  return champion ? `/champions/${champion.slug}/${roleSlug(role)}` : undefined;
+};
+
+// The artifact stores each pair once, lower id first. Both orientations are
+// materialised here so the matrix can be read as "row champion against column
+// champion" without a mirror lookup at render time. lib/artifacts owns the
+// mirroring rule, so the number here is the number a page would compute.
+type Result = { n: number; winRate: number };
+// Without JavaScript the first cell of every row is a tab stop, so each row of
+// the matrix can be reached and read; the runtime narrows this to a single
+// roving tab stop as soon as it runs.
+const firstColumnTabstop = (columnIndex: number): 0 | undefined => (columnIndex === 0 ? 0 : undefined);
+
+const pairs = new Map<string, Result>();
+for (const cell of matchups.cells as MatchupCell[]) {
+  const forward = matchupResult(cell, cell.champion_id);
+  const reverse = matchupResult(cell, cell.opponent_id);
+  if (forward) pairs.set(`${cell.champion_id}:${cell.opponent_id}`, forward);
+  if (reverse) pairs.set(`${cell.opponent_id}:${cell.champion_id}`, reverse);
+}
+
+const rows = matchups.champions.map((championId) => {
+  const cells = matchups.champions.map((opponentId) => {
+    if (championId === opponentId) return { kind: 'self' as const };
+    const result = pairs.get(`${championId}:${opponentId}`);
+    if (!result) return { kind: 'missing' as const };
+    if (cellAvailability(result, minCellN) !== 'published') return { kind: 'missing' as const };
+    const deviation = result.winRate - 0.5;
+    return {
+      kind: 'published' as const,
+      n: result.n,
+      winRate: result.winRate,
+      deviation,
+      tone: toneOf(deviation),
+      signed: signedPoints(deviation),
+      label: `${percent(result.winRate, 1)} over ${integer(result.n)} games`,
+    };
+  });
+  return { id: championId, name: nameOf(championId), href: hrefOf(championId), cells };
+});
+
+const published = rows.reduce(
+  (total, row) => total + row.cells.filter((cell) => cell.kind === 'published').length,
+  0,
+);
+const totalCells = rows.length * rows.length;
+
+const caption =
+  `Head to head, ${roleLabel(role)}, patch ${matchups.patch}, ${BRACKET_LABEL[matchups.bracket]}. ` +
+  `Each row is the champion in the first column and each column is the champion it faced; ` +
+  `the cell is the row champion's win rate in that pairing, and the small signed number beside it ` +
+  `is the distance from even in percentage points. A dash means the pair has fewer than ` +
+  `n = ${integer(minCellN)} games in this window and is not published.`;
+---
+
+<div class="island" data-island="heatmap" data-min-n={integer(minCellN)}>
+  <p class="detail ds-print-hidden" data-hm-detail role="status">
+    Point at, tap or tab into a cell to read the pairing in full; the arrow keys move through the grid,
+    and the first column names the champion in each row.
+  </p>
+
+  <ul class="legend ds-print-hidden">
+    <li><span class="swatch up-strong" aria-hidden="true"></span><span class="num">+5.0</span> or more above even</li>
+    <li><span class="swatch up" aria-hidden="true"></span><span class="num">0</span> to <span class="num">+5.0</span> above even</li>
+    <li><span class="swatch level" aria-hidden="true"></span>level: within 0.5 of even</li>
+    <li><span class="swatch down" aria-hidden="true"></span><span class="num">0</span> to <span class="num">-5.0</span> below even</li>
+    <li><span class="swatch down-strong" aria-hidden="true"></span><span class="num">-5.0</span> or more below even (hatched)</li>
+    <li><span class="swatch missing" aria-hidden="true"></span>not published: under n = {integer(minCellN)} games (faintly hatched)</li>
+  </ul>
+
+  <div class="wrap">
+    <table>
+      <caption>{caption}</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="corner">Champion</th>
+          {
+            rows.map((row) => (
+              <th scope="col" class="column" data-champion={row.id}>
+                {row.name}
+              </th>
+            ))
+          }
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.map((row) => (
+            <tr>
+              <th scope="row" class="row-head" data-champion={row.id}>
+                {row.href ? <a href={row.href}>{row.name}</a> : <span>{row.name}</span>}
+              </th>
+              {row.cells.map((cell, columnIndex) =>
+                cell.kind === 'self' ? (
+                  <td
+                    class="cell self"
+                    data-n="0"
+                    tabindex={firstColumnTabstop(columnIndex)}
+                    aria-label="the same champion in both axes"
+                  >
+                    &middot;
+                  </td>
+                ) : cell.kind === 'missing' ? (
+                  <td
+                    class="cell missing"
+                    data-n="0"
+                    tabindex={firstColumnTabstop(columnIndex)}
+                    aria-label="not published"
+                  >
+                    &mdash;
+                  </td>
+                ) : (
+                  <td
+                    class={`cell ${cell.tone}`}
+                    data-n={cell.n}
+                    tabindex={firstColumnTabstop(columnIndex)}
+                    aria-label={cell.label}
+                  >
+                    <span class="rate">{percent(cell.winRate, 1)}</span>
+                    <span class="dev" aria-hidden="true">
+                      {cell.signed}
+                    </span>
+                  </td>
+                ),
+              )}
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note ds-print-hidden">
+    {integer(published)} of {integer(totalCells)} pairings are published for this role. Cells the
+    aggregator withheld are absent from the artifact and read as a dash here, never as zero
+    {matchups.suppressed_cells > 0 && <> ({integer(matchups.suppressed_cells)} withheld in total)</>}.
+  </p>
+</div>
+
+<script>
+  // The same visible-only loader TableIsland uses: nothing but the loader runs
+  // with the page, and the runtime arrives when the matrix comes into view.
+  import { startIslands } from './island-boot.client.ts';
+
+  startIslands('[data-island="heatmap"]', () => import('./heatmap-island.client.ts'));
+</script>
+
+<style>
+  .island {
+    margin: 0 0 var(--space-5);
+  }
+
+  .detail {
+    margin: 0 0 var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    min-height: var(--space-6);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-on-dark);
+    background-color: var(--primary-color);
+    border-left: var(--border-width) solid var(--accent-color);
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem var(--space-3);
+    margin: 0 0 var(--space-3);
+    padding: 0;
+    list-style: none;
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .swatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--primary-color);
+  }
+
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wrap {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  table {
+    border-collapse: collapse;
+    font-size: var(--fs-xs);
+    line-height: var(--line-tight);
+  }
+
+  caption {
+    padding: 0 0 var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--fs-xs);
+    color: var(--text-color);
+    text-align: left;
+    max-width: 80ch;
+  }
+
+  th {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: var(--text-on-dark);
+    background-color: var(--primary-color);
+  }
+
+  .corner {
+    padding: var(--row-pad-y) var(--row-pad-x);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .column {
+    padding: 0.2rem 0.1rem;
+    height: 9rem;
+    vertical-align: bottom;
+    text-align: right;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+
+  .row-head {
+    padding: var(--row-pad-y) var(--row-pad-x) var(--row-pad-y) 0.4rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .row-head a {
+    color: var(--text-on-dark);
+    text-decoration: none;
+  }
+
+  .row-head a:hover {
+    color: var(--accent-on-dark);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+  }
+
+  .cell {
+    padding: 0.1rem 0.15rem;
+    min-width: 3.4rem;
+    text-align: right;
+    vertical-align: middle;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--tier-ink);
+    border: 1px solid var(--bg-color);
+  }
+
+  .rate {
+    display: block;
+    white-space: nowrap;
+  }
+
+  .dev {
+    display: block;
+    font-size: 0.6875rem;
+    white-space: nowrap;
+  }
+
+  .cell.up-strong,
+  .swatch.up-strong {
+    background-color: var(--dev-up-bg-strong);
+  }
+
+  .cell.up,
+  .swatch.up {
+    background-color: var(--dev-up-bg);
+  }
+
+  .cell.level,
+  .swatch.level {
+    background-color: var(--bg-light);
+  }
+
+  .cell.down,
+  .swatch.down {
+    background-color: var(--dev-down-bg);
+  }
+
+  .cell.down-strong,
+  .swatch.down-strong {
+    background-color: var(--dev-down-bg-strong);
+    background-image: var(--dev-down-hatch);
+  }
+
+  .cell.missing,
+  .swatch.missing {
+    color: var(--text-muted);
+    background-color: var(--dev-empty-bg);
+    background-image: var(--dev-empty-hatch);
+  }
+
+  .cell.self {
+    color: var(--text-muted);
+    background-color: var(--bg-color);
+  }
+
+  .cell:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: -2px;
+  }
+
+  .note {
+    margin: var(--space-2) 0 0;
+    max-width: 80ch;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+
+  @media print {
+    .cell,
+    .cell.missing,
+    .cell.self {
+      color: var(--print-ink);
+      background-color: transparent;
+      background-image: none;
+      border: 1px solid var(--print-rule);
+    }
+
+    th {
+      color: var(--print-ink);
+      background-color: transparent;
+      border-bottom: var(--border-width) solid var(--print-ink);
+    }
+
+    .column {
+      height: auto;
+      writing-mode: horizontal-tb;
+      transform: none;
+    }
+  }
+</style>

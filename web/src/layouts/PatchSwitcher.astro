@@ -1,0 +1,39 @@
+---
+// Patch switching as plain links between pre-generated snapshots. There is no
+// JavaScript here and no request: every published patch was rendered into its
+// own directory at build time, so switching patches is following a hyperlink.
+//
+// When only one patch is published the switcher still renders, saying so, so
+// that a reader can tell "this is the only snapshot" from "the switcher is
+// broken".
+
+interface Props {
+  patches: string[];
+  role: string;
+  active?: string;
+}
+
+const { patches, role, active } = Astro.props;
+---
+
+<nav class="fallback-patch-switcher-nav" aria-label="Patch">
+  {
+    patches.length > 0 ? (
+      <ul class="fallback-patch-switcher">
+        {patches.map((patch) => (
+          <li>
+            <a
+              href={`/patch/${patch}/tier-list/${role}`}
+              aria-current={active === patch ? 'page' : undefined}
+              title={active === patch ? 'the patch this page shows' : `switch to patch ${patch}`}
+            >
+              {patch}
+            </a>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="fallback-patch-switcher__empty">No snapshot has been published, so there is no patch to switch to.</p>
+    )
+  }
+</nav>

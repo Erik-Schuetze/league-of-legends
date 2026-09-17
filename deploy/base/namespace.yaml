@@ -1,0 +1,16 @@
+# A dedicated namespace, deliberately not shared with the existing `postgres`
+# namespace: this control plane is owned by this project and must be removable
+# without touching anything else on the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lolstats
+  labels:
+    # Every pod here runs as a fixed non-root UID with all capabilities
+    # dropped and allowPrivilegeEscalation disabled, so the strictest built-in
+    # profile applies without a single exception. Enforcing it (rather than
+    # only warning) means a manifest regression is rejected at admission
+    # instead of quietly widening what a compromised pod can do.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

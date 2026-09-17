@@ -1,0 +1,112 @@
+---
+interface FilterOption {
+  value: string;
+  label: string;
+}
+
+interface FilterSpec {
+  name: string; // query parameter name
+  label: string;
+  options: FilterOption[];
+  selected?: string;
+}
+
+interface Props {
+  filters: FilterSpec[];
+  action?: string;
+  method?: 'get' | 'post';
+  hidden?: Record<string, string>;
+}
+
+const { filters, action, method = 'get', hidden = {} } = Astro.props;
+
+// A filter is a navigation, so the bar is a plain form: no JavaScript, and every
+// selection is a URL that can be shared, bookmarked and cached.
+const formAction = action ?? Astro.url.pathname;
+const hiddenEntries = Object.entries(hidden);
+---
+
+<form class="ds-filter-bar ds-print-hidden" action={formAction} method={method} aria-label="Filters">
+  {
+    hiddenEntries.map(([name, value]) => <input type="hidden" name={name} value={value} />)
+  }
+
+  <div class="fields">
+    {
+      filters.map((filter) => (
+        <p class="field">
+          <label for={`filter-${filter.name}`}>{filter.label}</label>
+          <select id={`filter-${filter.name}`} name={filter.name}>
+            {filter.options.map((option) => (
+              <option value={option.value} selected={option.value === filter.selected}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </p>
+      ))
+    }
+  </div>
+
+  <button type="submit" class="submit">Apply</button>
+</form>
+
+<style>
+  .ds-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-2) var(--space-3);
+    margin: 0 0 var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--bg-light);
+    border: var(--border-width) solid var(--hairline);
+  }
+
+  .fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0;
+    font-size: var(--fs-xs);
+  }
+
+  label {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  select {
+    padding: 0.2rem 0.35rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--primary-color);
+    background-color: var(--bg-color);
+    border: var(--border-width) solid var(--primary-color);
+  }
+
+  .submit {
+    padding: 0.3rem 0.9rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    color: var(--text-on-dark);
+    background-color: var(--accent-color);
+    /* The single permitted radius in the system. */
+    border: var(--border-width) solid var(--accent-color);
+    border-radius: var(--radius-btn);
+    cursor: pointer;
+  }
+
+  .submit:hover {
+    color: var(--primary-color);
+    background-color: var(--text-on-dark);
+  }
+</style>

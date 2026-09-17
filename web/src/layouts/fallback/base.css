@@ -1,0 +1,279 @@
+/*
+ * Base styling for this layout and for the fallback renderers in this folder.
+ *
+ * The design system owns web/src/styles/** and web/src/components/**; this file
+ * exists so that the site is legible and clearly deliberate even before those
+ * land, and so the no-data state reads as an intentional empty product rather
+ * than as a broken page. It only ever targets this layout's own class names
+ * (`fallback-*` and the state banner), so it cannot restyle a design-system
+ * component. Where a design token exists it is used, with the token file's own
+ * value as the fallback.
+ */
+
+:root {
+  --fallback-text: var(--text-color, #242a2b);
+  --fallback-bg: var(--bg-color, #efdbbf);
+  --fallback-bg-light: var(--bg-light, #f1eae0);
+  --fallback-primary: var(--primary-color, #0b162a);
+  --fallback-accent: var(--accent-color, #1b4bc6);
+  --fallback-border: 2px solid var(--fallback-primary);
+}
+
+body {
+  margin: 0;
+  padding: 0 0 3rem;
+  background: var(--fallback-bg);
+  color: var(--fallback-text);
+  font-family: var(--font-body, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif);
+  line-height: 1.5;
+}
+
+main,
+.fallback-site-nav,
+.fallback-site-footer,
+.state-banner {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+a {
+  color: var(--fallback-accent);
+}
+
+a:focus-visible,
+summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--fallback-accent);
+}
+
+.fallback-skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.fallback-skip:focus {
+  left: 1rem;
+  top: 0.5rem;
+  background: var(--fallback-bg-light);
+  padding: 0.5rem;
+  z-index: 10;
+}
+
+.state-banner {
+  box-sizing: border-box;
+  max-width: 72rem;
+  margin: 0.75rem auto;
+}
+
+.state-banner__heading,
+.state-banner__body,
+.state-banner__link {
+  margin: 0.25rem 0;
+}
+
+.state-banner__link a {
+  color: inherit;
+  font-weight: 700;
+}
+
+.fallback-site-nav {
+  padding-top: 1rem;
+  border-bottom: var(--fallback-border);
+}
+
+.fallback-site-nav__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0 0 0.75rem;
+}
+
+.fallback-site-nav__patch {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.85rem;
+}
+
+.fallback-card {
+  display: block;
+  border: var(--fallback-border);
+  background: var(--fallback-bg-light);
+  padding: 0.75rem 1rem 1rem;
+  margin: 1rem 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.fallback-card--accent {
+  border-left-width: 8px;
+}
+
+.fallback-card__title {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-heading, inherit);
+}
+
+.fallback-card__sample {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.fallback-data-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.fallback-data-table caption {
+  text-align: left;
+  font-weight: 700;
+  padding-bottom: 0.4rem;
+}
+
+.fallback-data-table th,
+.fallback-data-table td {
+  border-bottom: 1px solid var(--grid-line, rgba(11, 22, 42, 0.2));
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+
+.fallback-data-table th {
+  border-bottom: var(--fallback-border);
+  white-space: nowrap;
+}
+
+.fallback-data-table--dense th,
+.fallback-data-table--dense td {
+  padding: 0.2rem 0.4rem;
+}
+
+.fallback-is-end {
+  text-align: right;
+}
+
+.fallback-data-table__empty {
+  margin: 0.5rem 0;
+  font-style: italic;
+}
+
+.fallback-tier-badge {
+  display: inline-block;
+  min-width: 2rem;
+  text-align: center;
+  border: var(--fallback-border);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 700;
+  padding: 0 0.25rem;
+}
+
+.fallback-stat {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.fallback-stat__value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fallback-stat__reason,
+.fallback-stat__n,
+.fallback-stat__label {
+  font-size: 0.85rem;
+}
+
+.fallback-sample-size-notice {
+  border-left: 4px solid var(--fallback-primary);
+  padding: 0.25rem 0 0.25rem 0.75rem;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.fallback-build-list {
+  margin: 1rem 0;
+}
+
+.fallback-site-footer {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: var(--fallback-border);
+  font-size: 0.9rem;
+}
+
+.fallback-site-footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+
+.fallback-site-footer__legal {
+  max-width: 60rem;
+}
+
+.fallback-champion-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+
+.fallback-matrix {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fallback-matrix th,
+.fallback-matrix td {
+  border: 1px solid var(--grid-line, rgba(11, 22, 42, 0.2));
+  padding: 0.15rem 0.3rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fallback-matrix tbody th {
+  text-align: left;
+}
+
+.fallback-matrix__unavailable {
+  color: #5a5a5a;
+}
+
+.fallback-matrix__self {
+  background: var(--grid-line, rgba(11, 22, 42, 0.15));
+}
+
+.fallback-scroll {
+  overflow-x: auto;
+}
+
+.fallback-empty {
+  border: var(--fallback-border);
+  background: var(--fallback-bg-light);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+}
+
+.fallback-patch-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.fallback-patch-switcher [aria-current="page"] {
+  font-weight: 700;
+  text-decoration: underline;
+}

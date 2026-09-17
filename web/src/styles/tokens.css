@@ -1,0 +1,55 @@
+/*
+ * The frozen token layer. docs/contracts.md section 3 says this file "declares
+ * exactly these names and no others at :root", so the thirteen values below are
+ * the entire :root block of this file and nothing else is added to it. The
+ * families are the reference design's own three, self-hosted (see fonts.css)
+ * and backed by the system stacks they fall back to.
+ *
+ * The rest of the system - semantic scales for tier grades and win-rate
+ * deviation, spacing, density and the composite shadows - is declared in
+ * global.css, which is imported here so that BaseLayout's single
+ * `import '../styles/tokens.css'` still pulls in the whole surface. Splitting
+ * the file rather than widening the frozen block is the one arrangement that
+ * keeps both rules true; see docs/design-system.md. fonts.css is imported for
+ * the same reason: the @font-face declarations are not tokens.
+ *
+ * Lift from plan section 7.1, values verbatim:
+ *   --bg-color        #efdbbf   page field
+ *   --bg-light        #f1eae0   raised surfaces and light-on-dark text
+ *   --primary-color   #0b162a   structure, headers, footer
+ *   --accent-color    #1b4bc6   links, edges, focus ring
+ *   --text-color      #242a2b   body copy
+ *   --grid-line       rgba(27, 75, 202, 0.06)   blueprint grid at 27px
+ *   --grid-size       27px
+ *   --border-width    2px
+ *   --shadow-offset-sm 8px      hard offset shadow
+ *   --shadow-offset-md 12px     hard offset shadow
+ *   --radius          0         no radius, anywhere
+ *
+ * There is no border radius in the system. The single exception is the submit
+ * button, which reads --radius-btn (5px) from global.css.
+ */
+@import './global.css';
+@import './fonts.css';
+
+:root {
+  --bg-color: #efdbbf;
+  --bg-light: #f1eae0;
+
+  --primary-color: #0b162a;
+  --accent-color: #1b4bc6;
+  --text-color: #242a2b;
+
+  --font-heading: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --grid-line: rgba(27, 75, 202, 0.06);
+  --grid-size: 27px;
+
+  --border-width: 2px;
+  --shadow-offset-sm: 8px;
+  --shadow-offset-md: 12px;
+
+  --radius: 0;
+}

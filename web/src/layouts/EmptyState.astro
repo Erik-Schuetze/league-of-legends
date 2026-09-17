@@ -1,0 +1,29 @@
+---
+// The explicit empty state.
+//
+// Two of the three data states render this: 'no data' on every statistics slot,
+// and 'live' for a selection the snapshot has nothing for. It is never an error
+// message and never a zero - it says what is missing, why, and what changes it.
+
+interface Props {
+  title: string;
+  body: string;
+  /** The threshold that would have to be met for a rate to be published. */
+  minCellN?: number | null;
+}
+
+const { title, body, minCellN } = Astro.props;
+---
+
+<div class="fallback-empty" role="note">
+  <p><strong>{title}</strong></p>
+  <p>{body}</p>
+  {
+    minCellN !== null && minCellN !== undefined && (
+      <p>
+        A rate is published only for a cell with at least n = {minCellN} games. Nothing here is estimated or
+        back-filled from a thinner sample.
+      </p>
+    )
+  }
+</div>

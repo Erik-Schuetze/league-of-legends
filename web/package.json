@@ -1,0 +1,26 @@
+{
+  "name": "league-of-legends-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "typecheck": "tsc --noEmit",
+    "data:champions": "node scripts/fetch-ddragon.mjs",
+    "data:fonts": "node scripts/fetch-fonts.mjs",
+    "data:fixtures": "node scripts/make-fixtures.mjs"
+  },
+  "dependencies": {
+    "astro": "7.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.5",
+    "typescript": "7.0.2"
+  }
+}

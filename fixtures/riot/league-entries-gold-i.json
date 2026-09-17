@@ -1,0 +1,23 @@
+[
+  {
+    "puuid": "fixture-puuid-01",
+    "queueType": "RANKED_SOLO_5x5",
+    "tier": "GOLD",
+    "rank": "I",
+    "leaguePoints": 74
+  },
+  {
+    "puuid": "fixture-puuid-02",
+    "queueType": "RANKED_SOLO_5x5",
+    "tier": "GOLD",
+    "rank": "I",
+    "leaguePoints": 42
+  },
+  {
+    "puuid": "fixture-puuid-03",
+    "queueType": "RANKED_SOLO_5x5",
+    "tier": "GOLD",
+    "rank": "I",
+    "leaguePoints": 11
+  }
+]

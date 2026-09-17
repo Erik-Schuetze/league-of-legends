@@ -1,0 +1,84 @@
+# The Caddyfile for the lolstats web tier. This is NOT the cluster's shared
+# Caddy: that one stays where it is and only gains a reverse_proxy to this
+# Service (see homecluster/web/caddy/configmap.yaml). This tier is what makes the
+# site and its aggregate artifacts one origin, so the browser needs no CORS
+# exception and the shared proxy needs no route of its own for /agg.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lolstats-site-config
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: web
+data:
+  Caddyfile: |
+    {
+    	# cache-handler is a third-party directive with no default place in the
+    	# standard order, so it has to be told where it belongs. Before rewrite
+    	# means the cached decision is made on the original path, which is what
+    	# /agg/* needs: without it the handler would see the path only after
+    	# handle_path had already stripped the prefix.
+    	order cache before rewrite
+
+    	cache {
+    		# Everything under /agg is republished nightly and the whole tree is
+    		# replaced by directory rename, so a stale entry can only survive for
+    		# a minute and a long TTL would buy nothing.
+    		ttl 60s
+    		allowed_http_verbs GET HEAD
+    		default_cache_control public
+    		# In-memory storage: this pod serves files and can be replaced at any
+    		# time, so a persistent cache would be a disk dependency with no
+    		# benefit.
+    		otter
+    	}
+    }
+
+    # Port 8080, not 80: the container runs as an unprivileged uid and the
+    # restricted pod security profile forbids the capability needed to bind a
+    # port below 1024. The Service publishes it as 80.
+    :8080 {
+    	# brotli is deliberately absent. It is not in Caddy's standard module set
+    	# (the official image ships gzip and zstd only), so `encode br` fails
+    	# config adaptation at start-up with "module not registered:
+    	# http.encoders.br" - a crash loop, not a warning. Adding it would mean
+    	# one more third-party module pinned in build/caddy/Dockerfile for a few
+    	# percent on a pre-rendered site that zstd already compresses well.
+    	# Verified against the built image with `caddy validate`.
+    	encode zstd gzip
+
+    	cache
+
+    	# Answered by the server, not by the file server, so the probes do not
+    	# depend on whether anything has been published yet. A probe on / would
+    	# read a 404 from an empty volume as a failure and hold both replicas out
+    	# of the Service while the site has simply never been built.
+    	handle /healthz {
+    		respond "ok" 200
+    	}
+
+    	# The aggregate tree, served as-is. handle_path strips /agg so that the
+    	# URL prefix and the on-disk layout stay independent.
+    	handle_path /agg/* {
+    		root * /var/lib/lolstats/agg
+    		file_server
+    	}
+
+    	# The rendered site. try_files is what makes Astro's directory output work
+    	# without a trailing slash on the request.
+    	handle {
+    		root * /var/lib/lolstats/site
+    		try_files {path} {path}/ {path}/index.html
+    		file_server
+    	}
+
+    	header {
+    		-Server
+    		X-Content-Type-Options nosniff
+    	}
+
+    	log {
+    		output stdout
+    		format console
+    	}
+    }
