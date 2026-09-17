@@ -6,8 +6,8 @@
 //
 // Usage:
 //
-//	go run ./cmd/gen-types -out web/src/types
-//	go run ./cmd/gen-types -check -out web/src/types
+//	go run ./cmd/gen-types -out schema
+//	go run ./cmd/gen-types -check -out schema
 package main
 
 import (
@@ -35,7 +35,7 @@ func main() {
 
 func run(args []string) error {
 	fs := flag.NewFlagSet("gen-types", flag.ContinueOnError)
-	out := fs.String("out", "web/src/types", "directory to write the generated declaration and schema into")
+	out := fs.String("out", "schema", "directory to write the generated declaration and schema into")
 	check := fs.Bool("check", false, "do not write; exit non-zero if the generated files are stale")
 	if err := fs.Parse(args); err != nil {
 		return err

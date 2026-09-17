@@ -3,10 +3,11 @@
 #
 #   sh scripts/compliance-check.sh
 #
-# No network, no npm, no package manager: it reads the source tree, the built
-# site in web/dist, and the shared wording in web/src/lib/legal.ts. Build the
-# site first, because four of the checks are about what the deployment actually
-# serves rather than about what the source intends.
+# No network, no npm, no package manager: it reads the source tree, the corpus of
+# pages a running tier served, and the shared wording in internal/webtier. Capture
+# the corpus first (make compliance does both), because four of the checks are
+# about what the deployment actually serves rather than about what the source
+# intends.
 #
 # It exits non-zero if any launch-blocking check fails, and prints PASS or FAIL
 # for each one together with the number of files the scan read. That count is
@@ -24,19 +25,10 @@
 #                                     canonical, the sitemap and robots.txt to name one
 #                                     host: this variable when it is set, and the build's
 #                                     own deliberate default when it is not
-#   LOLSTATS_DIST                     scan this build instead of web/dist. Used to check
-#                                     the demo, no-data and live builds separately; it
-#                                     changes only which files are read, never a rule
-#   LOLSTATS_SERVED_DIST              a directory of pages captured from a *running* tier
-#                                     (scripts/capture-served-pages.sh, `make
-#                                     compliance-served`). Checks 3 and 4 then also scan
-#                                     that corpus, every rule unchanged. It is a second
-#                                     corpus rather than a replacement: the built tree is
-#                                     what the tier renders from, and the served HTML is
-#                                     what a reader actually receives, and the two differ
-#                                     in exactly the place the amendment is about - the
-#                                     tier emits the no-JS <form> the reference tree does
-#                                     not, so check 4 against web/dist alone is vacuous
+#   LOLSTATS_DIST                     scan another capture instead of the default one
+#                                     (bin/served-pages). Used to check a demo, no-data
+#                                     or live tier separately; it changes only which
+#                                     files are read, never a rule
 #   LOLSTATS_CONTACT_EMAIL            the published contact address
 #
 # Where a check can only be satisfied by a decision that is not the code's to
@@ -46,17 +38,25 @@
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-# A reviewer who has to verify a specific data state can point the scans at that
-# snapshot instead of the shared web/dist, which concurrent builds overwrite:
-#   LOLSTATS_DIST=.agent-artifacts/provfix/dist-final-demo sh scripts/compliance-check.sh
-DIST="${LOLSTATS_DIST:-$ROOT/web/dist}"
+# The corpus is what a running tier served, captured by
+# scripts/capture-served-pages.sh. It replaced the compiled Astro reference tree
+# (web/dist) on 2026-09-17, when the Go SSR tier became the only published site
+# and the retired tree stopped being built. The capture is the stronger corpus and
+# it is the only one now: it is the deployment's own output, it covers the whole
+# site rather than a sample, and it carries the no-JS <form> the pre-rendered tree
+# never had - which is the markup checks 3 and 4 are about. A reviewer who has to
+# verify a specific data state can point the scans at a capture of that state
+# instead of the shared one, which a concurrent capture replaces wholesale:
+#   LOLSTATS_DIST=.agent-artifacts/capture-final-demo sh scripts/compliance-check.sh
+DIST="${LOLSTATS_DIST:-$ROOT/bin/served-pages}"
 if [ "${LOLSTATS_DIST:-}" != "" ] && [ "${DIST#/}" = "$DIST" ]; then DIST="$ROOT/$DIST"; fi
-# The optional second corpus: pages captured from a running tier. See the
-# environment note at the top of this file, and `make compliance-served`.
-SERVED_DIST="${LOLSTATS_SERVED_DIST:-}"
-if [ -n "$SERVED_DIST" ] && [ "${SERVED_DIST#/}" = "$SERVED_DIST" ]; then SERVED_DIST="$ROOT/$SERVED_DIST"; fi
-LEGAL="$ROOT/web/src/lib/legal.ts"
-SITE="$ROOT/web/src/lib/site.ts"
+# The shared wording, and the two Go files that carry it: brand.go holds the
+# non-endorsement notice, the trademarks, the operator's identity and the contact
+# address; site.go holds the three labels a page's data state is rendered with.
+# They were ported from web/src/lib/legal.ts and web/src/lib/site.ts, and they are
+# now the source of truth that the pages are checked against.
+LEGAL="$ROOT/internal/webtier/brand.go"
+SITE="$ROOT/internal/webtier/site.go"
 # Scratch space for the scans. It is named after this process so that two
 # reviewers running the gate at the same time cannot delete each other's tally
 # files half way through: that clobbering made whole checks report "0 of 0
@@ -110,28 +110,38 @@ list_grep() {
 	return 0
 }
 
-# Read one string constant out of a TypeScript module, or print nothing.
+# Read one string constant out of a Go source file, or print nothing.
 #
-# The constants these checks turn into patterns are declared in site.ts and
-# legal.ts, and a declaration is allowed to be wrapped over several lines:
-# site.ts writes UNVERIFIED_PREVIEW_TEXT that way. A line-oriented
-# `sed -n "s/.*NAME = '\(.*\)';.*/\1/p"` returns the empty string for such a
-# declaration, and that empty string then became a grep pattern - an ERE with a
-# trailing `|` has an empty alternative that matches every page, and
-# `grep -LF ""` lists no file at all - so the check that used it passed while
-# proving nothing. Newlines are therefore flattened to spaces before matching
-# (flattening cannot change a single-line string literal, but it does let a
-# declaration be read whole) and the declaration, not a mention of the name, is
-# what is matched: `const NAME = <quote>...<quote>`.
+# The constants these checks turn into patterns are declared in
+# internal/webtier/brand.go and internal/webtier/site.go. This reader used to
+# parse TypeScript, because the wording lived in web/src/lib/legal.ts and
+# web/src/lib/site.ts until the retired reference tree was deleted; the two rules
+# it learned there still apply and neither is cosmetic:
+#
+#  - a declaration may be wrapped over several lines, so newlines are flattened
+#    to spaces before matching. site.ts wrote UNVERIFIED_PREVIEW_TEXT that way,
+#    and a line-oriented `sed -n "s/.*NAME = '(.*)';.*/\1/p"` returned the empty
+#    string for it - and that empty string then became a grep pattern. An ERE
+#    with a trailing `|` has an empty alternative that matches every page, and
+#    `grep -LF ""` lists no file at all, so the check that used it passed while
+#    proving nothing.
+#  - the declaration, not a mention of the name, is what is matched.
+#
+# Go declares these inside a const block, so there is no `const` keyword on the
+# line to anchor on. The name is anchored by the `=` and by requiring a quoted
+# literal immediately after it, which is what keeps a reference to the constant
+# (`Heading: NoDataHeading`, `Prose(PreviewText)`) from being read as a
+# declaration of it. Both the interpreted literal and the raw one (in backticks,
+# which Go uses for a string with no escapes in it) are accepted, and single
+# quotes are not: they are not a Go string at all, and accepting them would only
+# mean a pattern read out of a syntax error.
 read_const() {
 	tr '\n' ' ' < "$1" 2>/dev/null | awk -v name="$2" '
-		BEGIN { sq = sprintf("%c", 39); dq = sprintf("%c", 34); bq = sprintf("%c", 96) }
+		BEGIN { dq = sprintf("%c", 34); bq = sprintf("%c", 96) }
 		{
-			# An optional type annotation is allowed; the literal may be single
-			# quoted, double quoted or backticked.
-			re = "(^|[^A-Za-z0-9_])const[[:space:]]+" name "([[:space:]]*:[^=;]*)?[[:space:]]*=[[:space:]]*"
-			for (i = 1; i <= 3; i++) {
-				q = (i == 1 ? sq : (i == 2 ? dq : bq))
+			re = "(^|[^A-Za-z0-9_])" name "[[:space:]]*=[[:space:]]*"
+			for (i = 1; i <= 2; i++) {
+				q = (i == 1 ? dq : bq)
 				if (match($0, re q "([^" q "]*)" q)) {
 					s = substr($0, RSTART, RLENGTH)
 					sub("^[^=]*=[[:space:]]*" q, "", s)
@@ -151,15 +161,15 @@ read_const() {
 # worse than no scan: it matches everything and reports PASS.
 assert_read() {
 	if [ -n "$3" ]; then return 0; fi
-	fail "$2 could not be read from $1, so $4 cannot be checked. An empty pattern is not a skipped check: it is a pattern that matches (or discards) every file, which is how this gate has passed while proving nothing. Expected a single-literal declaration, which may be wrapped over several lines and may be quoted with ' or \" or \`: const $2 = '...';"
+	fail "$2 could not be read from $1, so $4 cannot be checked. An empty pattern is not a skipped check: it is a pattern that matches (or discards) every file, which is how this gate has passed while proving nothing. Expected a single-literal declaration, which may be wrapped over several lines and may be quoted with \" or \`: $2 = \"...\";"
 	return 1
 }
 
-# The built site is written by another 'npm run build', which replaces web/dist
-# wholesale. A gate run that lands mid-rebuild reads a torn tree: /disclaimer
-# exists but is empty, no page carries the notice, no canonical can be read - and
-# the gate then reports five content violations that are really one race, which is
-# both alarming and wrong. Five missing-content failures at once is a shape, not a
+# The corpus is written by another scripts/capture-served-pages.sh, which removes
+# the directory and rebuilds it. A gate run that lands mid-capture reads a torn
+# tree: /disclaimer exists but is empty, no page carries the notice, no canonical
+# can be read - and the gate then reports five content violations that are really
+# one race, which is both alarming and wrong. Five missing-content failures at once is a shape, not a
 # coincidence, so the tree is checked for it up front and the run stops with a
 # diagnosis rather than a verdict. This exits 2: it is not a compliance failure,
 # and no check has been evaluated yet.
@@ -173,11 +183,11 @@ preflight_dist() {
 		fi
 	done
 	if [ "$torn" != '' ]; then
-		printf 'CANNOT RUN  the built site at %s is incomplete:%s\n' "$DIST" "$torn"
-		printf '            another process is writing it (an npm run build replaces web/dist\n'
-		printf '            wholesale) or the site has not been built. Build it, let the build\n'
-		printf '            settle, and re-run: these are missing or half-written files, not\n'
-		printf '            compliance failures.\n'
+		printf 'CANNOT RUN  the served corpus at %s is incomplete:%s\n' "$DIST" "$torn"
+		printf '            another process is writing it (capture-served-pages.sh replaces it\n'
+		printf '            wholesale) or nothing has been captured yet. Capture it, let the\n'
+		printf '            capture settle, and re-run: these are missing or half-written files,\n'
+		printf '            not compliance failures.\n'
 		exit 2
 	fi
 }
@@ -205,17 +215,17 @@ printf 'compliance gate: %s\n' "$ROOT"
 printf 'this is a build of %s\n' "${LOLSTATS_SITE_URL:-an unconfigured address}"
 
 # ---------------------------------------------------------------------------
-check '0. The built site is present'
+check '0. The served corpus is present'
 if [ ! -d "$DIST" ]; then
-	fail 'web/dist is missing; build it first: (cd web && npm run build)'
+	fail "no served corpus at $DIST; capture one first: make compliance (or make served-pages)"
 	exit 1
 fi
 htmls=$(count_files "$DIST")
 if [ "$htmls" -lt 10 ]; then
-	fail "web/dist holds only $htmls HTML pages; build it first: (cd web && npm run build)"
+	fail "$DIST holds only $htmls HTML pages; capture a tier's pages first: make served-pages"
 	exit 1
 fi
-pass "web/dist holds $htmls built HTML pages"
+pass "$DIST holds $htmls served HTML pages"
 
 preflight_dist
 
@@ -227,14 +237,14 @@ find "$ROOT" \
 	-o -name '*.mjs' -o -name '*.js' -o -name '*.html' -o -name '*.css' \) -print0 \
 	> "$WORK/rating-scan-files.bin" 2>/dev/null
 rating_scanned=$(count_nul "$WORK/rating-scan-files.bin")
-note "scanned $rating_scanned files: Go, SQL, TS/JS, Astro, JSON, HTML and CSS (node_modules, .git and .agent-artifacts excluded)"
+note "scanned $rating_scanned files: Go, SQL, TS/JS, JSON, HTML and CSS, the captured served pages included (node_modules, .git, .agent-artifacts and build caches excluded)"
 if [ "$rating_scanned" -lt 200 ]; then
 	fail "the rating scan read only $rating_scanned files, which is too few to be evidence; the find expression is wrong, not the code clean"
 else
 	list_grep "$WORK/rating-scan-files.bin" -InE "$RATING_TOKENS" > "$WORK/rating-hits.txt"
 	rating_hits=$(count_lines "$WORK/rating-hits.txt")
 	if [ "$rating_hits" -eq 0 ]; then
-		fail 'the rating scan found no mention of a rating at all, not even the standing prohibition in web/src/lib/legal.ts; the pattern is wrong rather than the code clean'
+		fail 'the rating scan found no mention of a rating at all, not even the standing prohibition in internal/webtier/brand.go; the pattern is wrong rather than the code clean'
 	else
 		grep -iE "$RATING_NEGATED" "$WORK/rating-hits.txt" > "$WORK/rating-exempt.txt" 2>/dev/null || true
 		rating_exempt=$(count_lines "$WORK/rating-exempt.txt")
@@ -262,7 +272,7 @@ find "$DIST" -type f \( -name '*.html' -o -name '*.css' \) -print0 |
 	> "$WORK/image-refs.txt" 2>/dev/null || true
 image_refs=$(count_lines "$WORK/image-refs.txt")
 dd_refs=$(grep -ohIE '<img[^>]*>' "$WORK/image-refs.txt" 2>/dev/null | grep -cF "$DD_ORIGIN" | tr -d ' ')
-note "scanned image references in the built HTML and CSS: $image_refs matching tags or url() values, of which $dd_refs belong to an <img> tag on Riot's Data Dragon CDN"
+note "scanned image references in the served HTML and CSS: $image_refs matching tags or url() values, of which $dd_refs belong to an <img> tag on Riot's Data Dragon CDN"
 if [ "$image_refs" -lt 20 ] || [ "$dd_refs" -lt 1 ]; then
 	fail "the asset scan read only $image_refs image references and $dd_refs Data Dragon ones; it is not evidence of anything"
 else
@@ -296,7 +306,7 @@ check '3. No third-party scripts, embeds, fonts or tracking in the served pages'
 # number of pages still fails.
 #
 # The origin a reference may legally name is the one this build declares for
-# itself, read from the canonical link of the built index rather than from an
+# itself, read from the canonical link of the served index rather than from an
 # environment variable, so a checkout with no site URL configured still knows
 # which absolute references are its own.
 SELF_ORIGIN=$(grep -ohE '<link[^>]*rel="canonical"[^>]*>' "$DIST/index.html" 2>/dev/null |
@@ -335,7 +345,7 @@ else
 	external_of "$WORK/resource-tags.txt" > "$WORK/external-resources.txt"
 	sort -u < "$WORK/external-resources.txt" > "$WORK/external-resources-uniq.txt" 2>/dev/null || cp "$WORK/external-resources.txt" "$WORK/external-resources-uniq.txt"
 	external_resources=$(count_lines "$WORK/external-resources-uniq.txt")
-	note "scanned $pages_scanned built pages: $resource_tags usable-resource tags, $script_tags <script> tags, $script_srcs of them with a src"
+	note "scanned $pages_scanned served pages: $resource_tags usable-resource tags, $script_tags <script> tags, $script_srcs of them with a src"
 	note 'a page with no <script> is not a failure and is not evidence of anything by itself: what is asserted is that no <script>, stylesheet, font preload, embed or @import in the served markup names any origin but the one above, and that no tracking service appears at all'
 	# The negative control. Each fragment below is one the check exists to catch,
 	# and the two positive controls must be flagged while the two negative ones
@@ -349,11 +359,11 @@ else
 	ctrl_self=$(probe_prefix | grep -c 'tokens\.css' | tr -d ' ')
 	ctrl_image=$(probe '<img src="https://example.invalid/x.png">' | grep -c 'example\.invalid' | tr -d ' ')
 	if [ "$pages_scanned" -lt 100 ]; then
-		fail "the resource scan read $pages_scanned built page(s); that is too few to be evidence about a site of this size"
+		fail "the resource scan read $pages_scanned served page(s); that is too few to be evidence about a site of this size"
 	elif [ "$resource_tags" -eq 0 ]; then
 		fail "the resource scan read $pages_scanned pages and extracted no resource tag at all, so its clean result is evidence of nothing: the extractor no longer matches the markup"
 	elif [ "$ctrl_tracker" -lt 1 ] || [ "$ctrl_font" -lt 1 ]; then
-		fail "the negative control did not fire: an analytics <script> was flagged $ctrl_tracker time(s) and a third-party font preconnect $ctrl_font time(s), so a clean scan of the built pages would prove nothing"
+		fail "the negative control did not fire: an analytics <script> was flagged $ctrl_tracker time(s) and a third-party font preconnect $ctrl_font time(s), so a clean scan of the served pages would prove nothing"
 	elif [ "$ctrl_self" -ne 0 ] || [ "$ctrl_image" -ne 0 ]; then
 		fail "the control is over-broad: a same-origin stylesheet was flagged $ctrl_self time(s) and a third-party <img> $ctrl_image time(s) (images are check 2's business, not this check's)"
 	elif [ "$external_resources" -eq 0 ]; then
@@ -361,36 +371,6 @@ else
 	else
 		fail "$external_resources external resource reference(s) or tracker name(s) found:"
 		trim < "$WORK/external-resources-uniq.txt" | sed 's/^/      /' | head -20
-	fi
-	# The same scan over the pages a running tier actually served, when a capture
-	# of them is offered. The built tree and the served HTML are not the same
-	# document - the tier renders the filter bar the reference tree leaves to a
-	# client island, and it can add a header, a banner or a script of its own at
-	# render time - so a clean built tree is not evidence about what a reader
-	# receives. Same extractor, same origin filter, same control above.
-	if [ -n "$SERVED_DIST" ]; then
-		served_pages=$(find "$SERVED_DIST" -type f -name '*.html' | wc -l | tr -d ' ')
-		if [ "$served_pages" -lt 8 ]; then
-			fail "the served corpus has $served_pages page(s); that is too few to be evidence that the tier serves nothing third-party"
-		else
-			: > "$WORK/served-resource-tags.txt"
-			find "$SERVED_DIST" -type f -name '*.html' -print0 |
-				xargs -0 cat 2>/dev/null | resource_tags_of > "$WORK/served-resource-tags.txt"
-			served_tags=$(count_lines "$WORK/served-resource-tags.txt")
-			external_of "$WORK/served-resource-tags.txt" > "$WORK/served-external.txt"
-			sort -u < "$WORK/served-external.txt" > "$WORK/served-external-uniq.txt" 2>/dev/null || cp "$WORK/served-external.txt" "$WORK/served-external-uniq.txt"
-			served_external=$(count_lines "$WORK/served-external-uniq.txt")
-			find "$SERVED_DIST" -type f -name '*.html' -print0 > "$WORK/served-pages.bin"
-			served_zero_script=$(list_grep "$WORK/served-pages.bin" -L '<script' | wc -l | tr -d ' ')
-			if [ "$served_tags" -eq 0 ]; then
-				fail "the served corpus has $served_pages page(s) and the extractor read no resource tag in them, so its clean result is evidence of nothing"
-			elif [ "$served_external" -eq 0 ]; then
-				pass "the served corpus agrees: all $served_tags resource tags across $served_pages served page(s) are same-origin, and $served_zero_script of them carry no <script> at all"
-			else
-				fail "$served_external external resource reference(s) or tracker name(s) in the served pages:"
-				trim < "$WORK/served-external-uniq.txt" | sed 's/^/      /' | head -20
-			fi
-		fi
 	fi
 fi
 
@@ -437,7 +417,7 @@ form_is_nojs_path() {
 	return 0
 }
 # Remove every <form ...> ... </form> span from the pages on standard input. The
-# built and served pages are one line each, so a line-oriented state machine is
+# every captured page is one line, so a line-oriented state machine is
 # enough; nested forms are invalid HTML and are not considered.
 strip_forms() {
 	awk '{
@@ -456,18 +436,18 @@ find "$DIST" -type f -name '*.html' -print0 |
 	> "$WORK/gating.txt" 2>/dev/null || true
 gating=$(count_lines "$WORK/gating.txt")
 search_inputs=$(find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -hoIE '<input[^>]*type="search"[^>]*>' 2>/dev/null | grep -c '<input' | tr -d ' ')
-note "scanned $(count_files "$DIST") built pages for a credential field, a sign-in, registration, subscription or checkout route, or a paywall"
+note "scanned $(count_files "$DIST") served pages for a credential field, a sign-in, registration, subscription or checkout route, or a paywall"
 # A site that gates nothing and a pattern that matches nothing produce the same
 # silence, so the pattern is exercised against the markup this check exists to
 # catch before its silence is believed - the same control check 9 applies to its
 # pattern, and the reason this check has no exemption list to hide behind.
 gating_probe=$(printf '%s\n' '<form action="/login"><input type="password" name="password"></form>' '<a href="/pricing">Pricing</a>' | grep -cE "$GATING" | tr -d ' ')
 if [ "$gating_probe" -lt 2 ]; then
-	fail "the gating pattern matches only $gating_probe of the two pieces of markup it exists to catch, so a clean scan of the built pages would prove nothing"
+	fail "the gating pattern matches only $gating_probe of the two pieces of markup it exists to catch, so a clean scan of the served pages would prove nothing"
 elif [ "$gating" -eq 0 ]; then
-	pass 'no credential field, no auth route and no paywall in any built page; every route renders for an anonymous reader'
+	pass 'no credential field, no auth route and no paywall in any served page; every route renders for an anonymous reader'
 else
-	fail "$gating gating element(s) found in the built pages:"
+	fail "$gating gating element(s) found in the served pages:"
 	trim < "$WORK/gating.txt" | sort -u | sed 's/^/      /' | head -20
 fi
 
@@ -490,7 +470,7 @@ forms_bad=$(count_lines "$WORK/forms-bad.txt")
 find "$DIST" -type f -name '*.html' -print0 | xargs -0 cat 2>/dev/null | strip_forms |
 	grep -ohIE "$NAMED_CONTROL" > "$WORK/controls-outside-form.txt" 2>/dev/null || true
 controls_outside=$(count_lines "$WORK/controls-outside-form.txt")
-note "scanned $forms form(s) in the built pages, and every named control outside one; $search_inputs <input type=\"search\"> elements are the islands' own filters, which carry no name and therefore submit nothing"
+note "scanned $forms form(s) in the served pages, and every named control outside one; $search_inputs <input type=\"search\"> elements are the islands' own filters, which carry no name and therefore submit nothing"
 # The controls. Both must fire on markup that is a gate or a dead control, and
 # neither may fire on the tier's own filter bar.
 r2_ctrl=$(printf '%s\n' '<form action="https://example.invalid/login" method="post"><input name="u"></form>' '<form method="get"><input name="q"></form>' | grep -cE "$FORM_TAG" | tr -d ' ')
@@ -504,49 +484,22 @@ if [ "$r2_ctrl" -lt 2 ] || [ "$r2_ctrl_bad" -lt 2 ] || [ "$r2_ctrl_good" -ne 0 ]
 	fail "the no-JS-path control is wrong: of two forms (one posting off-origin, one with no action) it flagged $r2_ctrl_bad of 2, and it flagged $r2_ctrl_good of the tier's own GET form"
 elif [ "$r3_ctrl" -lt 2 ] || [ "$r3_ctrl_good" -ne 0 ]; then
 	fail "the named-control control is wrong: $r3_ctrl of 2 named controls outside a form were found, and $r3_ctrl_good of the two named controls inside the tier's own form were reported as outside one"
+elif [ "$forms" -eq 0 ]; then
+	# The corpus is the tier's own output and the tier renders the no-JS filter
+	# bar, so a corpus with no <form> in it is either not the tier's HTML or has
+	# stopped exercising the rule this check exists for. Both readings are bad and
+	# neither is a pass: a rule about forms that no page can violate proves
+	# nothing. This was the served half of this check while the corpus and the
+	# served pages were two different things.
+	fail "no <form> appears in any of the $(count_files "$DIST") served page(s), so the no-JS-path rule proves nothing: either the tier stopped shipping its filter bar or this corpus is not the tier's HTML"
 elif [ "$forms_bad" -eq 0 ] && [ "$controls_outside" -eq 0 ]; then
-	pass "every form in the built pages is a GET form on this origin ($forms checked) and every named control is inside one (0 of $controls_outside outside); no credential field, no auth route and no paywall"
+	pass "every form in the served pages is a GET form on this origin ($forms checked) and every named control is inside one (0 of $controls_outside outside); no credential field, no auth route and no paywall"
 else
 	fail "$forms_bad form(s) are not a no-JS server-side path and $controls_outside named control(s) sit outside a form:"
 	trim < "$WORK/forms-bad.txt" | sed 's/^/      /' | head -10
 	trim < "$WORK/controls-outside-form.txt" | sed 's/^/      /' | head -10
 fi
 
-# The same two rules over the pages a running tier actually served. This is the
-# corpus they were written for: the reference tree in web/dist carries no <form>
-# at all (its filter bar is a client island), so against web/dist alone every
-# form rule above is vacuous - a form that does not exist cannot violate them.
-# The tier renders the no-JS GET form, so only the served corpus can show that
-# the route a reader gets satisfies R2 and R3, and only it can show that a form
-# accepted here is the one the tier really emits.
-if [ -n "$SERVED_DIST" ]; then
-	served_pages_forms=$(find "$SERVED_DIST" -type f -name '*.html' | wc -l | tr -d ' ')
-	find "$SERVED_DIST" -type f -name '*.html' -print0 > "$WORK/served-forms-pages.bin"
-	list_grep "$WORK/served-forms-pages.bin" -HoIE "$FORM_TAG" > "$WORK/served-forms.txt" 2>/dev/null || true
-	served_forms=$(count_lines "$WORK/served-forms.txt")
-	: > "$WORK/served-forms-bad.txt"
-	while IFS= read -r formline; do
-		[ -n "$formline" ] || continue
-		if ! form_is_nojs_path "${formline#*:}"; then
-			printf '%s\n' "$formline" >> "$WORK/served-forms-bad.txt"
-		fi
-	done < "$WORK/served-forms.txt"
-	served_forms_bad=$(count_lines "$WORK/served-forms-bad.txt")
-	find "$SERVED_DIST" -type f -name '*.html' -print0 | xargs -0 cat 2>/dev/null | strip_forms |
-		grep -ohIE "$NAMED_CONTROL" > "$WORK/served-controls-outside-form.txt" 2>/dev/null || true
-	served_controls_outside=$(count_lines "$WORK/served-controls-outside-form.txt")
-	if [ "$served_pages_forms" -lt 8 ]; then
-		fail "the served corpus has $served_pages_forms page(s); that is too few to be evidence about the forms the tier serves"
-	elif [ "$served_forms" -eq 0 ]; then
-		fail "the served corpus has $served_pages_forms page(s) and no <form> in any of them, so its agreement proves nothing: either the tier stopped shipping the no-JS filter bar or the capture is not the tier's HTML"
-	elif [ "$served_forms_bad" -eq 0 ] && [ "$served_controls_outside" -eq 0 ]; then
-		pass "the served corpus agrees: every one of the $served_forms form(s) the tier served is a GET form on this origin, and every named control is inside one ($served_controls_outside outside)"
-	else
-		fail "$served_forms_bad served form(s) are not a no-JS server-side path and $served_controls_outside served named control(s) sit outside a form:"
-		trim < "$WORK/served-forms-bad.txt" | sed 's/^/      /' | head -10
-		trim < "$WORK/served-controls-outside-form.txt" | sed 's/^/      /' | head -10
-	fi
-fi
 
 # ---------------------------------------------------------------------------
 check "5. Riot's verified-site requirement is claimed only when it is satisfied"
@@ -561,7 +514,7 @@ PENDING_MARKER='Riot has not verified this site'
 pages=$(count_files "$DIST")
 find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -hoiE "$CLAIMS" > "$WORK/claims.txt" 2>/dev/null || true
 claims=$(count_lines "$WORK/claims.txt")
-note "scanned $pages built pages for a positive claim that Riot has reviewed, verified or endorsed this site: $claims match(es)"
+note "scanned $pages served pages for a positive claim that Riot has reviewed, verified or endorsed this site: $claims match(es)"
 # The site is supposed to make no such claim, so this scan is silent by design and
 # a pattern that had stopped matching would be silent too. The pattern is therefore
 # exercised against the sentence it exists to catch first, as check 9 does with its
@@ -609,18 +562,18 @@ fi
 # ---------------------------------------------------------------------------
 check '6. The non-endorsement notice is visible, and the wording has not drifted'
 if [ ! -f "$LEGAL" ]; then
-	fail 'web/src/lib/legal.ts is missing, so the shared wording cannot be verified'
+	fail 'internal/webtier/brand.go is missing, so the shared wording cannot be verified'
 else
-	read_const "$LEGAL" NON_ENDORSEMENT_TEXT > "$WORK/non-endorsement.txt"
+	read_const "$LEGAL" NonEndorsementText > "$WORK/non-endorsement.txt"
 	approved=$(count_lines "$WORK/non-endorsement.txt")
-	note "read the approved wording back out of web/src/lib/legal.ts: $approved line"
+	note "read the approved wording back out of internal/webtier/brand.go: $approved line"
 	if [ "$approved" -ne 1 ] || ! grep -qF "$NON_ENDORSEMENT_MARKER" "$WORK/non-endorsement.txt"; then
-		fail 'the approved sentence could not be read back from web/src/lib/legal.ts, so this check cannot prove anything'
+		fail 'the approved sentence could not be read back from internal/webtier/brand.go, so this check cannot prove anything'
 	else
 		if grep -qF "$(cat "$WORK/non-endorsement.txt")" "$DIST/disclaimer/index.html" 2>/dev/null; then
 			pass 'the frozen non-endorsement sentence is rendered on /disclaimer, word for word'
 		else
-			fail 'the frozen non-endorsement sentence is missing from the built /disclaimer page'
+			fail 'the frozen non-endorsement sentence is missing from the served /disclaimer page'
 		fi
 		find "$DIST" -type f -name '*.html' -print0 |
 			xargs -0 grep -lF "$(cat "$WORK/non-endorsement.txt")" > "$WORK/notice-approved.txt" 2>/dev/null || true
@@ -633,48 +586,58 @@ else
 		# The notice itself has to be everywhere, or the counts below prove nothing:
 		# a footer that stopped serving it would take every paraphrase with it.
 		if [ "$notice_any" -eq 0 ]; then
-			fail 'no built page carries the non-endorsement notice at all'
+			fail 'no served page carries the non-endorsement notice at all'
 		elif [ "$notice_any" -ne "$pages" ]; then
-			fail "$notice_any of $pages built pages carry the non-endorsement notice; the footer serves it on every page"
+			fail "$notice_any of $pages served pages carry the non-endorsement notice; the footer serves it on every page"
 		else
-			pass "all $pages built pages carry the non-endorsement notice"
+			pass "all $pages served pages carry the non-endorsement notice"
 		fi
 		# Drift: a page that states the notice in wording that is not the frozen
-		# sentence is the failure this check exists for. web/src/components/Footer.astro
-		# used to carry its own paraphrase on every page while the approved sentence
+		# sentence is the failure this check exists for. The retired reference tree's
+		# footer carried its own paraphrase on every page while the approved sentence
 		# appeared on four, and this check passed anyway. It does not now.
 		sort "$WORK/notice-any.txt" > "$WORK/notice-any.sorted"
 		sort "$WORK/notice-approved.txt" > "$WORK/notice-approved.sorted"
 		comm -23 "$WORK/notice-any.sorted" "$WORK/notice-approved.sorted" > "$WORK/notice-drift.txt" 2>/dev/null || true
 		drift=$(count_lines "$WORK/notice-drift.txt")
 		if [ "$drift" -ne 0 ]; then
-			fail "$drift built page(s) state the non-endorsement notice in wording that is not the frozen sentence from web/src/lib/legal.ts:"
+			fail "$drift served page(s) state the non-endorsement notice in wording that is not the frozen sentence from internal/webtier/brand.go:"
 			sed 's/^/      /' "$WORK/notice-drift.txt" | head -5
-			note 'the footer and the legal pages must render NON_ENDORSEMENT_TEXT itself rather than a paraphrase'
+			note 'the footer and the legal pages must render NonEndorsementText itself rather than a paraphrase'
 		else
 			pass "every page that states the notice uses the frozen sentence, so no paraphrase of it is served ($notice_approved of $pages)"
 		fi
-		# And the source invariant behind that, so the drift is caught even in a state
-		# where every page happens to render the sentence for some other reason.
-		footers=''
-		for footer in web/src/components/Footer.astro web/src/layouts/fallback/Footer.astro; do
-			if [ -f "$ROOT/$footer" ] && ! grep -qF 'NON_ENDORSEMENT_TEXT' "$ROOT/$footer"; then
-				footers="$footers $footer"
-			fi
-		done
-		if [ -n "$footers" ]; then
-			fail "these footers do not read NON_ENDORSEMENT_TEXT from web/src/lib/legal.ts, so they can drift from the approved wording:$footers"
+		# And the source invariant behind that, so the drift is caught even in a
+		# state where every page happens to render the sentence for some other
+		# reason. The footer is the one place the notice is repeated on every single
+		# page, so its wording has to be the constants rather than a copy of them:
+		# footerFor in render.go builds the footer sentence as
+		# TrademarkText + " " + NonEndorsementText, and shell.tmpl renders that field.
+		# A footer that carried its own copy of the sentence is exactly the drift
+		# this check exists for - the retired reference tree did that on every page
+		# while the approved sentence appeared on four, and this check passed anyway.
+		# The legal pages' own body copy is not covered by this: stating the notice
+		# is what those pages are for, and the page scans above assert its wording.
+		footer_wiring=''
+		if ! grep -qF 'TrademarkText + " " + NonEndorsementText' "$ROOT/internal/webtier/render.go" 2>/dev/null; then
+			footer_wiring="$footer_wiring internal/webtier/render.go (footerFor no longer builds the footer sentence from the two constants)"
+		fi
+		if ! grep -qF '.Footer.Riot }' "$ROOT/internal/webtier/templates/shell.tmpl" 2>/dev/null; then
+			footer_wiring="$footer_wiring internal/webtier/templates/shell.tmpl (the shell no longer renders the footer sentence)"
+		fi
+		if [ -n "$footer_wiring" ]; then
+			fail "the footer no longer renders the approved sentence from the shared constant, so it can drift from the approved wording:$footer_wiring"
 		else
-			pass 'both footers render the approved sentence from the shared constant rather than a copy of it'
+			pass 'the footer sentence is the shared constants themselves (render.go concatenates TrademarkText and NonEndorsementText, shell.tmpl renders the field), not a copy of the wording'
 		fi
 	fi
 fi
 find "$DIST" -type f -name '*.html' -print0 | xargs -0 grep -LF 'href="/disclaimer"' > "$WORK/no-disclaimer-link.txt" 2>/dev/null || true
 unlinked=$(count_lines "$WORK/no-disclaimer-link.txt")
 if [ "$unlinked" -eq 0 ]; then
-	pass 'every built page links to /disclaimer, so the notice is one click from anywhere on the site'
+	pass 'every served page links to /disclaimer, so the notice is one click from anywhere on the site'
 else
-	fail "$unlinked built page(s) do not link to /disclaimer:"
+	fail "$unlinked served page(s) do not link to /disclaimer:"
 	sed 's/^/      /' "$WORK/no-disclaimer-link.txt" | head -10
 fi
 
@@ -682,10 +645,10 @@ fi
 check '7. The legal pages publish a contact route'
 email=${LOLSTATS_CONTACT_EMAIL:-}
 if [ -z "$email" ] && [ -f "$LEGAL" ]; then
-	email=$(read_const "$LEGAL" OPERATOR_CONTACT_EMAIL)
+	email=$(read_const "$LEGAL" OperatorContactEmail)
 fi
 if [ -z "$email" ]; then
-	fail 'no contact address is configured and none could be read from web/src/lib/legal.ts'
+	fail 'no contact address is configured and none could be read from internal/webtier/brand.go'
 else
 	note "contact address in force for this check: $email"
 	missing=''
@@ -712,11 +675,11 @@ find "$DIST" -type f \( -name '*.html' -o -name '*.xml' -o -name '*.txt' \) -pri
 	xargs -0 grep -lF "$PLACEHOLDER" > "$WORK/placeholder.txt" 2>/dev/null || true
 placeholder=$(count_lines "$WORK/placeholder.txt")
 if [ "$placeholder" -eq 0 ]; then
-	pass 'no built page, sitemap or robots.txt carries a reserved placeholder hostname'
+	pass 'no served page, sitemap or robots.txt carries a reserved placeholder hostname'
 else
 	fail "$placeholder published file(s) carry the reserved placeholder hostname $PLACEHOLDER; a missing LOLSTATS_SITE_URL must never reach the canonicals or the sitemap"
 	sed 's/^/      /' "$WORK/placeholder.txt" | head -5
-	note 'astro.config.mjs publishes a stated default instead of a placeholder, and refuses a reserved hostname outright'
+	note 'the renderer publishes a stated default instead of a placeholder (internal/webtier/artifacts.go, DefaultSiteURL), so a reserved hostname can only appear here if one is introduced deliberately'
 fi
 
 : > "$WORK/hosts.txt"
@@ -735,9 +698,9 @@ sort -u "$WORK/hosts.txt" > "$WORK/hosts-uniq.txt"
 addressed=$(count_lines "$WORK/hosts.txt")
 hosts=$(count_lines "$WORK/hosts-uniq.txt")
 if [ "$addressed" -eq 0 ]; then
-	fail 'no canonical URL could be read out of the built site, so this check cannot prove where it points'
+	fail 'no canonical URL could be read out of the served site, so this check cannot prove where it points'
 elif [ "$hosts" -ne 1 ]; then
-	fail "the built site addresses $hosts different hosts; every canonical and the sitemap must name one origin:"
+	fail "the served site addresses $hosts different hosts; every canonical and the sitemap must name one origin:"
 	sed 's/^/      /' "$WORK/hosts-uniq.txt" | head -5
 else
 	pass "all $addressed canonical, sitemap and robots.txt addresses name $(cat "$WORK/hosts-uniq.txt")"
@@ -768,7 +731,7 @@ check '9. Nothing per-player is published, so the site cannot be a data broker'
 PERSONAL='(^|[^A-Za-z0-9_])(puuid|puuids|summoner_?id|account_?id|riot_?id|profile_?icon_?id|summoner_?name)([^A-Za-z0-9_]|$)'
 : > "$WORK/personal-files.bin"
 schemas=0
-for candidate in "$ROOT/web/src/types/agg.d.ts" "$ROOT/web/src/types/agg.schema.json"; do
+for candidate in "$ROOT/schema/agg.d.ts" "$ROOT/schema/agg.schema.json"; do
 	if [ -s "$candidate" ]; then
 		printf '%s\0' "$candidate" >> "$WORK/personal-files.bin"
 		schemas=$((schemas + 1))
@@ -779,10 +742,10 @@ done
 find "$DIST" -type f -name '*.json' -print0 >> "$WORK/personal-files.bin" 2>/dev/null || true
 published_json=$(find "$DIST" -type f -name '*.json' | grep -c '' | tr -d ' ')
 published_scanned=$(count_nul "$WORK/personal-files.bin")
-note "scanned the published artifact schema ($schemas of 2 files) and $published_json JSON file(s) under web/dist: $published_scanned file(s) in all"
+note "scanned the published artifact schema ($schemas of 2 files) and $published_json served JSON file(s): $published_scanned file(s) in all"
 # A scan that reads nothing looks exactly like a scan that finds nothing, so the
 # schema is checked for a field it is known to declare.
-shape_probe=$(grep -cE 'StaticSummonerSpells' "$ROOT/web/src/types/agg.d.ts" 2>/dev/null | tr -d ' ')
+shape_probe=$(grep -cE 'StaticSummonerSpells' "$ROOT/schema/agg.d.ts" 2>/dev/null | tr -d ' ')
 control=$(grep -icE "$PERSONAL" "$ROOT/internal/contract/contract.go" 2>/dev/null | tr -d ' ')
 if [ "$schemas" -ne 2 ] || [ "$shape_probe" -lt 1 ]; then
 	fail 'the artifact schema was not read, so an empty result would be meaningless'
@@ -853,12 +816,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-check '11. Every built page is a whole document that carries its data-provenance labelling'
-# The served tree is a copy of web/dist, so this is the same property that
-# scripts/verify-serving.sh asserts against a live origin, checked one step
-# earlier and for all 1000+ pages instead of the handful a running tier is polled
-# for. It is not redundant with it: this one runs in CI without a cluster, and
-# that one catches a tier that damages a page on the way out.
+check '11. Every served page is a whole document that carries its data-provenance labelling'
+# The corpus is the tier's own output, so this is the same property that
+# scripts/verify-serving.sh asserts against a live origin, asserted here for the
+# whole site rather than for the handful of routes that script polls. The two are
+# not redundant: this one runs in CI without a cluster and asserts the labelling
+# on 1000+ captured pages, and that one polls a deployment after it is rolled out,
+# so it catches a tier that damages a page on the way out.
 #
 # The labelling is mandatory rather than decorative. With no Riot API key the
 # site publishes demo data on purpose, and a page that has lost its banner is
@@ -883,23 +847,23 @@ check '11. Every built page is a whole document that carries its data-provenance
 # declared across two lines and the extractor used to read one line at a time, so
 # a demo page that had lost its banner passed this check. read_const reads the
 # declaration whole, and assert_read fails the gate by name when it cannot.
-PREVIEW_TEXT=$(read_const "$SITE" PREVIEW_TEXT)
-UNVERIFIED_PREVIEW_TEXT=$(read_const "$SITE" UNVERIFIED_PREVIEW_TEXT)
-NO_DATA_HEADING=$(read_const "$SITE" NO_DATA_HEADING)
+PREVIEW_TEXT=$(read_const "$SITE" PreviewText)
+UNVERIFIED_PREVIEW_TEXT=$(read_const "$SITE" UnverifiedPreviewText)
+NO_DATA_HEADING=$(read_const "$SITE" NoDataHeading)
 readable=1
-assert_read "$SITE" PREVIEW_TEXT "$PREVIEW_TEXT" 'the demo labelling of every built page' || readable=0
-assert_read "$SITE" UNVERIFIED_PREVIEW_TEXT "$UNVERIFIED_PREVIEW_TEXT" 'the demo labelling of a snapshot whose manifest does not declare its source' || readable=0
-assert_read "$SITE" NO_DATA_HEADING "$NO_DATA_HEADING" 'the no-data labelling of every built page' || readable=0
+assert_read "$SITE" PreviewText "$PREVIEW_TEXT" 'the demo labelling of every served page' || readable=0
+assert_read "$SITE" UnverifiedPreviewText "$UNVERIFIED_PREVIEW_TEXT" 'the demo labelling of a snapshot whose manifest does not declare its source' || readable=0
+assert_read "$SITE" NoDataHeading "$NO_DATA_HEADING" 'the no-data labelling of every served page' || readable=0
 # Escape a literal for use inside an extended regular expression: everything
 # except the characters that appear in this site's wording is escaped, which is
 # cheaper to read than a bracket expression and cannot under-escape a dot.
 ere() { printf '%s' "$1" | sed 's/[^A-Za-z0-9 _,-]/\\&/g'; }
 if [ "$readable" -eq 0 ]; then
-	note 'the three constants are read out of web/src/lib/site.ts by read_const; an empty one is reported above rather than searched for'
+	note 'the three constants are read out of internal/webtier/site.go by read_const; an empty one is reported above rather than searched for'
 else
 	find "$DIST" -type f -name '*.html' -print0 > "$WORK/pages.bin" 2>/dev/null || true
 	pages_checked=$(count_nul "$WORK/pages.bin")
-	# grep -L lists the files that do NOT match. The built pages are one long
+	# grep -L lists the files that do NOT match. The served pages are one long
 	# line each, so an anchored </html>$ matches only a page that really ends
 	# where it should; a page cut short has no line that ends with it.
 	list_grep "$WORK/pages.bin" -LE '</html>$' > "$WORK/pages-truncated.txt"
@@ -919,18 +883,18 @@ else
 	unlabelled=$(count_lines "$WORK/pages-unlabelled.txt")
 	live_broken=$(count_lines "$WORK/pages-live-broken.txt")
 	no_data_broken=$(count_lines "$WORK/pages-no-data-broken.txt")
-	note "scanned $pages_checked built page(s) for a final </html> and for the banner their state declares: $(count_lines "$WORK/pages-demo.txt") demo, $(count_lines "$WORK/pages-live.txt") live, $(count_lines "$WORK/pages-no-data.txt") no-data"
+	note "scanned $pages_checked served page(s) for a final </html> and for the banner their state declares: $(count_lines "$WORK/pages-demo.txt") demo, $(count_lines "$WORK/pages-live.txt") live, $(count_lines "$WORK/pages-no-data.txt") no-data"
 	if [ "$pages_checked" -lt 10 ]; then
-		fail "only $pages_checked built page(s) were inspected, so the scan is not reaching the pages and a clean result would be meaningless"
+		fail "only $pages_checked served page(s) were inspected, so the scan is not reaching the pages and a clean result would be meaningless"
 	elif [ "$truncated" -eq 0 ] && [ "$bannerless" -eq 0 ] && [ "$unlabelled" -eq 0 ] && [ "$live_broken" -eq 0 ] && [ "$no_data_broken" -eq 0 ]; then
-		pass "all $pages_checked built page(s) end with </html> and carry the labelling their declared state requires"
+		pass "all $pages_checked served page(s) end with </html> and carry the labelling their declared state requires"
 	else
 		if [ "$truncated" -gt 0 ]; then
-			fail "$truncated built page(s) do not end with </html>:"
+			fail "$truncated served page(s) do not end with </html>:"
 			sort -u "$WORK/pages-truncated.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
 		fi
 		if [ "$bannerless" -gt 0 ]; then
-			fail "$bannerless built page(s) declare no data state at all, so they carry no provenance:"
+			fail "$bannerless served page(s) declare no data state at all, so they carry no provenance:"
 			sort -u "$WORK/pages-bannerless.txt" | sed "s|^$DIST/||" | sed 's/^/      /' | head -10
 		fi
 		if [ "$unlabelled" -gt 0 ]; then
