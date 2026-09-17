@@ -579,11 +579,13 @@ served manifest does not carry them.
 | `cells_published` | Cells actually published in that partition |
 | `suppressed_cells` | Cells withheld by `min_cell_n`. Published on purpose, so a thin patch is visible to the operator and to the page rather than looking like an empty region |
 
-The deployed snapshot as of 2026-09-17T23:19:48Z (`build_run_id` 19,
-`git_sha` `9526227`) publishes exactly one partition - `16.18` / `EUW` / `420` /
-`all` - with `min_cell_n: 100`, **244 cells published and 522 suppressed**, over
-the 173 champion ids in `latest.champions`. Those numbers are a reading of one
-published tree, not constants: they move with every publish, and what is frozen
+The deployed snapshot publishes exactly one partition - `16.18` / `EUW` / `420` /
+`all` - with `min_cell_n: 100` and 173 champion ids in `latest.champions`. Two
+readings of it, to make the point that these are readings and not constants:
+`build_run_id` 19 / `git_sha` `9526227` / **244 cells published, 522 suppressed**
+at 2026-09-17T23:19:48Z, and `build_run_id` 24 / `git_sha` `fbed839` / **248
+published, 521 suppressed** at 2026-09-18T02:04Z. They move with every publish -
+and what is frozen
 is the *presence* of the keys and their meaning. That it is a real tree is why
 the contract can cite numbers rather than placeholders: `cells_published` far
 below the champion-role cross product is the expected state of a young archive,
