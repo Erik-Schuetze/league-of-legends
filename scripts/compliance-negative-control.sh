@@ -6,18 +6,18 @@
 # checks 3 and 4, the dynamic-serving amendment".
 #
 # An amended check is only trustworthy if it still fails on a genuinely bad
-# page, so this script plants one violation at a time into a copy of the built
-# tree and asserts that the gate exits non-zero, names the right check and says
-# what it found. It also asserts the direction the amendment claims - a page
-# with no <script> at all is legal now - because a rule that only ever fails is
-# not a control either.
+# page, so this script plants one violation at a time into a copy of the served
+# capture the gate reads, and asserts that the gate exits non-zero, names the
+# right check and says what it found. It also asserts the direction the
+# amendment claims - a page with no <script> at all is legal now - because a rule
+# that only ever fails is not a control either.
 #
-# It never writes to web/dist: the plants go into a scratch copy under
+# It never writes to the capture: the plants go into a scratch copy under
 # .agent-artifacts/, that copy is asserted to pass the gate *before* anything is
-# planted into it (so a probe cannot pass because the tree was already broken),
+# planted into it (so a probe cannot pass because the copy was already broken),
 # and every plant is asserted to have landed before the gate is believed.
 #
-#   LOLSTATS_DIST          the built tree to copy (default web/dist)
+#   LOLSTATS_DIST          the served capture to copy (default bin/served-pages)
 #   LOLSTATS_CONTROL_PAGES how many pages the scratch copy keeps (default 150);
 #                          the gate refuses a resource scan of fewer than 100,
 #                          and the full tree is not needed to plant one page
@@ -28,7 +28,7 @@ set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 GATE="$ROOT/scripts/compliance-check.sh"
-DIST=${LOLSTATS_DIST:-$ROOT/web/dist}
+DIST=${LOLSTATS_DIST:-$ROOT/bin/served-pages}
 KEEP_PAGES=${LOLSTATS_CONTROL_PAGES:-150}
 WORK="$ROOT/.agent-artifacts/compliance-negative-control.$$"
 SCRATCH="$WORK/dist"
@@ -43,7 +43,7 @@ bad() { broken=$((broken + 1)); printf 'FAIL  %s\n' "$1"; }
 note() { printf '      %s\n' "$1"; }
 
 if [ ! -d "$DIST" ]; then
-	printf 'FAIL  %s is not present; build the site first: (cd web && npm run build)\n' "$DIST"
+	printf 'FAIL  %s is not present; capture the served pages first: make served-pages\n' "$DIST"
 	exit 1
 fi
 if [ ! -f "$DIST/$plant_page" ]; then
@@ -61,11 +61,18 @@ cp -R "$DIST" "$SCRATCH" || { printf 'FAIL  could not copy %s\n' "$DIST"; exit 1
 # Keep $KEEP_PAGES pages and drop the rest, so a probe run costs seconds rather
 # than a full-tree scan. The gate's own floors are what make a page count
 # meaningful, and the clean-copy control below proves the pruning did not fall
-# under one of them. The four pages the gate's preflight names are always kept:
-# dropping one makes the gate exit 2 with "the built site is incomplete" before
-# it reaches any check, which would look like a broken control rather than a
-# broken copy.
-keep_required='index.html about/index.html disclaimer/index.html legal/privacy/index.html legal/terms/index.html'
+# under one of them, so these pages are always kept on top of the first
+# $KEEP_PAGES in path order:
+#
+#   - index.html, about/, disclaimer/ and the two legal pages: the gate's
+#     preflight names them, and dropping one makes it exit 2 with "the served
+#     corpus is incomplete" before it reaches any check, which would look like a
+#     broken control rather than a broken copy.
+#   - $plant_page and a page carrying the filter bar: check 4 asserts that a
+#     no-JS path exists, so a corpus with no <form> in it is a violation, and
+#     the alphabetically-first pages are all champion pages with nothing to
+#     submit through.
+keep_required='index.html about/index.html disclaimer/index.html legal/privacy/index.html legal/terms/index.html tier-list/mid/index.html'
 find "$SCRATCH" -type f -name '*.html' | LC_ALL=C sort |
 	sed "s|^$SCRATCH/||" > "$WORK/relpaths.txt"
 awk -v req="$keep_required" -v keep="$KEEP_PAGES" '
@@ -163,7 +170,7 @@ printf '\ncontrol 4: a credential field (check 4, the original gating rule)\n'
 plant '<form action="/negcontrol" method="get"><input type="password" name="password"></form>'
 if grep -qF 'name="password"' "$SCRATCH/$plant_page"; then
 	run_gate
-	fail_line 'gating element(s) found in the built pages'
+	fail_line 'gating element(s) found in the served pages'
 else
 	bad 'the password field did not land in the page'
 fi
@@ -192,10 +199,10 @@ restore_page
 printf '\ncontrol 6: a live page with no live banner fails (check 11, the scan the CI bug hid)\n'
 # This is the control for the defect that made CI red: check 11 hands a list of
 # paths to grep -L, and grep answered an empty list from its own standard input,
-# reporting "(standard input)" as a live page with no banner. The built tree has
-# no live page at all - every page is demo - so the non-empty half of that scan
-# never ran in CI, and a guard that had silently disabled it would have looked
-# identical. Declaring one demo page live, with the banner it would need missing,
+# reporting "(standard input)" as a live page with no banner. The captured
+# corpus has no live page at all - it is a capture of a demo build - so the
+# non-empty half of that scan never ran in CI, and a guard that had silently
+# disabled it would have looked identical. Declaring one demo page live, with the banner it would need missing,
 # is the case the scan exists for.
 if sed 's|data-state="demo"|data-state="live"|g' "$DIST/$plant_page" > "$SCRATCH/$plant_page" &&
 	grep -qF 'data-state="live"' "$SCRATCH/$plant_page" &&
