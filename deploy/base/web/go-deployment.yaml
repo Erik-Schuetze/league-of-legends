@@ -21,7 +21,7 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:bc84909b383f5fb9c8f4805e650d2b3606e8d911d23ae019b28eab005ed145
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:51775acc8f8e24dfbb6fa3a3a4b4ed9e415f7029208bdcc99d9d538375fb514a
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
