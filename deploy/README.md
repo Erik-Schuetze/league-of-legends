@@ -563,4 +563,79 @@ directory holds no dashboards as files - so a dashboard JSON added here would be
 the first file in a directory nothing reads. Recording that is more useful than
 shipping a file that appears nowhere.
 
+### Is it actually running? (`scripts/backup-status.sh`)
+
+A CronJob whose YAML is correct is not a backup. This is the instrument that tells
+the difference, and it exists because both jobs read `LAST SCHEDULE <none>` for
+most of a day while nothing was wrong:
+
+```sh
+sh scripts/backup-status.sh              # exit 0 only if every artifact is present and fresh
+sh scripts/backup-status.sh --keep       # leave the reader Job in place for inspection
+sh scripts/backup-status.sh --max-age-hours 50
+```
+
+It checks the CronJobs (suspended? ever scheduled? and if never, was the object
+created after today's fire time - which is not a defect), then reads the volume
+through a short-lived Job that mounts `lolstats-data` **read-only** as uid 65532
+(the artifacts are mode 0700, so nothing else can read them). It prints the newest
+dump with its size and sha256, the row counts and `schema_md5` from the dump's own
+manifest, how many `pg_restore --list` TOC entries still parse out of the stored
+file, the newest restic snapshot, and the repository's size. It exits non-zero on a
+missing, unreadable or stale artifact, and it names the repository as off-site or
+not:
+
+```
+[pod/backup-status-.../archive-repo] WARN repository is /var/lib/lolstats/backups/restic -
+  a path on this cluster's own volume, i.e. NOT an off-site copy (plan risk R6 stays open)
+```
+
+### Pointing the destination somewhere else
+
+The switch is a Secret edit plus one NetworkPolicy rule, and nothing else:
+
+```sh
+kubectl -n lolstats patch secret lolstats-restic --type merge -p '{"stringData":{
+  "RESTIC_REPOSITORY_OVERRIDE":"s3:https://<endpoint>/<bucket>",
+  "AWS_ACCESS_KEY_ID":"...", "AWS_SECRET_ACCESS_KEY":"..."}}'
+```
+
+- `RESTIC_REPOSITORY_OVERRIDE` wins over the ConfigMap default **by name**, so it
+  does not depend on which order `envFrom` applies its two sources in.
+- every other key of the Secret arrives as an environment variable, which is how an
+  S3, R2 or B2 backend gets its credentials with no manifest change. An `sftp`
+  destination can pass extra arguments through `RESTIC_EXTRA` (for example
+  `-o sftp.command=ssh -i /etc/restic/id_ed25519 ...`); the Secret already mounts at
+  `/etc/restic`, mode 0440.
+- **the egress rule is not optional.** `deploy/base/network/default-deny.yaml`
+  denies all egress in `lolstats` and `allow.yaml` allows only DNS, Riot over 443 and
+  in-namespace traffic, so a remote repository hangs and then times out. A rule
+  selecting `app.kubernetes.io/component: backup-archive` on 443 (s3) or 22 (sftp)
+  is required, and that file belongs to another lane.
+- prove the transport before trusting it: `sh scripts/offsite-verify.sh --docker`
+  builds a real S3-compatible endpoint, backs a tree up to it, restores it and
+  compares every file by sha256 (observed: 195/195 identical, `restic check
+  --read-data-subset=25%` → no errors). `--cluster` does the same round trip for
+  the real archive, into scratch on the cluster volume, and prints whether every
+  file came back byte-identical.
+
+**R6 is still blocked, and it is an owner decision, not an engineering one.** No
+destination outside the premises exists; the surveyed options, their cost and the
+one that would break the 0 EUR/month budget are in
+`docs/runbooks/offsite-options.md`.
+
+### Alerts, confirmed again on 2026-09-17
+
+`kubectl get alertmanager -A` → **No resources found**; the `Prometheus` CR
+`prometheus-persistant` in namespace `monitoring` carries `alerting: {}`. The nine
+rules below are loaded and evaluated, and every firing is delivered nowhere. This is
+an unmet gate of the same shape as R6, recorded rather than hidden;
+`docs/runbooks/enable-alert-delivery.md` is the opt-in switch.
+
 <!-- end additions: operations workstream -->
+
+<!-- begin additions: operations lane 2026-09-17 -->
+<!-- The subsections above were added before this marker; this block records the
+     two runbook addenda and the options paper that go with them, so a reader who
+     finds only one of the files still finds the others. -->
+<!-- end additions: operations lane 2026-09-17 -->
