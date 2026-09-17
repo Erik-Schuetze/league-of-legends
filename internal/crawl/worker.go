@@ -43,6 +43,11 @@ const (
 	// KeyWarnAge is when a key is old enough that an operator should expect
 	// the next rotation. A Riot development key expires after 24 hours.
 	KeyWarnAge = 12 * time.Hour
+	// StaleWarnAge is how old the newest fetch has to be before the report
+	// interval's line is a warning rather than a status line. It is the hour
+	// the LolstatsCrawlStale rule holds for, so the log and the alert agree
+	// about when the pipeline is late rather than merely quiet.
+	StaleWarnAge = time.Hour
 	// maxRateLimitPause caps a single adaptive pause. Riot's Retry-After is
 	// honoured in full by the client's limiter; this cap only bounds how long
 	// the worker sleeps in one go before re-checking its context.
@@ -87,6 +92,13 @@ type Worker struct {
 	lastReport  time.Time
 	warnedEmpty bool
 	rng         *rand.Rand
+
+	// matchesRetained counts the payloads this process has put in the archive
+	// since it started. It is the number the report interval publishes, and it
+	// is the one that stops moving when the crawl stops working - which is how
+	// a stalled pipeline is told apart from a throttled one that is still
+	// fetching.
+	matchesRetained int
 }
 
 // WorkerOptions configures the loop. The zero value is valid for every field
@@ -376,6 +388,7 @@ func (w *Worker) drainQueue(ctx context.Context) (int, error) {
 		}
 		if held {
 			retained = append(retained, items[i])
+			w.matchesRetained++
 		}
 		processed++
 	}
@@ -873,17 +886,29 @@ func (w *Worker) widen(ctx context.Context, dto riot.MatchDTO, meta contract.Mat
 	w.deps.Log.Debug("frontier widened", "match_id", meta.MatchID, "participants", len(entries), "new", added)
 }
 
-// report publishes the pipeline metrics. Staleness is the alert that matters:
-// if nothing has been fetched for longer than a poll interval, the operator
-// wants to know before the frontier silently empties.
+// report publishes the pipeline metrics and one heartbeat line. Staleness is
+// the alert that matters: if nothing has been fetched for longer than a poll
+// interval, the operator wants to know before the frontier silently empties.
+//
+// The heartbeat exists because a throttled crawler and a stopped one used to
+// write the same thing to this log - nothing, or a warning about a rate limit -
+// and a reader could not tell them apart. The measured case is a development
+// key ridden at its ceiling: Riot answers about one request in fifty with a
+// 429, the client absorbs it on the next attempt, and the log for a full hour
+// was 72 lines of WARN and no INFO at all while the crawl was in fact fetching
+// forty-four matches a minute. One line per interval carrying the numbers that
+// freeze in a stall makes the healthy case legible and turns the stalled case
+// into a number that stops moving, in the log as well as in Prometheus.
 func (w *Worker) report(ctx context.Context, force bool) {
 	if !force && w.deps.Now().Sub(w.lastReport) < w.opts.ReportInterval {
 		return
 	}
 	w.lastReport = w.deps.Now()
 
+	attrs := []any{"matches_retained", w.matchesRetained}
+
 	if w.pacer != nil {
-		w.deps.Log.Debug("limiter state",
+		attrs = append(attrs,
 			"advertised", w.pacer.Advertised(),
 			"effective_rps", w.pacer.EffectiveRate())
 	}
@@ -897,24 +922,38 @@ func (w *Worker) report(ctx context.Context, force bool) {
 			}
 		}
 	}
-	if w.reporter == nil {
+
+	var stale bool
+	if w.reporter != nil {
+		size, err := w.reporter.FrontierSize(ctx)
+		if err != nil {
+			w.deps.Log.Warn("frontier size unavailable", "err", err)
+		} else {
+			w.deps.Metrics.SetFrontierSize(size)
+			attrs = append(attrs, "frontier", size)
+		}
+		if newest, ok, err := w.reporter.NewestFetchedAt(ctx); err != nil {
+			w.deps.Log.Warn("pipeline staleness unavailable", "err", err)
+		} else if ok {
+			age := w.deps.Now().Sub(newest)
+			if age < 0 {
+				age = 0
+			}
+			w.deps.Metrics.SetPipelineStaleness(obs.StageCrawl, age.Seconds())
+			attrs = append(attrs, "staleness", age.Round(time.Second).String())
+			// Past the age the staleness alert fires at, the heartbeat is
+			// itself the loud failure: a crawl that has stopped fetching is
+			// what the pipeline is required to report rather than re-serve
+			// stale numbers quietly.
+			stale = age >= StaleWarnAge
+		}
+	}
+	if stale {
+		w.deps.Log.Warn("crawl is not fetching: the newest match is older than the staleness alert holds for",
+			attrs...)
 		return
 	}
-	size, err := w.reporter.FrontierSize(ctx)
-	if err != nil {
-		w.deps.Log.Warn("frontier size unavailable", "err", err)
-	} else {
-		w.deps.Metrics.SetFrontierSize(size)
-	}
-	if newest, ok, err := w.reporter.NewestFetchedAt(ctx); err != nil {
-		w.deps.Log.Warn("pipeline staleness unavailable", "err", err)
-	} else if ok {
-		age := w.deps.Now().Sub(newest)
-		if age < 0 {
-			age = 0
-		}
-		w.deps.Metrics.SetPipelineStaleness(obs.StageCrawl, age.Seconds())
-	}
+	w.deps.Log.Info("crawl pipeline status", attrs...)
 }
 
 // shutdown flushes the archive so that a cancelled run leaves the part files
