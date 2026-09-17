@@ -25,6 +25,32 @@ data:
   LOLSTATS_RIOT_PLATFORM_ROUTE: "euw1"
   LOLSTATS_RIOT_REGIONAL_ROUTE: "europe"
 
+  # How long Riot is allowed to take before a call is called dead. The 10s
+  # default was set for a match summary of about 100 KB, and it is too short for
+  # the retry the same API asks for: a key at its rate limit answers 429 with
+  # Retry-After, and this key has returned 15-16s while the crawler was keeping
+  # up and 34s while it was behind. A client whose whole call has to finish
+  # inside 10s cannot pay either, so it releases the retry and fails the row -
+  # which is exactly what the live ingest Deployment logged, pass after pass:
+  #   "retry-after outlasts the call's own deadline; the call is released"
+  #   retry_after=15s deadline=10s
+  #
+  # 45s covers the largest Retry-After measured here (34s) with room for the
+  # request itself. It is deliberately a ConfigMap value and not a flag: this is
+  # the one lever that reaches the image already running, so the deployed
+  # pipeline can pay Riot's Retry-After without waiting for a new build.
+  #
+  # Measured with the deployed `latest` image: a 20-match re-fetch with this
+  # value set fetched 20/20, 0 failed, having paid a 16s and a 9s Retry-After
+  # mid-run; with the 10s default the same call is released at the deadline.
+  #
+  # The retry-budget fix in internal/riot (RetryWaitBudget, 60s) bounds the
+  # *waiting* rather than the whole call, and it reads this value as the
+  # one-round-trip bound, so the two are additive: 45s + 60s has to stay inside
+  # the fetch's own timeout, which is why the worker is started with
+  # -job-timeout 120s in ingest/deployment.yaml.
+  LOLSTATS_RIOT_TIMEOUT: "45s"
+
   # Both trees live on the one ReadWriteMany volume mounted at
   # /var/lib/lolstats, which is also where the site build writes and the web
   # tier serves from. Keeping the roots here means no manifest has to guess a
@@ -118,3 +144,31 @@ data:
   # published/suppressed cells and the rows the published cells hold, so the
   # measurement is one log line away.
   LOLSTATS_AGG_MIN_CONFIDENT_SHARE: "0.15"
+
+  # The crawl-freshness bound: the nightly build refuses to publish when the
+  # newest match in the archive is older than this, and disables the check when
+  # it is empty.
+  #
+  # It exists because a snapshot's generated_at is the time of the *build*, not
+  # the age of the data behind it. An expired development key or a crawler that
+  # will not start freezes the raw tree without changing it, so every later build
+  # is a cheap success that republishes the same cells under a new timestamp and
+  # the site swaps a dated snapshot for a freshly stamped copy of itself - which
+  # reads as "the pipeline is alive". Measured: a build over the frozen archive
+  # exits 1 with the age it measured and leaves the published tree untouched,
+  # while a build one second after a real crawl publishes normally.
+  #
+  # 26h is one nightly cycle plus slack: scheduled every day at 01:00, the job
+  # still runs after a normal day's crawling and refuses once the archive has
+  # gone quiet. Nothing in the cluster can crawl with an expired key, so refusing
+  # is the honest outcome - the alternative is publishing week-old matches under
+  # tonight's date.
+  #
+  # A ConfigMap value rather than an argv flag on purpose. Manifests and images
+  # reach this cluster from Git on independent schedules, so a flag can arrive
+  # before the binary that defines it, and an unknown flag makes the nightly job
+  # fail for a reason that has nothing to do with the data. An environment
+  # variable degrades the other way: a binary that does not know it ignores it
+  # and keeps publishing exactly as before, so the gate switches on with the
+  # image that carries the check and never before.
+  LOLSTATS_AGG_CRAWL_MAX_AGE: "26h"

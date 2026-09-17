@@ -46,6 +46,10 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		duckdbMaxTempSize = cfg.Aggregate.DuckDBMaxTempSize
 		crawlMaxAge       time.Duration
 	)
+	crawlMaxAge, err = crawlMaxAgeDefault(getenv)
+	if err != nil {
+		return fail(stderr, "build", err)
+	}
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addSegFlags(fs, &seg, cfg)
@@ -74,8 +78,9 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		"bound on the DuckDB spill directory such as 10GiB")
 	fs.StringVar(&metricsAddr, "metrics-addr", metricsAddr,
 		"prometheus listen address, empty disables the endpoint")
-	fs.DurationVar(&crawlMaxAge, "crawl-max-age", 0,
-		"fail instead of publishing when the newest crawled payload is older than this, zero disables the check")
+	fs.DurationVar(&crawlMaxAge, "crawl-max-age", crawlMaxAge,
+		"fail instead of publishing when the newest crawled payload is older than this; "+
+			"defaults to $"+CrawlMaxAgeEnv+", and an empty variable disables the check")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}

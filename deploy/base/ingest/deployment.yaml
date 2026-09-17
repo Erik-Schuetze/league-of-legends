@@ -60,7 +60,19 @@ spec:
           # once, so a rollout is reproducible from this file alone.
           image: ghcr.io/erik-schuetze/league-of-legends:latest
           command: ["/lolstats-ingest"]
-          args: ["worker"]
+          # -job-timeout bounds one row's fetch, retries included, and it has to
+          # outlast the client's own deadlines or the job releases a call that
+          # was still going to succeed. The binary's default is 25s, which is
+          # shorter than the 45s LOLSTATS_RIOT_TIMEOUT in the ConfigMap plus the
+          # limiter's penalty wait - a call paying Riot's Retry-After would be
+          # cut off by its own job after having waited. 120s covers 45s of round
+          # trips and the 60s RetryWaitBudget the client allows a call to spend
+          # waiting, and it is also the default the fixed binary derives for
+          # itself, so the value does not need to change when the image carrying
+          # that fix is published. Spelled out as argv rather than left to the
+          # default because the flag exists in both images: the deployed one gets
+          # the headroom now, and the next one keeps the same behaviour.
+          args: ["worker", "-job-timeout", "120s"]
           envFrom:
             - configMapRef:
                 name: lolstats-config

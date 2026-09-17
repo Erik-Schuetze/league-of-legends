@@ -190,6 +190,40 @@ func addSegFlags(fs *flag.FlagSet, seg *segFlags, cfg config.Config) {
 		"rank bracket, v1 publishes only \"all\"")
 }
 
+// CrawlMaxAgeEnv names the environment variable that carries the
+// crawl-freshness bound. The deployed nightly build gets it from the shared
+// ConfigMap (deploy/base/config.yaml) rather than from argv, deliberately:
+// manifests and images reach a cluster on independent schedules, so an argv
+// flag can arrive before the binary that defines it and turn the nightly job
+// into an "unknown flag" failure that says nothing about the data. An
+// environment variable applied by an older binary is simply ignored, so the
+// gate can only ever switch on together with the code that implements it.
+const CrawlMaxAgeEnv = "LOLSTATS_AGG_CRAWL_MAX_AGE"
+
+// crawlMaxAgeDefault reads the freshness bound from the environment. An unset
+// or empty variable disables the check, which is what a developer running the
+// build by hand over a fixture or a partial archive wants.
+//
+// A malformed value is an error rather than a fallback to "disabled": the
+// bound is the only thing standing between a frozen archive and a freshly
+// stamped copy of it, so quietly dropping it would produce exactly the failure
+// the bound exists to prevent.
+func crawlMaxAgeDefault(getenv config.Getenv) (time.Duration, error) {
+	raw, ok := getenv(CrawlMaxAgeEnv)
+	raw = strings.TrimSpace(raw)
+	if !ok || raw == "" {
+		return 0, nil
+	}
+	age, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s = %q is not a duration such as 26h: %w", CrawlMaxAgeEnv, raw, err)
+	}
+	if age < 0 {
+		return 0, fmt.Errorf("%s = %q is negative; leave it empty to disable the check", CrawlMaxAgeEnv, raw)
+	}
+	return age, nil
+}
+
 // gitSHA is the revision recorded in the manifest and the audit row so a
 // published number has a commit behind it. The image sets GIT_SHA at build
 // time; without it the value says so rather than pretending to be a revision.
@@ -244,7 +278,7 @@ func (e environment) auditor(aggRoot string) (aggregate.Auditor, error) {
 // The connection is opened for this one question and closed again. The build's
 // own connection is owned by the shared aggregate package as an opaque
 // Auditor, and widening that interface would be a change to shared code for a
-// flag in this binary; one dial against a local postgres is the cheaper trade.
+// knob in this binary; one dial against a local postgres is the cheaper trade.
 func (e environment) newestFetchedAt(ctx context.Context) (time.Time, bool, error) {
 	if e.cfg.Postgres.DSN == "" {
 		return time.Time{}, false, nil
