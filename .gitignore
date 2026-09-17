@@ -52,6 +52,19 @@ deploy/secret.yaml
 # `go build -o build/lolstats-web` did exactly that once.
 /build/lolstats-*
 
+# `web/` is the retired Astro tree, and it is still built in order to be
+# measured: `npm install` runs inside it and the serve-time gates read its
+# `dist/`. None of those three outputs is ever committed. Measured 2026-09-17:
+# they left **10,862 untracked files** in the working tree while lane M3 was
+# editing the tree, i.e. one `git add -A` away from the repository — the same
+# class of trap as the `.zz-*` and gitlink incidents above, and the reason this
+# rule is written by pattern rather than left to the lane that creates the files.
+# The root `/dist/` rule earlier in this file does NOT cover `web/dist`: it is
+# anchored to the repository root.
+/web/node_modules/
+/web/dist/
+/web/.astro/
+
 # Go
 *.test
 *.out
