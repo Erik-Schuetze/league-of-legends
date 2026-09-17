@@ -144,6 +144,15 @@ type Aggregate struct {
 	// rows it marks as position-less (see the MaxRejectedRows note in
 	// internal/aggregate/gate.go).
 	MaxRejectedRows int
+	// How many of the window's computable champion/role cells must survive
+	// suppression for the build to publish at all. The default is 0.5, and the
+	// value that is right depends on how deeply the patch the window ends on
+	// has been crawled: a real window always has a tail of one-off
+	// champion/role pairs, so the share of cells above min_cell_n is a
+	// property of the archive's maturity, not of the pipeline's health. The
+	// deployed value is measured against the live archive; see the
+	// MinConfidentShare note in internal/aggregate/gate.go.
+	MinConfidentShare float64
 	// Trailing window of days of raw data a build reads.
 	SourceWindowDays int
 	// v1 publishes a single unsegmented bracket; the value is still explicit
@@ -231,13 +240,17 @@ const (
 	// A fail-closed archive gate: zero tolerant rows unless an operator has
 	// measured a reason to allow some. See Aggregate.MaxRejectedRows.
 	defaultMaxRejectedRows = 0
-	defaultSourceWindow    = 14
-	defaultQueueID         = 420
-	defaultBracket         = "all"
-	defaultReadHeaderLimit = 10 * time.Second
-	defaultReadLimit       = 30 * time.Second
-	defaultWriteLimit      = 30 * time.Second
-	defaultIdleLimit       = 60 * time.Second
+	// The same value as GateConfig's own default, so that a build with no
+	// operator input behaves identically whether the gate set comes from here
+	// or from internal/aggregate. See Aggregate.MinConfidentShare.
+	defaultMinConfidentShare = 0.5
+	defaultSourceWindow      = 14
+	defaultQueueID           = 420
+	defaultBracket           = "all"
+	defaultReadHeaderLimit   = 10 * time.Second
+	defaultReadLimit         = 30 * time.Second
+	defaultWriteLimit        = 30 * time.Second
+	defaultIdleLimit         = 60 * time.Second
 )
 
 // Load reads the configuration from the real environment.
@@ -278,14 +291,15 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			CompressionLevel: r.integer(env("RAW_COMPRESSION_LEVEL"), defaultCompressionLevel),
 		},
 		Aggregate: Aggregate{
-			Root:             r.str(env("AGG_ROOT"), defaultAggRoot),
-			SchemaVersion:    r.integer(env("AGG_SCHEMA_VERSION"), defaultSchemaVersion),
-			MinCellN:         r.integer(env("AGG_MIN_CELL_N"), defaultMinCellN),
-			MaxRejectedRows:  r.nonNegativeInteger(env("AGG_MAX_REJECTED_ROWS"), defaultMaxRejectedRows),
-			SourceWindowDays: r.integer(env("AGG_SOURCE_WINDOW_DAYS"), defaultSourceWindow),
-			Bracket:          r.str(env("AGG_BRACKET"), defaultBracket),
-			QueueID:          r.integer(env("AGG_QUEUE_ID"), defaultQueueID),
-			Patch:            r.str(env("AGG_PATCH"), ""),
+			Root:              r.str(env("AGG_ROOT"), defaultAggRoot),
+			SchemaVersion:     r.integer(env("AGG_SCHEMA_VERSION"), defaultSchemaVersion),
+			MinCellN:          r.integer(env("AGG_MIN_CELL_N"), defaultMinCellN),
+			MaxRejectedRows:   r.nonNegativeInteger(env("AGG_MAX_REJECTED_ROWS"), defaultMaxRejectedRows),
+			MinConfidentShare: r.share(env("AGG_MIN_CONFIDENT_SHARE"), defaultMinConfidentShare),
+			SourceWindowDays:  r.integer(env("AGG_SOURCE_WINDOW_DAYS"), defaultSourceWindow),
+			Bracket:           r.str(env("AGG_BRACKET"), defaultBracket),
+			QueueID:           r.integer(env("AGG_QUEUE_ID"), defaultQueueID),
+			Patch:             r.str(env("AGG_PATCH"), ""),
 
 			DuckDBMemoryLimit: r.str(env("AGG_DUCKDB_MEMORY_LIMIT"), ""),
 			DuckDBThreads:     r.integer(env("AGG_DUCKDB_THREADS"), 0),
@@ -389,6 +403,28 @@ func (r *reader) nonNegativeInteger(key string, def int) int {
 		r.fail(key, "must not be negative")
 	default:
 		return n
+	}
+	return def
+}
+
+// share is for a fraction of a whole, such as the smallest share of cells that
+// must survive suppression. A value outside (0,1] is refused loudly rather than
+// clamped: 0 would mean "publish nothing" and a value above 1 can never be met,
+// and both read like a configured threshold while behaving as a gate that no
+// archive can satisfy or one that accepts anything.
+func (r *reader) share(key string, def float64) float64 {
+	v, ok := r.raw(key)
+	if !ok {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	switch {
+	case err != nil:
+		r.fail(key, "is not a number")
+	case f <= 0 || f > 1:
+		r.fail(key, "must be greater than 0 and at most 1")
+	default:
+		return f
 	}
 	return def
 }

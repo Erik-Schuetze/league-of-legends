@@ -50,6 +50,16 @@ type GateConfig struct {
 	// MinConfidentShare is the smallest share of computable cells that must
 	// survive suppression. The default is 0.5, i.e. a minority of suppressions
 	// is acceptable and a majority is not.
+	//
+	// The share is a property of the window, not of the pipeline, and a real
+	// window has a long tail of one-off champion/role pairs, so the deployed
+	// value is measured rather than assumed. Over the live EUW/420 archive
+	// (2026-09-04..09-17, min_cell_n=100) the share was 19.3% at 34,780
+	// classified rows, 12.1% at 21,620 and 2.1% at 8,770: it rises with the
+	// crawl depth of the patch the window ends on and is nowhere near 50%
+	// while the crawler's recent days are denser than its older ones. The
+	// flag is `--min-confident-share`, the variable is
+	// LOLSTATS_AGG_MIN_CONFIDENT_SHARE (see internal/config/config.go).
 	MinConfidentShare float64
 
 	// ReconcileTolerance is the number of rows by which the sum of the cell
@@ -113,6 +123,12 @@ type GateCounts struct {
 	// number of participant rows that produced a champion and a role.
 	SumN           int
 	ClassifiedRows int
+
+	// SumNPublished is the sum of n over the published cells only. It is not
+	// judged directly; it is reported with the suppression share so that a
+	// reader can see whether the published cells describe the window (most of
+	// its rows) or only its largest champions.
+	SumNPublished int
 }
 
 // CheckInput runs the gates that can be judged before any cell exists.
@@ -176,12 +192,26 @@ func (c GateCounts) CheckOutput(cfg GateConfig) error {
 	} else if c.CellsTotal > 0 {
 		share := float64(c.CellsPublished) / float64(c.CellsTotal)
 		if share < cfg.MinConfidentShare {
-			errs = append(errs, fmt.Errorf("%w: only %d of %d cells (%.1f%%) reach min_cell_n=%d, below the %.1f%% floor",
-				ErrSuppressionMajority, c.CellsPublished, c.CellsTotal, share*100, cfg.MinCellN, cfg.MinConfidentShare*100))
+			errs = append(errs, fmt.Errorf("%w: only %d of %d cells (%.1f%%) reach min_cell_n=%d, below the %.1f%% floor%s",
+				ErrSuppressionMajority, c.CellsPublished, c.CellsTotal, share*100, cfg.MinCellN,
+				cfg.MinConfidentShare*100, describedShare(c.SumNPublished, c.ClassifiedRows)))
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// describedShare renders how much of the window the published cells describe,
+// for the failure message only: the share of cells is what the gate judges, and
+// the share of rows is what tells an operator whether the cells that did
+// survive still carry the window. It is empty when there are no classified rows
+// to divide by, because the input gate has already reported that window.
+func describedShare(publishedRows, classifiedRows int) string {
+	if classifiedRows <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (the published cells hold %d of %d classified rows, %.1f%%)",
+		publishedRows, classifiedRows, float64(publishedRows)/float64(classifiedRows)*100)
 }
 
 // Check runs both passes, for a caller that already holds the complete counts.

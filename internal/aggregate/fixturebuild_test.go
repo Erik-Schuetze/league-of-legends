@@ -217,6 +217,9 @@ var fixtureExpectedCounts = GateCounts{
 	CellsSuppressed: 2,
 	// SumN counts the suppressed cells too: two lanes of one game each.
 	SumN: 90,
+	// SumNPublished is the same reduction over the published cells only, so it
+	// is SumN minus those two single-game lanes.
+	SumNPublished: 88,
 }
 
 // fixtureExpectedChampions is every champion the window saw, ascending,
