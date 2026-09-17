@@ -39,18 +39,22 @@ alternative behind them live in `docs/decisions/`; this page is the map.
                                 manifest.json (patches, n per cell, suppressed cells)
                                            |
                                            v
-                                +---------------------+      +--------------+
-                                |  Astro build        | ---> |  Caddy       | ---> users
-                                |  (CronJob / CI)     |      |  file_server |
-                                +---------------------+      +--------------+
+                                +---------------------+      +---------------+
+                                |  lolstats-web       | ---> |  shared Caddy | --> users
+                                |  (Go tier, Deploy)  |      |  (ns `web`)   |
+                                |  renders every      |      |  TLS, proxy   |
+                                |  route from agg/v1  |      +---------------+
+                                +---------------------+
 ```
 
 The two properties worth noticing:
 
-**Nothing is fetched at request time.** The site is a directory of pre-rendered
-HTML and pre-computed JSON. There is no request path to a database, so there is
-no query to make slow, no connection pool to exhaust and nothing to overload
-under a spike beyond static file serving.
+**Nothing leaves the origin at request time.** Every number and every sentence is
+derived inside the cluster: the Go tier renders a route from the artifacts on its
+volume and from nothing else. There is no request path to a database, no
+third-party call, no analytics and no font or CDN fetch from the browser, so there
+is no query to make slow, no connection pool to exhaust and no upstream that can
+rate-limit or observe a reader.
 
 **There are exactly two stores, and they hold different kinds of thing.**
 Postgres holds control-plane state whose write volume is bounded by pipeline
@@ -58,7 +62,9 @@ events - one row per match, per queue item, per PUUID, per build. The raw archiv
 holds the payloads themselves and is the only copy that cannot be re-fetched,
 because Riot retains match history for two years and timelines for one. Per-
 participant feature rows live in Parquet, not Postgres, so the aggregate shape
-can change without a migration.
+can change without a migration. The published `agg/v1` tree is a third thing
+again: derived, disposable and rebuildable from the archive, which is why losing
+it is an outage rather than a data loss.
 
 ## Components
 
@@ -70,8 +76,35 @@ can change without a migration.
 | `lolstats-ingest maintain` | CronJob | Frontier pruning, raw-archive compaction, key-age check, source-toggle review dates | daily |
 | `lolstats-aggregate build` | CronJob | DuckDB reads the raw archive, computes cells, suppresses thin ones, writes `agg/v1/**` and flips the manifest | nightly |
 | `lolstats-aggregate verify` | CronJob | Validate published artifacts against the schema and the gate rules; alert on staleness | after build |
-| Astro build | CronJob / CI | Pre-render every route from the aggregate tree | after build |
-| Caddy | Deployment | Serve the site and `/agg/**` from disk with caching and compression | continuous |
+| `lolstats-web` | Deployment | Render every route from `agg/v1` at request time, serve `/agg/**` unchanged, answer `/healthz` and `/metrics`, and fail visibly (503 + error page) when the artifact tree is missing | continuous |
+| shared Caddy (namespace `web`) | Deployment | Terminate TLS and reverse-proxy to `lolstats-web`; it is the cluster's, not this project's | continuous |
+
+## The serving tier
+
+`lolstats-web` is one Go binary and one Deployment (`cmd/lolstats-web`,
+`internal/webtier`). It is not a file server with a router bolted on: it renders
+each route from the published `agg/v1` artifacts that are mounted on the pod's
+volume, which is what makes the site and `/agg/**` one origin with no CORS
+exception and no route of its own in the shared proxy.
+
+| Surface | Behaviour |
+| --- | --- |
+| `/healthz` | 200 `ok`, `Cache-Control: no-store`; this is the readiness and liveness probe |
+| `/metrics` | Prometheus text, `lolstats_`-prefixed, `Cache-Control: no-store` |
+| HTML routes | `Cache-Control: private, max-age=60, stale-while-revalidate=300`, a quoted `ETag`, `Vary: Accept-Encoding`; a matching `If-None-Match` is answered `304` with no body, a stale validator is answered with the byte-identical 200 |
+| `/agg/v1/static/**` | Data Dragon JSON published by the static sync, `Cache-Control: public, max-age=3600` - safe to cache publicly because it is immutable upstream data with no reader in it |
+| `/agg/v1/manifest.json` | `Cache-Control: public, max-age=60`; the 60s matches the nightly build's directory-rename publish, so a stale entry cannot outlive one publish cycle |
+| `agg/v1` absent | 503 with a **visible** error page (`data-fault="no-snapshot"`), `no-store` - a page that cannot be rendered correctly is never served as a 200 |
+
+`scripts/verify-serving.sh` (`make verify-serving` against the cluster through
+`kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80`, or
+`make verify-serving-local` against a tier started over the checked-in fixture
+tree) asserts every row of that table, and asserts it against the deployed
+Service rather than against the source: the gate grew out of a static-site
+script whose file paths and `Cache-Status` expectations no longer described
+anything the tier does. The local variant starts the binary a second time over a
+deliberately corrupt aggregate root, because "503 rather than a truncated 200" is
+the kind of property that only a live probe can establish.
 
 ## Boundaries
 
@@ -101,7 +134,10 @@ and the site volume are mounts. The runtime image is distroless and nonroot.
 | Crash between archive write and dedupe | Nothing is lost: the archive is written first and the queue row is idempotent |
 | Aggregate build fails | The previous artifacts stay live and the manifest is not flipped. Publishing nothing beats publishing garbage |
 | Aggregate build is thin | `cells_suppressed` is surfaced in the manifest and on the page; thin is visible before it is wrong |
-| Site build fails | The previous site stays live; Caddy keeps serving the last good directory |
+| `agg/v1` is missing or unreadable | The pages that need it answer **503 with a visible error page** and `Cache-Control: no-store` - never a truncated 200. Pages that do not need it (`/`, `/about`) render their no-data state |
+| The manifest is present but corrupt | The tier serves the artifact bytes back unchanged rather than inventing a state, so a corrupt manifest is visible as a corrupt manifest. `make verify-serving-local` byte-compares the served bytes against the fixture on purpose |
+| A tier process dies | It is a Deployment with a readiness probe on `/healthz`, so the pod is replaced; the shared Caddy proxies to the Service, not to a pod |
+| A request is repeated | `ETag` + `304`, and `Cache-Control: private, max-age=60, stale-while-revalidate=300` on HTML so a stale copy is revalidated rather than assumed correct |
 | Postgres lost | Rebuildable from the archive. Crawl state is lost, which costs time and not data |
 
 ## What is deliberately not here

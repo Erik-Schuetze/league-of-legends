@@ -56,8 +56,8 @@ The twelve checks, in the order the gate runs them:
 | 0 | The built site is present and whole | `web/dist` is missing or holds implausibly few pages, so the later scans would read nothing. It also refuses to run at all (exit 2, not a FAIL) when a page it is about to judge is empty or has no closing `</html>`: another `npm run build` replaces `web/dist` wholesale, and a run that lands mid-rebuild used to report five content violations that were really one race. A torn tree is diagnosed, not scored |
 | 1 | No MMR, ELO or rating-like value anywhere | A rating-like identifier, key or column appears in Go, SQL, TS/JS, Astro, JSON, HTML or CSS |
 | 2 | Only permitted Riot assets | An image reference has an absolute origin other than the Data Dragon CDN |
-| 3 | No third-party scripts, embeds or tracking | An executable resource in a built page is not same-origin |
-| 4 | The free tier is free and ungated | A form, credential field, auth route, pricing route or paywall appears |
+| 3 | No third-party scripts, embeds or tracking | An executable resource in a built page is not same-origin, or names a tracking service. Amended 2026-09-17: the old "at least one `<script>` per page" floor is gone - a server-rendered page is legitimately script-free. See the amendment below |
+| 4 | The free tier is free and ungated | A credential field, auth route, pricing route or paywall appears; or a form is not a no-JS server-side path (`method="get"` with an on-origin `action`); or a named control sits outside a form. Amended 2026-09-17: the old "any `<form>`" rule is gone - the filter bar *is* the no-JS path. See the amendment below |
 | 5 | Verified-site claims are only made when satisfied | A page claims Riot reviewed or endorsed the site, or a `/riot.txt` is published without the token (or vice versa) |
 | 6 | The non-endorsement notice is visible, and its wording has not drifted | The frozen sentence is not on `/disclaimer` word for word; a built page states the notice in wording other than `NON_ENDORSEMENT_TEXT`; a built page carries no notice; an editable footer stops rendering `NON_ENDORSEMENT_TEXT`; or a built page stops linking to `/disclaimer` |
 | 7 | The legal pages publish a contact route | Any of the four compliance pages renders with no contact address |
@@ -68,6 +68,100 @@ The twelve checks, in the order the gate runs them:
 
 Each `PASS`/`FAIL` line names the number of files or pages the scan read, so a
 check that passed vacuously is visible in its own output.
+
+## Amendment: checks 3 and 4, the dynamic-serving amendment
+
+**Amended 2026-09-17, last reviewed 2026-09-17. Reason: the product became a
+server-rendered dynamic app, and the plan's original wording would have failed a
+correct build. Neither rule was weakened - each was replaced by the invariant it
+was standing in for, and both replacements are fail-closed and carry a negative
+control.**
+
+The plan wrote checks 3 and 4 for a pre-rendered Astro site, where every page
+carries a hydration bundle and no page has a form. The frozen architecture
+(`DECISION-dynamic-architecture.md`) replaced that with `lolstats-web`, a Go
+tier that renders every route from the published `agg/v1` snapshot at request
+time, and both assumptions are false of it:
+
+| Plan wording | What it failed on | Why that is wrong for the tier |
+| --- | --- | --- |
+| check 3: a built page must carry at least one `<script>` | a page whose `<script>` tag count is 0 | A server-rendered page is legitimately script-free: the served `/champions/ahri` page emits **0** `<script>` tags, and elsewhere the only one is the JSON-LD block. A tag *count* was never the invariant - the invariant is that nothing a page loads can phone home |
+| check 4: any `<form>` is a gate | the presence of the `<form>` tag, at all | The filter bar is a `method="get"` form with `action="/tier-list/mid"`, and it is the **no-JS path** for sorting, filtering and paging - the reason every table is complete and readable with JavaScript disabled. Banning the tag would have banned the accessibility mechanism the redesign is built on |
+
+The observed failure was on a mirror of the live served pages, with the
+pre-amendment gate (`git show HEAD:scripts/compliance-check.sh`):
+
+```
+RESULT: FAIL - 1 launch-blocking violation(s)     # exit 1
+FAIL  4. The free tier is genuinely free and ungated: no account, no paywall
+      10 <form class="ds-filter-bar ds-print-hidden" action="/patch/16.18/tier-list/mid" method="get" ...>
+```
+
+That is one check failing on ten GET forms and nothing else, which is exactly
+the "a normal dynamic app is unlaunchable" risk. The amended gate on the same
+tree: `RESULT: PASS - 0 launch-blocking violations(s)`, check 3 reporting 480
+resource tags across 150 pages, check 4 reporting 10 forms and 0 of 0 named
+controls outside a form.
+
+### What replaced the two rules
+
+**Check 3** now asserts the invariant directly: no `<script>`, `<iframe>`,
+stylesheet, font preload, module preload, preconnect, `@import` or tracking
+service name on any served page may refer to any origin but the one the build
+declares for itself (read from the canonical link of the built index, so a
+checkout with no site URL configured still knows which absolute references are
+its own). The honesty labelling the old floor stood in for is asserted
+separately and directly by check 11, which requires every page's banner to match
+the data state the page declares. A page with no `<script>` is now simply not a
+failure, and it is not treated as evidence of anything either.
+
+**Check 4** keeps the entire original gating pattern - `type="password"`,
+`type="email"`, `name="password"`, `name="email"`, sign-in, sign-up, register,
+subscribe, pricing and checkout routes, `data-paywall`, "Sign in"/"Sign up" -
+and adds three rules in place of the bare-`<form>` alternative:
+
+- **R1** the original gating pattern above, unchanged, so credential fields,
+  auth routes, subscription routes and paywalls still fail the build.
+- **R2** every form must be a no-JS server-side path: `method="get"` and an
+  explicit `action` that is a path on this origin. A form that can change state,
+  or that submits off-origin, fails. An action is **required** rather than
+  optional so that the destination of every control is checkable in the markup
+  instead of being inherited from whatever URL the page was reached by.
+- **R3** every *named* control (`<input>`, `<select>`, `<textarea>`, `<button>`
+  with a `name`) must sit inside a form. A named control submits a value; if it
+  is not in a form it has no server-side path at all. A control with no `name` -
+  the islands' own sort and filter widgets - cannot submit anything and is a JS
+  enhancement on top of a working page, so it is not this check's subject.
+
+Both amended checks remain fail-closed in the original direction: check 3 still
+fails when the scan reads fewer than 100 pages or extracts no resource tag at
+all, check 4 still fails when its gating pattern matches less than 2 of the 2
+pieces of markup it exists to catch, and both fail when their own controls do not
+fire.
+
+### Evidence that the amendment is not a weakening
+
+`make compliance-negative-control` (`scripts/compliance-negative-control.sh`)
+copies `web/dist` to a scratch tree, asserts the unmodified copy **passes**, then
+plants one violation at a time and asserts the gate exits non-zero with the
+expected FAIL text. Last run, on the same tree the gate is run against in CI:
+
+```
+control 0  PASS  the unmodified scratch copy passes the gate (exit 0) ...
+control 1  PASS  googletagmanager                       # third-party script  (check 3)
+control 2  PASS  form(s) are not a no-JS server-side path # off-origin POST    (check 4 R2)
+control 3  PASS  named control(s) sit outside a form      # dead control      (check 4 R3)
+control 4  PASS  gating element(s) found in the built pages # password field  (check 4 R1)
+control 5  PASS  a page stripped of every <script> passes
+RESULT: PASS - 6 negative control(s) held and 0 broken
+```
+
+Control 5 is the one that makes the amendment auditable rather than merely
+recorded: a page with every `<script>` removed must **pass**, and it does, which
+is the property the plan's floor forbade. The gate is run in CI
+(`.github/workflows/docker-build.yml`) both plain and with the controls, so a
+future weakening of either rule - or a control that silently stops planting -
+fails the build.
 
 ## Checkpoint register
 
@@ -88,7 +182,7 @@ free and ungated; no MMR/ELO calculator anywhere; no data-broker behaviour.
 | Privacy Policy published | met | `web/src/pages/legal/privacy.astro` builds to `/legal/privacy` |
 | Non-endorsement disclaimer visible | met | `web/src/pages/disclaimer.astro` builds to `/disclaimer`; 4 of 4 compliance pages render the frozen sentence verbatim, and every one of the 1063 built pages links to `/disclaimer` |
 | `riot.txt` hosted | **pending** | `astro.config.mjs` publishes `dist/riot.txt` only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set. It is unset, so **no `riot.txt` exists and none is offered** - a placeholder would be a false claim. The token is issued to the domain owner after they start a production-key application, so this is owner action, not code work |
-| Free tier genuinely free and ungated | met | gate check 4: no `<form>`, no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any of the 1063 pages |
+| Free tier genuinely free and ungated | met | gate check 4: no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any of the 1063 pages, and the 10 forms it finds are all no-JS server-side paths (`method="get"` with an on-origin `action`) whose named controls are inside them - see the amendment below |
 | No MMR/ELO calculator anywhere | met | gate check 1: 1370 files scanned, 4 rating mentions, all 4 exempt negations of the standing prohibition, 0 rating-like identifiers or keys. The count moves as the other workstreams add files; the run in the evidence log, not this number, is the evidence |
 | No data-broker behaviour | met | gate check 9: the published artifact schema (`web/src/types/agg.d.ts`, `agg.schema.json`) declares no PUUID and no served JSON file carries one; `web/dist` contains no raw-archive path |
 
@@ -222,17 +316,21 @@ renders its substantive content for an anonymous reader, and all of it renders
 **without JavaScript** - the tables are server-rendered and the island only adds
 sorting and filtering.
 
-Evidence: gate check 4 scans all 1063 built pages for a `<form>`, a password or
-email field, a `name="password"`/`name="email"` field, a login, sign-in, sign-up,
-register, subscribe, pricing or checkout route, `data-paywall` or a "Sign in"/"Sign
-up" link, and finds none. There is no auth code in the repository, no session
+Evidence: gate check 4 scans all 1063 built pages for a password or email field,
+a `name="password"`/`name="email"` field, a login, sign-in, sign-up, register,
+subscribe, pricing or checkout route, `data-paywall` or a "Sign in"/"Sign up"
+link, and finds none; it separately requires that every form in those pages is a
+no-JS GET form with an on-origin action and that every named control sits inside
+one, which is what keeps a form from becoming a gate by accident (the 2026-09-17
+amendment below). There is no auth code in the repository, no session
 cookie, and the deployment has no identity provider: `deploy/base/web/` serves
-static files through Caddy, and `caddyfile.yaml` contains no `basic_auth`,
-`forward_auth` or other authentication directive. Twenty
+the tier's HTTP surface through Caddy, and `caddyfile.yaml` contains no
+`basic_auth`, `forward_auth` or other authentication directive. Twenty
 `<input type="search">` elements exist and are deliberately excluded from the
-pattern - they are the same-origin table filters inside a `data-island`, they
-filter data the reader has already been served in full, and the tables are
-complete and readable with JavaScript disabled.
+pattern - they are the islands' own same-origin table filters, they carry no
+`name` and therefore submit nothing, they filter data the reader has already
+been served in full, and the tables are complete and readable with JavaScript
+disabled.
 
 ### No MMR, ELO or rating-like value is computed, stored or displayed anywhere
 
@@ -450,6 +548,13 @@ a compliance change, not a copy change.
   throws rather than publish a Dataset `measurementTechnique` in any other state.
   Gate check 11 asserts that every built page carries the labelling its declared
   state requires, so a page cannot lose its banner or claim a state it is not in.
+- **Checks 3 and 4 were amended on 2026-09-17** for the server-rendered tier,
+  and `scripts/compliance-negative-control.sh` / `make
+  compliance-negative-control` were added as the standing proof that the
+  amendment is not a weakening: one planted violation at a time, each of which
+  the amended gate must still reject, plus a page stripped of every `<script>`,
+  which must pass. See "Amendment: checks 3 and 4, the dynamic-serving
+  amendment" above. Both the gate and its controls run in CI.
 - Three decisions were recorded: `docs/decisions/ADR-008-no-third-party-ingestion.md`,
   `ADR-009-operator-identity-and-governing-law.md` and
   `ADR-010-public-preview-posture.md`.
