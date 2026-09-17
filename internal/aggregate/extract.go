@@ -58,6 +58,13 @@ const (
 	// The two summoner spells in pick order.
 	spellKeyExpr = "[p.summoner1_id, p.summoner2_id]"
 	spellExtra   = "(p.summoner1_id > 0 AND p.summoner2_id > 0)"
+
+	// How many staged archive parts one batch of the extraction holds. Every
+	// statement that reads a batch reads at most this much payload, which is
+	// what keeps the unnesting statements inside the engine's memory limit; see
+	// extract for the measurement. Eight parts of the live archive are about
+	// 160 matches, or 12 MB of payload.
+	extractBatchParts = 8
 )
 
 // planArchive resolves the window and the parts that can contribute to it.
@@ -133,16 +140,64 @@ func (s *buildState) run(ctx context.Context, result *BuildResult) error {
 	return s.publishLive(result)
 }
 
-// extract is phase one: read the archive once, spill it, and derive the feature
-// rows and the patch list.
-func (s *buildState) extract(ctx context.Context, filters string) error {
-	script := joinStatements(
-		copyParquet(matchesSQL(s.stagedPaths), s.matchesPath),
+// extract is phase one: read the archive, spill it, and derive the feature rows
+// and the patch list. It runs as a single script (extractScript) so that a probe
+// can run exactly what the build runs.
+//
+// Everything here that touches a payload is batched by parts, because every
+// statement that reads a payload holds its whole input in memory while it runs.
+// Three measurements on the live archive (205 staged parts, 3,643 matches in the
+// window, 283 MB of payload) fix the shape:
+//
+//   - A single statement that projects the envelope keys and carries the payload
+//     does not fit. Splitting it into a keys-only statement (envelopeSQL, which
+//     also computes the payload_valid flag, because json_valid does not fit
+//     beside a projected payload) and a JSON-free payload statement (payloadSQL)
+//     does.
+//   - The statements that unnest the payload's arrays do not fit when they read
+//     the whole window: the participants statement over every spilled file dies
+//     with "Out of Memory Error: failed to allocate data of size 16.0 MiB
+//     (1008.7 MiB/1.0 GiB used)" under a 1 GiB engine limit and at 1.9 GiB under
+//     a 2 GiB limit, and preserve_insertion_order does not change it. Reading one
+//     batch of parts at a time does: the whole 26-batch script completes at a
+//     1.5 GiB limit, and at 1 GiB the statement that dies is one batch's features
+//     COPY rather than the window-wide one.
+//   - What that statement costs is dominated by the rune-style list, not by the
+//     JSON extraction around it: replacing runeStyleSQL's CASE with a NULL list
+//     of the same type makes the same batch complete at the 1 GiB limit that it
+//     otherwise dies under. So the batch boundary and the engine's limit are
+//     chosen together - extractBatchParts below and DefaultDuckDBMemoryLimit.
+//
+// The payload is spilled one file per batch of parts and the unnesting
+// statements run once per batch file, each appending to the features and bans
+// directories. Every later statement reads those directories through a glob, so
+// the batch boundary is invisible past this phase.
+func (s *buildState) extractScript(filters string) string {
+	statements := []string{copyParquet(envelopeSQL(s.stagedPaths), s.envelopePath)}
+	for i := 0; i*extractBatchParts < len(s.stagedPaths); i++ {
+		parts := s.stagedPaths[i*extractBatchParts:]
+		if len(parts) > extractBatchParts {
+			parts = parts[:extractBatchParts]
+		}
+		matches := filepath.Join(s.matchesDir, batchFileName("matches", i))
+		statements = append(statements,
+			copyParquet(payloadSQL(s.envelopePath, parts), matches),
+			copyParquet(participantsSQL(matches, filters), filepath.Join(s.featuresDir, batchFileName("features", i))),
+			copyParquet(bansSQL(matches, filters), filepath.Join(s.bansDir, batchFileName("bans", i))),
+		)
+	}
+	statements = append(statements,
 		copyJSON(archiveStatsSQL(s.matchesPath), s.path("archive_stats.json")),
-		copyParquet(participantsSQL(s.matchesPath, filters), s.featuresPath),
-		copyParquet(bansSQL(s.matchesPath, filters), s.bansPath),
 		copyJSON(patchListSQL(s.featuresPath), s.path("patches.json")),
 	)
+	return joinStatements(statements...)
+}
+
+// batchFileName is the name of one batch's file inside a phase directory.
+func batchFileName(kind string, i int) string { return fmt.Sprintf("%s-%05d.parquet", kind, i) }
+
+func (s *buildState) extract(ctx context.Context, filters string) error {
+	script := s.extractScript(filters)
 	if err := s.engine.Exec(ctx, script); err != nil {
 		return err
 	}
