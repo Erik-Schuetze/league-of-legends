@@ -57,7 +57,7 @@ func fixtureDir() string {
 	if root == "" {
 		panic("the repository root could not be located from the test's working directory")
 	}
-	return filepath.Join(root, "web", "src", "fixtures")
+	return filepath.Join(root, "fixtures", "site")
 }
 
 // httpResult is a request's whole answer: the status, the headers and the bytes.
@@ -707,7 +707,7 @@ func faultKindIn(page string) string {
 }
 
 func fixtureDataDir() string {
-	return filepath.Join(discoverRepoRoot(), "web", "src", "data")
+	return filepath.Join(discoverRepoRoot(), "projection")
 }
 
 // copyFixtureTree copies the checked-in demo tree into a temporary directory so

@@ -1,0 +1,1869 @@
+{
+  "ddragon_version": "16.18.1",
+  "champions": [
+    {
+      "id": 1,
+      "key": "Annie",
+      "slug": "annie",
+      "name": "Annie",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Annie.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 2,
+      "key": "Olaf",
+      "slug": "olaf",
+      "name": "Olaf",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Olaf.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 3,
+      "key": "Galio",
+      "slug": "galio",
+      "name": "Galio",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Galio.png",
+      "roles": [
+        "BOTTOM",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 4,
+      "key": "TwistedFate",
+      "slug": "twistedfate",
+      "name": "Twisted Fate",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/TwistedFate.png",
+      "roles": [
+        "SUPPORT",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 5,
+      "key": "XinZhao",
+      "slug": "xinzhao",
+      "name": "Xin Zhao",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/XinZhao.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 6,
+      "key": "Urgot",
+      "slug": "urgot",
+      "name": "Urgot",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Urgot.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 7,
+      "key": "Leblanc",
+      "slug": "leblanc",
+      "name": "LeBlanc",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Leblanc.png",
+      "roles": [
+        "JUNGLE",
+        "MID"
+      ]
+    },
+    {
+      "id": 8,
+      "key": "Vladimir",
+      "slug": "vladimir",
+      "name": "Vladimir",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Vladimir.png",
+      "roles": [
+        "MID",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 9,
+      "key": "Fiddlesticks",
+      "slug": "fiddlesticks",
+      "name": "Fiddlesticks",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Fiddlesticks.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 10,
+      "key": "Kayle",
+      "slug": "kayle",
+      "name": "Kayle",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kayle.png",
+      "roles": [
+        "JUNGLE",
+        "MID"
+      ]
+    },
+    {
+      "id": 11,
+      "key": "MasterYi",
+      "slug": "masteryi",
+      "name": "Master Yi",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/MasterYi.png",
+      "roles": [
+        "BOTTOM",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 12,
+      "key": "Alistar",
+      "slug": "alistar",
+      "name": "Alistar",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Alistar.png",
+      "roles": [
+        "SUPPORT",
+        "MID"
+      ]
+    },
+    {
+      "id": 13,
+      "key": "Ryze",
+      "slug": "ryze",
+      "name": "Ryze",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ryze.png",
+      "roles": [
+        "TOP"
+      ]
+    },
+    {
+      "id": 14,
+      "key": "Sion",
+      "slug": "sion",
+      "name": "Sion",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Sion.png",
+      "roles": [
+        "BOTTOM",
+        "TOP"
+      ]
+    },
+    {
+      "id": 15,
+      "key": "Sivir",
+      "slug": "sivir",
+      "name": "Sivir",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Sivir.png",
+      "roles": [
+        "JUNGLE",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 16,
+      "key": "Soraka",
+      "slug": "soraka",
+      "name": "Soraka",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Soraka.png",
+      "roles": [
+        "MID",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 17,
+      "key": "Teemo",
+      "slug": "teemo",
+      "name": "Teemo",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Teemo.png",
+      "roles": [
+        "SUPPORT",
+        "MID"
+      ]
+    },
+    {
+      "id": 18,
+      "key": "Tristana",
+      "slug": "tristana",
+      "name": "Tristana",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Tristana.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 19,
+      "key": "Warwick",
+      "slug": "warwick",
+      "name": "Warwick",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Warwick.png",
+      "roles": [
+        "MID",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 20,
+      "key": "Nunu",
+      "slug": "nunu",
+      "name": "Nunu & Willump",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Nunu.png",
+      "roles": [
+        "JUNGLE",
+        "MID"
+      ]
+    },
+    {
+      "id": 21,
+      "key": "MissFortune",
+      "slug": "missfortune",
+      "name": "Miss Fortune",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/MissFortune.png",
+      "roles": [
+        "BOTTOM",
+        "TOP"
+      ]
+    },
+    {
+      "id": 22,
+      "key": "Ashe",
+      "slug": "ashe",
+      "name": "Ashe",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ashe.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 23,
+      "key": "Tryndamere",
+      "slug": "tryndamere",
+      "name": "Tryndamere",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Tryndamere.png",
+      "roles": [
+        "SUPPORT",
+        "MID"
+      ]
+    },
+    {
+      "id": 24,
+      "key": "Jax",
+      "slug": "jax",
+      "name": "Jax",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Jax.png",
+      "roles": [
+        "BOTTOM",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 25,
+      "key": "Morgana",
+      "slug": "morgana",
+      "name": "Morgana",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Morgana.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 26,
+      "key": "Zilean",
+      "slug": "zilean",
+      "name": "Zilean",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zilean.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 27,
+      "key": "Singed",
+      "slug": "singed",
+      "name": "Singed",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Singed.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 28,
+      "key": "Evelynn",
+      "slug": "evelynn",
+      "name": "Evelynn",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Evelynn.png",
+      "roles": [
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 29,
+      "key": "Twitch",
+      "slug": "twitch",
+      "name": "Twitch",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Twitch.png",
+      "roles": [
+        "MID",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 30,
+      "key": "Karthus",
+      "slug": "karthus",
+      "name": "Karthus",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Karthus.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 31,
+      "key": "Chogath",
+      "slug": "chogath",
+      "name": "Cho'Gath",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Chogath.png",
+      "roles": [
+        "TOP",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 32,
+      "key": "Amumu",
+      "slug": "amumu",
+      "name": "Amumu",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Amumu.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 33,
+      "key": "Rammus",
+      "slug": "rammus",
+      "name": "Rammus",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Rammus.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 34,
+      "key": "Anivia",
+      "slug": "anivia",
+      "name": "Anivia",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Anivia.png",
+      "roles": [
+        "MID",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 35,
+      "key": "Shaco",
+      "slug": "shaco",
+      "name": "Shaco",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Shaco.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 36,
+      "key": "DrMundo",
+      "slug": "drmundo",
+      "name": "Dr. Mundo",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/DrMundo.png",
+      "roles": [
+        "TOP",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 37,
+      "key": "Sona",
+      "slug": "sona",
+      "name": "Sona",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Sona.png",
+      "roles": [
+        "SUPPORT",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 38,
+      "key": "Kassadin",
+      "slug": "kassadin",
+      "name": "Kassadin",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kassadin.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 39,
+      "key": "Irelia",
+      "slug": "irelia",
+      "name": "Irelia",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Irelia.png",
+      "roles": [
+        "JUNGLE",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 40,
+      "key": "Janna",
+      "slug": "janna",
+      "name": "Janna",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Janna.png",
+      "roles": [
+        "TOP"
+      ]
+    },
+    {
+      "id": 41,
+      "key": "Gangplank",
+      "slug": "gangplank",
+      "name": "Gangplank",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Gangplank.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 42,
+      "key": "Corki",
+      "slug": "corki",
+      "name": "Corki",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Corki.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 43,
+      "key": "Karma",
+      "slug": "karma",
+      "name": "Karma",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Karma.png",
+      "roles": [
+        "JUNGLE",
+        "MID"
+      ]
+    },
+    {
+      "id": 44,
+      "key": "Taric",
+      "slug": "taric",
+      "name": "Taric",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Taric.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 45,
+      "key": "Veigar",
+      "slug": "veigar",
+      "name": "Veigar",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Veigar.png",
+      "roles": [
+        "BOTTOM",
+        "TOP"
+      ]
+    },
+    {
+      "id": 48,
+      "key": "Trundle",
+      "slug": "trundle",
+      "name": "Trundle",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Trundle.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 50,
+      "key": "Swain",
+      "slug": "swain",
+      "name": "Swain",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Swain.png",
+      "roles": [
+        "BOTTOM",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 51,
+      "key": "Caitlyn",
+      "slug": "caitlyn",
+      "name": "Caitlyn",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Caitlyn.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 53,
+      "key": "Blitzcrank",
+      "slug": "blitzcrank",
+      "name": "Blitzcrank",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Blitzcrank.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 54,
+      "key": "Malphite",
+      "slug": "malphite",
+      "name": "Malphite",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Malphite.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 55,
+      "key": "Katarina",
+      "slug": "katarina",
+      "name": "Katarina",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Katarina.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 56,
+      "key": "Nocturne",
+      "slug": "nocturne",
+      "name": "Nocturne",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Nocturne.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 57,
+      "key": "Maokai",
+      "slug": "maokai",
+      "name": "Maokai",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Maokai.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 58,
+      "key": "Renekton",
+      "slug": "renekton",
+      "name": "Renekton",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Renekton.png",
+      "roles": [
+        "MID",
+        "TOP"
+      ]
+    },
+    {
+      "id": 59,
+      "key": "JarvanIV",
+      "slug": "jarvaniv",
+      "name": "Jarvan IV",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/JarvanIV.png",
+      "roles": [
+        "SUPPORT",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 60,
+      "key": "Elise",
+      "slug": "elise",
+      "name": "Elise",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Elise.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 61,
+      "key": "Orianna",
+      "slug": "orianna",
+      "name": "Orianna",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Orianna.png",
+      "roles": [
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 62,
+      "key": "MonkeyKing",
+      "slug": "monkeyking",
+      "name": "Wukong",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/MonkeyKing.png",
+      "roles": [
+        "BOTTOM",
+        "TOP"
+      ]
+    },
+    {
+      "id": 63,
+      "key": "Brand",
+      "slug": "brand",
+      "name": "Brand",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Brand.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 64,
+      "key": "LeeSin",
+      "slug": "leesin",
+      "name": "Lee Sin",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/LeeSin.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 67,
+      "key": "Vayne",
+      "slug": "vayne",
+      "name": "Vayne",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Vayne.png",
+      "roles": [
+        "SUPPORT",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 68,
+      "key": "Rumble",
+      "slug": "rumble",
+      "name": "Rumble",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Rumble.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 69,
+      "key": "Cassiopeia",
+      "slug": "cassiopeia",
+      "name": "Cassiopeia",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Cassiopeia.png",
+      "roles": [
+        "MID",
+        "TOP"
+      ]
+    },
+    {
+      "id": 72,
+      "key": "Skarner",
+      "slug": "skarner",
+      "name": "Skarner",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Skarner.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 74,
+      "key": "Heimerdinger",
+      "slug": "heimerdinger",
+      "name": "Heimerdinger",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Heimerdinger.png",
+      "roles": [
+        "SUPPORT",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 75,
+      "key": "Nasus",
+      "slug": "nasus",
+      "name": "Nasus",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Nasus.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 76,
+      "key": "Nidalee",
+      "slug": "nidalee",
+      "name": "Nidalee",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Nidalee.png",
+      "roles": [
+        "TOP",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 77,
+      "key": "Udyr",
+      "slug": "udyr",
+      "name": "Udyr",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Udyr.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 78,
+      "key": "Poppy",
+      "slug": "poppy",
+      "name": "Poppy",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Poppy.png",
+      "roles": [
+        "JUNGLE",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 79,
+      "key": "Gragas",
+      "slug": "gragas",
+      "name": "Gragas",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Gragas.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 80,
+      "key": "Pantheon",
+      "slug": "pantheon",
+      "name": "Pantheon",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Pantheon.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 81,
+      "key": "Ezreal",
+      "slug": "ezreal",
+      "name": "Ezreal",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ezreal.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 82,
+      "key": "Mordekaiser",
+      "slug": "mordekaiser",
+      "name": "Mordekaiser",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Mordekaiser.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 83,
+      "key": "Yorick",
+      "slug": "yorick",
+      "name": "Yorick",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Yorick.png",
+      "roles": [
+        "JUNGLE",
+        "MID"
+      ]
+    },
+    {
+      "id": 84,
+      "key": "Akali",
+      "slug": "akali",
+      "name": "Akali",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Akali.png",
+      "roles": [
+        "BOTTOM",
+        "TOP"
+      ]
+    },
+    {
+      "id": 85,
+      "key": "Kennen",
+      "slug": "kennen",
+      "name": "Kennen",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kennen.png",
+      "roles": [
+        "SUPPORT",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 86,
+      "key": "Garen",
+      "slug": "garen",
+      "name": "Garen",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Garen.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 89,
+      "key": "Leona",
+      "slug": "leona",
+      "name": "Leona",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Leona.png",
+      "roles": [
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 90,
+      "key": "Malzahar",
+      "slug": "malzahar",
+      "name": "Malzahar",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Malzahar.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 91,
+      "key": "Talon",
+      "slug": "talon",
+      "name": "Talon",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Talon.png",
+      "roles": [
+        "SUPPORT",
+        "MID"
+      ]
+    },
+    {
+      "id": 92,
+      "key": "Riven",
+      "slug": "riven",
+      "name": "Riven",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Riven.png",
+      "roles": [
+        "MID",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 96,
+      "key": "KogMaw",
+      "slug": "kogmaw",
+      "name": "Kog'Maw",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/KogMaw.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 98,
+      "key": "Shen",
+      "slug": "shen",
+      "name": "Shen",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Shen.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 99,
+      "key": "Lux",
+      "slug": "lux",
+      "name": "Lux",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Lux.png",
+      "roles": [
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 101,
+      "key": "Xerath",
+      "slug": "xerath",
+      "name": "Xerath",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Xerath.png",
+      "roles": [
+        "BOTTOM",
+        "MID"
+      ]
+    },
+    {
+      "id": 102,
+      "key": "Shyvana",
+      "slug": "shyvana",
+      "name": "Shyvana",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Shyvana.png",
+      "roles": [
+        "SUPPORT",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 103,
+      "key": "Ahri",
+      "slug": "ahri",
+      "name": "Ahri",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ahri.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 104,
+      "key": "Graves",
+      "slug": "graves",
+      "name": "Graves",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Graves.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 105,
+      "key": "Fizz",
+      "slug": "fizz",
+      "name": "Fizz",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Fizz.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 106,
+      "key": "Volibear",
+      "slug": "volibear",
+      "name": "Volibear",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Volibear.png",
+      "roles": [
+        "JUNGLE",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 107,
+      "key": "Rengar",
+      "slug": "rengar",
+      "name": "Rengar",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Rengar.png",
+      "roles": [
+        "BOTTOM",
+        "MID"
+      ]
+    },
+    {
+      "id": 110,
+      "key": "Varus",
+      "slug": "varus",
+      "name": "Varus",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Varus.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 111,
+      "key": "Nautilus",
+      "slug": "nautilus",
+      "name": "Nautilus",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Nautilus.png",
+      "roles": [
+        "MID",
+        "TOP"
+      ]
+    },
+    {
+      "id": 112,
+      "key": "Viktor",
+      "slug": "viktor",
+      "name": "Viktor",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Viktor.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 113,
+      "key": "Sejuani",
+      "slug": "sejuani",
+      "name": "Sejuani",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Sejuani.png",
+      "roles": [
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 114,
+      "key": "Fiora",
+      "slug": "fiora",
+      "name": "Fiora",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Fiora.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 115,
+      "key": "Ziggs",
+      "slug": "ziggs",
+      "name": "Ziggs",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ziggs.png",
+      "roles": [
+        "SUPPORT",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 117,
+      "key": "Lulu",
+      "slug": "lulu",
+      "name": "Lulu",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Lulu.png",
+      "roles": [
+        "SUPPORT",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 119,
+      "key": "Draven",
+      "slug": "draven",
+      "name": "Draven",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Draven.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 120,
+      "key": "Hecarim",
+      "slug": "hecarim",
+      "name": "Hecarim",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Hecarim.png",
+      "roles": [
+        "TOP"
+      ]
+    },
+    {
+      "id": 121,
+      "key": "Khazix",
+      "slug": "khazix",
+      "name": "Kha'Zix",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Khazix.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 122,
+      "key": "Darius",
+      "slug": "darius",
+      "name": "Darius",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Darius.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 126,
+      "key": "Jayce",
+      "slug": "jayce",
+      "name": "Jayce",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Jayce.png",
+      "roles": [
+        "MID",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 127,
+      "key": "Lissandra",
+      "slug": "lissandra",
+      "name": "Lissandra",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Lissandra.png",
+      "roles": [
+        "SUPPORT",
+        "MID"
+      ]
+    },
+    {
+      "id": 131,
+      "key": "Diana",
+      "slug": "diana",
+      "name": "Diana",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Diana.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 133,
+      "key": "Quinn",
+      "slug": "quinn",
+      "name": "Quinn",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Quinn.png",
+      "roles": [
+        "TOP",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 134,
+      "key": "Syndra",
+      "slug": "syndra",
+      "name": "Syndra",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Syndra.png",
+      "roles": [
+        "SUPPORT",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 136,
+      "key": "AurelionSol",
+      "slug": "aurelionsol",
+      "name": "Aurelion Sol",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/AurelionSol.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 141,
+      "key": "Kayn",
+      "slug": "kayn",
+      "name": "Kayn",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kayn.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 142,
+      "key": "Zoe",
+      "slug": "zoe",
+      "name": "Zoe",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zoe.png",
+      "roles": [
+        "TOP",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 143,
+      "key": "Zyra",
+      "slug": "zyra",
+      "name": "Zyra",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zyra.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 145,
+      "key": "Kaisa",
+      "slug": "kaisa",
+      "name": "Kai'Sa",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kaisa.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 147,
+      "key": "Seraphine",
+      "slug": "seraphine",
+      "name": "Seraphine",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Seraphine.png",
+      "roles": [
+        "BOTTOM",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 150,
+      "key": "Gnar",
+      "slug": "gnar",
+      "name": "Gnar",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Gnar.png",
+      "roles": [
+        "TOP"
+      ]
+    },
+    {
+      "id": 154,
+      "key": "Zac",
+      "slug": "zac",
+      "name": "Zac",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zac.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 157,
+      "key": "Yasuo",
+      "slug": "yasuo",
+      "name": "Yasuo",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Yasuo.png",
+      "roles": [
+        "BOTTOM",
+        "TOP"
+      ]
+    },
+    {
+      "id": 161,
+      "key": "Velkoz",
+      "slug": "velkoz",
+      "name": "Vel'Koz",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Velkoz.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 163,
+      "key": "Taliyah",
+      "slug": "taliyah",
+      "name": "Taliyah",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Taliyah.png",
+      "roles": [
+        "TOP",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 164,
+      "key": "Camille",
+      "slug": "camille",
+      "name": "Camille",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Camille.png",
+      "roles": [
+        "MID",
+        "TOP"
+      ]
+    },
+    {
+      "id": 166,
+      "key": "Akshan",
+      "slug": "akshan",
+      "name": "Akshan",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Akshan.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 200,
+      "key": "Belveth",
+      "slug": "belveth",
+      "name": "Bel'Veth",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Belveth.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 201,
+      "key": "Braum",
+      "slug": "braum",
+      "name": "Braum",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Braum.png",
+      "roles": [
+        "BOTTOM",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 202,
+      "key": "Jhin",
+      "slug": "jhin",
+      "name": "Jhin",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Jhin.png",
+      "roles": [
+        "TOP",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 203,
+      "key": "Kindred",
+      "slug": "kindred",
+      "name": "Kindred",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kindred.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 221,
+      "key": "Zeri",
+      "slug": "zeri",
+      "name": "Zeri",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zeri.png",
+      "roles": [
+        "MID",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 222,
+      "key": "Jinx",
+      "slug": "jinx",
+      "name": "Jinx",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Jinx.png",
+      "roles": [
+        "TOP",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 223,
+      "key": "TahmKench",
+      "slug": "tahmkench",
+      "name": "Tahm Kench",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/TahmKench.png",
+      "roles": [
+        "BOTTOM",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 233,
+      "key": "Briar",
+      "slug": "briar",
+      "name": "Briar",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Briar.png",
+      "roles": [
+        "MID",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 234,
+      "key": "Viego",
+      "slug": "viego",
+      "name": "Viego",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Viego.png",
+      "roles": [
+        "SUPPORT",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 235,
+      "key": "Senna",
+      "slug": "senna",
+      "name": "Senna",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Senna.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 236,
+      "key": "Lucian",
+      "slug": "lucian",
+      "name": "Lucian",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Lucian.png",
+      "roles": [
+        "SUPPORT",
+        "MID"
+      ]
+    },
+    {
+      "id": 238,
+      "key": "Zed",
+      "slug": "zed",
+      "name": "Zed",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zed.png",
+      "roles": [
+        "TOP"
+      ]
+    },
+    {
+      "id": 240,
+      "key": "Kled",
+      "slug": "kled",
+      "name": "Kled",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kled.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 245,
+      "key": "Ekko",
+      "slug": "ekko",
+      "name": "Ekko",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ekko.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 246,
+      "key": "Qiyana",
+      "slug": "qiyana",
+      "name": "Qiyana",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Qiyana.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 254,
+      "key": "Vi",
+      "slug": "vi",
+      "name": "Vi",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Vi.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 266,
+      "key": "Aatrox",
+      "slug": "aatrox",
+      "name": "Aatrox",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Aatrox.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 267,
+      "key": "Nami",
+      "slug": "nami",
+      "name": "Nami",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Nami.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 268,
+      "key": "Azir",
+      "slug": "azir",
+      "name": "Azir",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Azir.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    },
+    {
+      "id": 350,
+      "key": "Yuumi",
+      "slug": "yuumi",
+      "name": "Yuumi",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Yuumi.png",
+      "roles": [
+        "TOP"
+      ]
+    },
+    {
+      "id": 360,
+      "key": "Samira",
+      "slug": "samira",
+      "name": "Samira",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Samira.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 412,
+      "key": "Thresh",
+      "slug": "thresh",
+      "name": "Thresh",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Thresh.png",
+      "roles": [
+        "TOP",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 420,
+      "key": "Illaoi",
+      "slug": "illaoi",
+      "name": "Illaoi",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Illaoi.png",
+      "roles": [
+        "BOTTOM",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 421,
+      "key": "RekSai",
+      "slug": "reksai",
+      "name": "Rek'Sai",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/RekSai.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 427,
+      "key": "Ivern",
+      "slug": "ivern",
+      "name": "Ivern",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ivern.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 429,
+      "key": "Kalista",
+      "slug": "kalista",
+      "name": "Kalista",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Kalista.png",
+      "roles": [
+        "TOP",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 432,
+      "key": "Bard",
+      "slug": "bard",
+      "name": "Bard",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Bard.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 497,
+      "key": "Rakan",
+      "slug": "rakan",
+      "name": "Rakan",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Rakan.png",
+      "roles": [
+        "SUPPORT",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 498,
+      "key": "Xayah",
+      "slug": "xayah",
+      "name": "Xayah",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Xayah.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 516,
+      "key": "Ornn",
+      "slug": "ornn",
+      "name": "Ornn",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ornn.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 517,
+      "key": "Sylas",
+      "slug": "sylas",
+      "name": "Sylas",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Sylas.png",
+      "roles": [
+        "JUNGLE",
+        "MID"
+      ]
+    },
+    {
+      "id": 518,
+      "key": "Neeko",
+      "slug": "neeko",
+      "name": "Neeko",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Neeko.png",
+      "roles": [
+        "MID",
+        "TOP"
+      ]
+    },
+    {
+      "id": 523,
+      "key": "Aphelios",
+      "slug": "aphelios",
+      "name": "Aphelios",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Aphelios.png",
+      "roles": [
+        "JUNGLE",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 526,
+      "key": "Rell",
+      "slug": "rell",
+      "name": "Rell",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Rell.png",
+      "roles": [
+        "SUPPORT",
+        "TOP"
+      ]
+    },
+    {
+      "id": 555,
+      "key": "Pyke",
+      "slug": "pyke",
+      "name": "Pyke",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Pyke.png",
+      "roles": [
+        "MID",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 711,
+      "key": "Vex",
+      "slug": "vex",
+      "name": "Vex",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Vex.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 777,
+      "key": "Yone",
+      "slug": "yone",
+      "name": "Yone",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Yone.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 799,
+      "key": "Ambessa",
+      "slug": "ambessa",
+      "name": "Ambessa",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ambessa.png",
+      "roles": [
+        "SUPPORT",
+        "MID"
+      ]
+    },
+    {
+      "id": 800,
+      "key": "Mel",
+      "slug": "mel",
+      "name": "Mel",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Mel.png",
+      "roles": [
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 804,
+      "key": "Yunara",
+      "slug": "yunara",
+      "name": "Yunara",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Yunara.png",
+      "roles": [
+        "TOP"
+      ]
+    },
+    {
+      "id": 805,
+      "key": "Locke",
+      "slug": "locke",
+      "name": "Locke",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Locke.png",
+      "roles": [
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 875,
+      "key": "Sett",
+      "slug": "sett",
+      "name": "Sett",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Sett.png",
+      "roles": [
+        "SUPPORT",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 876,
+      "key": "Lillia",
+      "slug": "lillia",
+      "name": "Lillia",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Lillia.png",
+      "roles": [
+        "MID",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 887,
+      "key": "Gwen",
+      "slug": "gwen",
+      "name": "Gwen",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Gwen.png",
+      "roles": [
+        "BOTTOM",
+        "MID"
+      ]
+    },
+    {
+      "id": 888,
+      "key": "Renata",
+      "slug": "renata",
+      "name": "Renata Glasc",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Renata.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 893,
+      "key": "Aurora",
+      "slug": "aurora",
+      "name": "Aurora",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Aurora.png",
+      "roles": [
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 895,
+      "key": "Nilah",
+      "slug": "nilah",
+      "name": "Nilah",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Nilah.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 897,
+      "key": "KSante",
+      "slug": "ksante",
+      "name": "K'Sante",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/KSante.png",
+      "roles": [
+        "MID",
+        "JUNGLE"
+      ]
+    },
+    {
+      "id": 901,
+      "key": "Smolder",
+      "slug": "smolder",
+      "name": "Smolder",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Smolder.png",
+      "roles": [
+        "JUNGLE",
+        "TOP"
+      ]
+    },
+    {
+      "id": 902,
+      "key": "Milio",
+      "slug": "milio",
+      "name": "Milio",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Milio.png",
+      "roles": [
+        "TOP",
+        "SUPPORT"
+      ]
+    },
+    {
+      "id": 904,
+      "key": "Zaahen",
+      "slug": "zaahen",
+      "name": "Zaahen",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zaahen.png",
+      "roles": [
+        "MID"
+      ]
+    },
+    {
+      "id": 910,
+      "key": "Hwei",
+      "slug": "hwei",
+      "name": "Hwei",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Hwei.png",
+      "roles": [
+        "TOP",
+        "BOTTOM"
+      ]
+    },
+    {
+      "id": 950,
+      "key": "Naafiri",
+      "slug": "naafiri",
+      "name": "Naafiri",
+      "icon": "https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Naafiri.png",
+      "roles": [
+        "TOP",
+        "MID"
+      ]
+    }
+  ]
+}

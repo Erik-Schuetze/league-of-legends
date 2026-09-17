@@ -20,7 +20,7 @@ import (
 //
 // Two sources, in this order:
 //
-//  1. the checked-in projection (web/src/data/{items,runes,spells}.json, or the
+//  1. the checked-in projection (projection/{items,runes,spells}.json, or the
 //     copy embedded in this binary), which is what makes a build work offline;
 //  2. the aggregate tree's own static projection
 //     (agg/v1/static/<ddragon_version>/{items,runes,summoner-spells}.json),

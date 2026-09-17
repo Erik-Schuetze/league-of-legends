@@ -55,10 +55,10 @@ type Options struct {
 	// FixturesMode defaults to FixturesAuto.
 	FixturesMode FixturesMode
 	// FixturesDir is the checked-in demo tree (LOLSTATS_FIXTURES_DIR, or
-	// <repo>/web/src/fixtures).
+	// <repo>/fixtures/site).
 	FixturesDir string
 	// DataDir is the checked-in Data Dragon projection
-	// (LOLSTATS_DATA_DIR, or <repo>/web/src/data).
+	// (LOLSTATS_DATA_DIR, or <repo>/projection).
 	DataDir string
 }
 
@@ -95,10 +95,10 @@ func OptionsFromEnv() Options {
 		opts.FixturesMode = FixturesAuto
 	}
 	if opts.FixturesDir == "" && root != "" {
-		opts.FixturesDir = filepath.Join(root, "web", "src", "fixtures")
+		opts.FixturesDir = filepath.Join(root, "fixtures", "site")
 	}
 	if opts.DataDir == "" && root != "" {
-		opts.DataDir = filepath.Join(root, "web", "src", "data")
+		opts.DataDir = filepath.Join(root, "projection")
 	}
 	if opts.AggRoot == "" && root != "" {
 		opts.AggRoot = filepath.Join(root, "agg")
@@ -120,7 +120,7 @@ func discoverRepoRoot() string {
 		return ""
 	}
 	for dir := cwd; ; {
-		if _, err := os.Stat(filepath.Join(dir, "web", "src", "fixtures")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "fixtures", "site")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)

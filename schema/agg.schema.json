@@ -1,0 +1,802 @@
+{
+  "$defs": {
+    "Bracket": {
+      "enum": [
+        "all",
+        "emerald_plus",
+        "platinum_plus",
+        "diamond_plus",
+        "master_plus"
+      ],
+      "type": "string"
+    },
+    "Build": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "win_rate": {
+          "type": "number"
+        },
+        "wins": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "key",
+        "label",
+        "n",
+        "wins",
+        "win_rate"
+      ],
+      "type": "object"
+    },
+    "Cell": {
+      "additionalProperties": false,
+      "properties": {
+        "ban_rate": {
+          "type": "number"
+        },
+        "champion_id": {
+          "type": "integer"
+        },
+        "ci95_half_width": {
+          "type": "number"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "pick_rate": {
+          "type": "number"
+        },
+        "role": {
+          "$ref": "#/$defs/Role"
+        },
+        "tier": {
+          "$ref": "#/$defs/Tier"
+        },
+        "win_rate": {
+          "type": "number"
+        },
+        "wins": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "champion_id",
+        "role",
+        "n",
+        "wins",
+        "win_rate",
+        "pick_rate",
+        "ban_rate",
+        "tier",
+        "ci95_half_width"
+      ],
+      "type": "object"
+    },
+    "Champion": {
+      "additionalProperties": false,
+      "properties": {
+        "bracket": {
+          "$ref": "#/$defs/Bracket"
+        },
+        "champion_id": {
+          "type": "integer"
+        },
+        "champion_slug": {
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "min_cell_n": {
+          "type": "integer"
+        },
+        "patch": {
+          "type": "string"
+        },
+        "queue": {
+          "type": "integer"
+        },
+        "region": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "$ref": "#/$defs/ChampionRole"
+          },
+          "type": "array"
+        },
+        "schema": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "source_window": {
+          "$ref": "#/$defs/Window"
+        },
+        "suppressed_cells": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema",
+        "source",
+        "patch",
+        "region",
+        "queue",
+        "bracket",
+        "generated_at",
+        "source_window",
+        "min_cell_n",
+        "suppressed_cells",
+        "champion_id",
+        "champion_slug",
+        "roles"
+      ],
+      "type": "object"
+    },
+    "ChampionRole": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/Build"
+          },
+          "type": "array"
+        },
+        "role": {
+          "$ref": "#/$defs/Role"
+        },
+        "runes": {
+          "items": {
+            "$ref": "#/$defs/Build"
+          },
+          "type": "array"
+        },
+        "skill_orders": {
+          "items": {
+            "$ref": "#/$defs/SkillOrder"
+          },
+          "type": "array"
+        },
+        "spells": {
+          "items": {
+            "$ref": "#/$defs/Build"
+          },
+          "type": "array"
+        },
+        "stats": {
+          "$ref": "#/$defs/Cell"
+        }
+      },
+      "required": [
+        "role",
+        "stats",
+        "items",
+        "runes",
+        "spells",
+        "skill_orders"
+      ],
+      "type": "object"
+    },
+    "Envelope": {
+      "additionalProperties": false,
+      "properties": {
+        "bracket": {
+          "$ref": "#/$defs/Bracket"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "min_cell_n": {
+          "type": "integer"
+        },
+        "patch": {
+          "type": "string"
+        },
+        "queue": {
+          "type": "integer"
+        },
+        "region": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "source_window": {
+          "$ref": "#/$defs/Window"
+        },
+        "suppressed_cells": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema",
+        "source",
+        "patch",
+        "region",
+        "queue",
+        "bracket",
+        "generated_at",
+        "source_window",
+        "min_cell_n",
+        "suppressed_cells"
+      ],
+      "type": "object"
+    },
+    "Manifest": {
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "latest": {
+          "$ref": "#/$defs/Partition"
+        },
+        "partitions": {
+          "items": {
+            "$ref": "#/$defs/Partition"
+          },
+          "type": "array"
+        },
+        "schema": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "schema",
+        "source",
+        "generated_at",
+        "latest",
+        "partitions"
+      ],
+      "type": "object"
+    },
+    "MatchupCell": {
+      "additionalProperties": false,
+      "properties": {
+        "champion_id": {
+          "type": "integer"
+        },
+        "ci95_half_width": {
+          "type": "number"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "opponent_id": {
+          "type": "integer"
+        },
+        "win_rate": {
+          "type": "number"
+        },
+        "wins": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "champion_id",
+        "opponent_id",
+        "n",
+        "wins",
+        "win_rate",
+        "ci95_half_width"
+      ],
+      "type": "object"
+    },
+    "Matchups": {
+      "additionalProperties": false,
+      "properties": {
+        "bracket": {
+          "$ref": "#/$defs/Bracket"
+        },
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/MatchupCell"
+          },
+          "type": "array"
+        },
+        "champions": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "min_cell_n": {
+          "type": "integer"
+        },
+        "patch": {
+          "type": "string"
+        },
+        "queue": {
+          "type": "integer"
+        },
+        "region": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/Role"
+        },
+        "schema": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "source_window": {
+          "$ref": "#/$defs/Window"
+        },
+        "suppressed_cells": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema",
+        "source",
+        "patch",
+        "region",
+        "queue",
+        "bracket",
+        "generated_at",
+        "source_window",
+        "min_cell_n",
+        "suppressed_cells",
+        "role",
+        "champions",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "Partition": {
+      "additionalProperties": false,
+      "properties": {
+        "bracket": {
+          "$ref": "#/$defs/Bracket"
+        },
+        "build_run_id": {
+          "type": "integer"
+        },
+        "cells_published": {
+          "type": "integer"
+        },
+        "champions": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "git_sha": {
+          "type": "string"
+        },
+        "matchup_roles": {
+          "items": {
+            "$ref": "#/$defs/Role"
+          },
+          "type": "array"
+        },
+        "min_cell_n": {
+          "type": "integer"
+        },
+        "patch": {
+          "type": "string"
+        },
+        "queue": {
+          "type": "integer"
+        },
+        "region": {
+          "type": "string"
+        },
+        "source_window": {
+          "$ref": "#/$defs/Window"
+        },
+        "suppressed_cells": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "patch",
+        "region",
+        "queue",
+        "bracket",
+        "generated_at",
+        "source_window",
+        "min_cell_n",
+        "suppressed_cells",
+        "cells_published",
+        "build_run_id",
+        "git_sha",
+        "champions",
+        "matchup_roles"
+      ],
+      "type": "object"
+    },
+    "Role": {
+      "enum": [
+        "TOP",
+        "JUNGLE",
+        "MID",
+        "BOTTOM",
+        "SUPPORT"
+      ],
+      "type": "string"
+    },
+    "SkillOrder": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "type": "integer"
+        },
+        "order": {
+          "type": "string"
+        },
+        "win_rate": {
+          "type": "number"
+        },
+        "wins": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "order",
+        "n",
+        "wins",
+        "win_rate"
+      ],
+      "type": "object"
+    },
+    "Source": {
+      "enum": [
+        "riot-match-v5",
+        "demo"
+      ],
+      "type": "string"
+    },
+    "StaticChampion": {
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "$ref": "#/$defs/Role"
+          },
+          "type": "array"
+        },
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "key",
+        "slug",
+        "name",
+        "icon",
+        "roles"
+      ],
+      "type": "object"
+    },
+    "StaticChampions": {
+      "additionalProperties": false,
+      "properties": {
+        "champions": {
+          "items": {
+            "$ref": "#/$defs/StaticChampion"
+          },
+          "type": "array"
+        },
+        "ddragon_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ddragon_version",
+        "champions"
+      ],
+      "type": "object"
+    },
+    "StaticItem": {
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon"
+      ],
+      "type": "object"
+    },
+    "StaticItems": {
+      "additionalProperties": false,
+      "properties": {
+        "ddragon_version": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/StaticItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ddragon_version",
+        "items"
+      ],
+      "type": "object"
+    },
+    "StaticPatches": {
+      "additionalProperties": false,
+      "properties": {
+        "ddragon_version": {
+          "type": "string"
+        },
+        "latest": {
+          "type": "string"
+        },
+        "patches": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ddragon_version",
+        "latest",
+        "patches"
+      ],
+      "type": "object"
+    },
+    "StaticRune": {
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tree": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon",
+        "tree"
+      ],
+      "type": "object"
+    },
+    "StaticRunes": {
+      "additionalProperties": false,
+      "properties": {
+        "ddragon_version": {
+          "type": "string"
+        },
+        "runes": {
+          "items": {
+            "$ref": "#/$defs/StaticRune"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ddragon_version",
+        "runes"
+      ],
+      "type": "object"
+    },
+    "StaticSummonerSpell": {
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon"
+      ],
+      "type": "object"
+    },
+    "StaticSummonerSpells": {
+      "additionalProperties": false,
+      "properties": {
+        "ddragon_version": {
+          "type": "string"
+        },
+        "spells": {
+          "items": {
+            "$ref": "#/$defs/StaticSummonerSpell"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ddragon_version",
+        "spells"
+      ],
+      "type": "object"
+    },
+    "Tier": {
+      "enum": [
+        "S+",
+        "S",
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "type": "string"
+    },
+    "TierList": {
+      "additionalProperties": false,
+      "properties": {
+        "bracket": {
+          "$ref": "#/$defs/Bracket"
+        },
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/Cell"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "min_cell_n": {
+          "type": "integer"
+        },
+        "patch": {
+          "type": "string"
+        },
+        "queue": {
+          "type": "integer"
+        },
+        "region": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "source_window": {
+          "$ref": "#/$defs/Window"
+        },
+        "suppressed_cells": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema",
+        "source",
+        "patch",
+        "region",
+        "queue",
+        "bracket",
+        "generated_at",
+        "source_window",
+        "min_cell_n",
+        "suppressed_cells",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "Window": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/Erik-Schuetze/league-of-legends/agg/v1/schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/TierList"
+    },
+    {
+      "$ref": "#/$defs/Champion"
+    },
+    {
+      "$ref": "#/$defs/Matchups"
+    },
+    {
+      "$ref": "#/$defs/Manifest"
+    },
+    {
+      "$ref": "#/$defs/StaticChampions"
+    },
+    {
+      "$ref": "#/$defs/StaticItems"
+    },
+    {
+      "$ref": "#/$defs/StaticRunes"
+    },
+    {
+      "$ref": "#/$defs/StaticSummonerSpells"
+    },
+    {
+      "$ref": "#/$defs/StaticPatches"
+    }
+  ],
+  "title": "League of Legends aggregate artifacts (agg/v1)"
+}

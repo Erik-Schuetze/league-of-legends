@@ -1,13 +1,15 @@
 # Fixtures
 
-Small, hand-authored payloads for tests and for reasoning about shapes.
+Small, hand-authored payloads for tests and for reasoning about shapes, plus the
+generated demo artifact tree built from them (`site/`).
 
 ## Provenance and legality
 
-**Nothing in this directory is real Riot data.** Every file here was written by
-hand to match the documented MATCH-V5 shape, using the field set frozen in
-`internal/riot/dto.go`. There is no captured payload, no scraped response and no
-player data of any kind.
+**Nothing in this directory is real Riot data.** Every payload here was written
+by hand to match the documented MATCH-V5 shape, using the field set frozen in
+`internal/riot/dto.go`, and `site/` is derived from those payloads rather than
+from a crawl. There is no captured payload, no scraped response and no player
+data of any kind.
 
 That is deliberate, for three reasons:
 
@@ -45,6 +47,7 @@ locally, never committed.
 | `ddragon/runesReforged.json` | Data Dragon rune tree | One tree with one slot, because the shape is what the join needs, not the content |
 | `ddragon/summoner.json` | Data Dragon summoner spell document | Two spells. The document is still named `summoner.json` upstream, which is why the path is spelled out in `internal/crawl` |
 | `agg/` | raw archive in the frozen `riot/match-v5/dt=<date>/` layout, as JSONL | The aggregation fixture: fourteen hand-authored matches plus a `corrupt/` variant for the fail-closed test, and the hand-computed cell table they have to produce. See `agg/README.md` |
+| `site/` | published artifact tree (`v1/manifest.json`, `v1/p/<patch>/...`, `v1/static/<version>/...`) | The demo tree the Go tier renders when `LOLSTATS_AGG_FIXTURES=only`, which is the value `deploy/base/config.yaml` sets. It is generated from the payloads above by the aggregation tests rather than hand-authored, and every identifier in it is one of theirs, so it carries no player data for the same reason they do not. Moved here from `web/src/fixtures/` on 2026-09-17, when the retired Astro tree was deleted; the image still mounts it at `/web/src/fixtures` because that is the path `deploy/base/web/go-deployment.yaml` names |
 
 The Data Dragon files carry `version: 16.20.1`, which is the newest entry of
 `versions.json`. `latestVersion` picks the newest by comparing patch numbers, so
