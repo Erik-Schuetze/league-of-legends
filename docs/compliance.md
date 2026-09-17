@@ -19,6 +19,9 @@ Last reviewed: **2026-09-17**. Next review due: **2026-12-17**.
 
 ```
 make compliance          # or: sh scripts/compliance-check.sh
+make compliance-served   # the same gate over the HTML the tier actually served
+make compliance-negative-control   # one planted violation at a time
+make capture-served-pages          # refresh the served corpus from a running tier
 make compliance-gnu      # the same gate in a GNU userland, when docker is present
 ```
 
@@ -29,6 +32,16 @@ first: several checks are about what the deployment actually serves rather than
 about what the source intends. It prints `PASS` or `FAIL` per check together with
 the number of files each scan read, and exits non-zero if any launch-blocking
 check fails.
+
+It reads a **second** corpus of HTML when `LOLSTATS_SERVED_DIST` points at one:
+the pages a running `lolstats-web` returned, byte for byte, captured by
+`scripts/capture-served-pages.sh`. `web/dist` is what the tier renders *from*;
+the served responses are what a reader *receives*, and some invariants only exist
+in the second (the no-JS filter bar is rendered by the tier and is in no built
+file at all). Checks 3 and 4 assert over both, and say which corpus each line is
+about. `make compliance-served` starts the tier on loopback with the checked-in
+fixture artifact tree - no cluster, no PVC, no network - captures its pages and
+runs the gate over them, so this half runs in CI too.
 
 A build is published in three data states (`demo`, no data, live `riot-match-v5`),
 so the gate has to hold in all three. `LOLSTATS_DIST` points the scans at one
@@ -57,8 +70,8 @@ The thirteen checks, in the order the gate runs them:
 | 0 | The built site is present and whole | `web/dist` is missing or holds implausibly few pages, so the later scans would read nothing. It also refuses to run at all (exit 2, not a FAIL) when a page it is about to judge is empty or has no closing `</html>`: another `npm run build` replaces `web/dist` wholesale, and a run that lands mid-rebuild used to report five content violations that were really one race. A torn tree is diagnosed, not scored |
 | 1 | No MMR, ELO or rating-like value anywhere | A rating-like identifier, key or column appears in Go, SQL, TS/JS, Astro, JSON, HTML or CSS |
 | 2 | Only permitted Riot assets | An image reference has an absolute origin other than the Data Dragon CDN |
-| 3 | No third-party scripts, embeds or tracking | An executable resource in a built page is not same-origin, or names a tracking service. Amended 2026-09-17: the old "at least one `<script>` per page" floor is gone - a server-rendered page is legitimately script-free. See the amendment below |
-| 4 | The free tier is free and ungated | A credential field, auth route, pricing route or paywall appears; or a form is not a no-JS server-side path (`method="get"` with an on-origin `action`); or a named control sits outside a form. Amended 2026-09-17: the old "any `<form>`" rule is gone - the filter bar *is* the no-JS path. See the amendment below |
+| 3 | No third-party scripts, embeds or tracking | An executable resource in a built page is not same-origin, or names a tracking service. Amended 2026-09-17: the old "at least one `<script>` per page" floor is gone - a server-rendered page is legitimately script-free. See the amendment below. The served corpus is asserted the same way, and its script-free page count is reported |
+| 4 | The free tier is free and ungated | A credential field, auth route, pricing route or paywall appears; or a form is not a no-JS server-side path (`method="get"` with an on-origin `action`); or a named control sits outside a form. Amended 2026-09-17: the old "any `<form>`" rule is gone - the filter bar *is* the no-JS path. See the amendment below. The served corpus is asserted the same way, and every served form must be a GET form on this origin |
 | 5 | Verified-site claims are only made when satisfied | A page claims Riot reviewed or endorsed the site, or a `/riot.txt` is published without the token (or vice versa) |
 | 6 | The non-endorsement notice is visible, and its wording has not drifted | The frozen sentence is not on `/disclaimer` word for word; a built page states the notice in wording other than `NON_ENDORSEMENT_TEXT`; a built page carries no notice; an editable footer stops rendering `NON_ENDORSEMENT_TEXT`; or a built page stops linking to `/disclaimer` |
 | 7 | The legal pages publish a contact route | Any of the four compliance pages renders with no contact address |
@@ -88,8 +101,12 @@ rather than cosmetic: every scan that reads a list file goes through
 of that behaviour. Because a green local run cannot show this class of defect,
 `make compliance-gnu` re-runs the same script in a GNU userland
 (`debian:12-slim`) when a container runtime is available, and says so when it
-skips. That target is a local verification aid and is not part of CI; the half of
-the control that runs everywhere is check 12.
+skips; it also carries the captured served corpus into the container
+(`-e LOLSTATS_SERVED_DIST`) when one is present, so the new scans are exercised
+under GNU grep as well. It runs in CI next to the gate, where the runner's own
+GNU userland and the container's non-empty stdin are two different harnesses for
+the same script. The half of the control that runs everywhere, including a
+checkout with no container runtime, is check 12.
 
 ## Amendment: checks 3 and 4, the dynamic-serving amendment
 
@@ -170,20 +187,140 @@ expected FAIL text. Last run, on the same tree the gate is run against in CI:
 
 ```
 control 0  PASS  the unmodified scratch copy passes the gate (exit 0) ...
-control 1  PASS  googletagmanager                       # third-party script  (check 3)
+control 1  PASS  googletagmanager                        # third-party script   (check 3)
 control 2  PASS  form(s) are not a no-JS server-side path # off-origin POST    (check 4 R2)
-control 3  PASS  named control(s) sit outside a form      # dead control      (check 4 R3)
-control 4  PASS  gating element(s) found in the built pages # password field  (check 4 R1)
+control 3  PASS  named control(s) sit outside a form      # dead control       (check 4 R3)
+control 4  PASS  gating element(s) found in the built pages # password field   (check 4 R1)
 control 5  PASS  a page stripped of every <script> passes
-RESULT: PASS - 6 negative control(s) held and 0 broken
+control 6  PASS  live page(s) carry no live banner        # the scan the GNU bug hid (check 11)
+control 7  PASS  external resource reference(s) or tracker name(s) found
+                        # <script src="https://third-party.example/analytics.js">, an
+                        # origin on no denylist anywhere                 (check 3)
+control 8  PASS  form(s) are not a no-JS server-side path
+                        # a filter-bar-shaped form with a search box and a sort
+                        # selector, no method and no action: the control exists and
+                        # submits nowhere the server can answer   (check 4 R2)
+control 9  PASS  the tier's own no-JS GET filter bar passes (check 4)
+RESULT: PASS - 10 negative control(s) held and 0 broken
 ```
 
 Control 5 is the one that makes the amendment auditable rather than merely
 recorded: a page with every `<script>` removed must **pass**, and it does, which
-is the property the plan's floor forbade. The gate is run in CI
-(`.github/workflows/docker-build.yml`) both plain and with the controls, so a
-future weakening of either rule - or a control that silently stops planting -
-fails the build.
+is the property the plan's floor forbade. Controls 7 and 8 are the two the
+coordinator asked for in each direction - a page whose *origin* is foreign but
+whose hostname is invented (so the tracker-name list cannot be what catches it),
+and a form that is shaped exactly like the tier's filter bar while having no
+server-side path at all. Control 9 is the opposite direction again: the tier's
+real filter bar must pass, so a future tightening cannot quietly reject the page
+a reader receives. The gate is run in CI
+(`.github/workflows/docker-build.yml`) plain, over the served corpus, and with
+the controls, so a future weakening of either rule - or a control that silently
+stops planting - fails the build.
+
+## Amendment 2: the served corpus, and what "interactive" actually means
+
+**Amended 2026-09-17 (the second amendment of that day). Reason: amendment 1 was
+written against `web/dist`, which is not the corpus either rule is about, and the
+form rule was therefore vacuous - it had nothing to be wrong about. The
+replacement asserts the invariant the rule stood in for: the tier's controls are
+answered by the server, so they need no JavaScript.**
+
+`web/dist` holds 1063 built HTML pages and **zero** `<form>` elements: the sort
+and filter bar is rendered by the Go tier, not by the reference tree. So a check
+4 that only read `web/dist` would have passed for the wrong reason - it reported
+`(0 checked)` - and could not have caught a JS-only control, because the tree it
+read has no controls. The same is true in the other direction for check 3: 1038
+of the 1063 built pages carry no `<script>` at all, so the old floor was already
+failing the *build*, and a served page is no different.
+
+The coordinator measured the live tier directly
+(`kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80`, then
+`curl -s ... | grep -o '<script' | wc -l`), against the demo build
+(`data-state="demo"`):
+
+```
+route                          scripts  forms
+/                                   1      0
+/about                              1      0
+/disclaimer                         1      0
+/legal/terms                        1      0
+/legal/privacy                      1      0
+/tier-list/mid                      1      1
+/champions/ahri                     0      0     <- the old check 3 failed here
+/champions/ahri/mid                 0      0     <- and here
+/matchups/mid                       1      0
+/patch/16.18/tier-list/mid          1      1     <- the old check 4 failed here
+```
+
+Both shapes are legitimate and neither is a defect: `/champions/ahri` is static
+content, and the sort/filter controls on a tier list are real server-side forms.
+The gate's own capture of the tier's pages (63 pages sampled from the 1067 the
+tier's own `/sitemap.xml` advertises, on loopback over the fixture artifact tree)
+agrees and is the evidence CI now produces:
+
+```
+PASS  the served corpus agrees: all 193 resource tags across 63 served page(s)
+      are same-origin, and 59 of them carry no <script> at all
+PASS  the served corpus agrees: every one of the 3 form(s) the tier served is a
+      GET form on this origin, and every named control is inside one (0 outside)
+```
+
+The 3 forms are the filter bars on `/tier-list/<role>/` and
+`/patch/<ver>/tier-list/<role>/`; the 59 script-free pages are the champion
+pages. A corpus smaller than 8 pages, or one from which the check extracts
+nothing, **fails**: a scan that passes because it read nothing is the failure
+mode the floors exist for.
+
+### The invariant, stated
+
+The rule that replaced "must contain a form" is a property of the *server*, not
+of the markup: **every control the page offers must change the document without
+JavaScript.** `scripts/verify-serving.sh` check 4 asserts it directly and
+dynamically - it parses the values the served `<select>` elements themselves
+offer, requests each one, and requires at least two distinct documents. Live, on
+the running tier (`/tier-list/mid/`, unfiltered digest `fbcdb46f93eba14e`):
+
+```
+PASS  the filter is a GET form to its own path:
+      <form class="ds-filter-bar ds-print-hidden" action="/tier-list/mid" method="get" ...>
+PASS  the sort is server-side (4 values of 'sort', 4 distinct documents):
+      sort=champion:4288935b946455fc  sort=tier:c0e3d3674345d0da
+      sort=n:d6e10e76dac1329a         sort=win_rate:fbcdb46f93eba14e
+PASS  the direction is server-side (2 values of 'dir', 2 distinct documents):
+      dir=asc:8a15677ec6beb33f  dir=desc:fbcdb46f93eba14e
+PASS  the page size is server-side (3 values of 'per', 3 distinct documents):
+      per=0:fbcdb46f93eba14e  per=25:ba64c9cc1f8adb59  per=50:1ea03bb3daf98162
+PASS  the text filter is server-side (1 value of 'q', 2 distinct documents):
+      unfiltered:fbcdb46f93eba14e  q=xerath:ca0e664f928d3a4c
+```
+
+Note what this does not trust. The values are read out of the page rather than
+hardcoded, so a rename in the template changes what is probed instead of quietly
+probing a parameter the tier ignores - an earlier version of this check probed
+`?sort=games`, a parameter that does not exist, and passed on the identical
+document returned for it. A parameter with one value is only accepted when it
+differs from the unfiltered page, which is why the text filter is compared
+against the bare page rather than against another filtered one.
+
+### `/riot.txt` - a decision, not a gap
+
+`/riot.txt` returns **404** on the running tier, and that is correct: no Riot
+site-verification token is configured, so the file the token would go in is not
+offered. A placeholder would be a false claim of verification. The reference
+build returns 404 for the same reason.
+
+**Decision: the absence of `/riot.txt` is not a gate.** It is a documented open
+operational requirement, owned by the deploy lane, that becomes satisfiable only
+after the domain owner starts a production-key application and is issued a token
+(see checkpoint 1 and gap 3 below). What the gate does instead is fail-closed on
+the two states that *are* code: gate check 5 passes when no token is configured
+and no `/riot.txt` is published, and it fails when a `/riot.txt` appears without
+a configured token, or when a configured token is not published, or when any page
+claims Riot has verified the site while no token is configured. The claim is
+gated; the errand is not invented. The tier's own half is proved in code, not by
+argument: `internal/webtier/parity_test.go` fails if `/riot.txt` is published
+without a token and fails if it is not published once
+`LOLSTATS_RIOT_VERIFICATION_TOKEN` is set.
 
 ## Checkpoint register
 
@@ -203,8 +340,8 @@ free and ungated; no MMR/ELO calculator anywhere; no data-broker behaviour.
 | Terms of Service published | met | `web/src/pages/legal/terms.astro` builds to `/legal/terms`; the built page carries the 13 required sections, from acceptable use to a "Governing law" clause and an explicit Riot non-endorsement section |
 | Privacy Policy published | met | `web/src/pages/legal/privacy.astro` builds to `/legal/privacy` |
 | Non-endorsement disclaimer visible | met | `web/src/pages/disclaimer.astro` builds to `/disclaimer`; 4 of 4 compliance pages render the frozen sentence verbatim, and every one of the 1063 built pages links to `/disclaimer` |
-| `riot.txt` hosted | **pending** | `astro.config.mjs` publishes `dist/riot.txt` only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set. It is unset, so **no `riot.txt` exists and none is offered** - a placeholder would be a false claim. The token is issued to the domain owner after they start a production-key application, so this is owner action, not code work |
-| Free tier genuinely free and ungated | met | gate check 4: no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any of the 1063 pages, and the 10 forms it finds are all no-JS server-side paths (`method="get"` with an on-origin `action`) whose named controls are inside them - see the amendment below |
+| `riot.txt` hosted | **pending, and deliberately not a gate** | `astro.config.mjs` publishes `dist/riot.txt` only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set, and the tier republishes it the same way. It is unset, so **no `riot.txt` exists and none is offered** - a placeholder would be a false claim, and the live tier returns 404 for it. The token is issued to the domain owner after they start a production-key application, so this is owner action, not code work. Gate check 5 is the gate that fires on a *false* claim, not on the honest absence - see the `/riot.txt` decision in amendment 2 |
+| Free tier genuinely free and ungated | met | gate check 4: no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any of the 1063 built pages or in the pages the tier served; every form the tier serves is a `method="get"` form with an on-origin `action` (3 of them, all filter bars) whose named controls are inside them, and every control it offers provably changes the document without JavaScript (digests in amendment 2) - see the amendments below |
 | No MMR/ELO calculator anywhere | met | gate check 1: 1370 files scanned, 4 rating mentions, all 4 exempt negations of the standing prohibition, 0 rating-like identifiers or keys. The count moves as the other workstreams add files; the run in the evidence log, not this number, is the evidence |
 | No data-broker behaviour | met | gate check 9: the published artifact schema (`web/src/types/agg.d.ts`, `agg.schema.json`) declares no PUUID and no served JSON file carries one; `web/dist` contains no raw-archive path |
 
@@ -505,8 +642,11 @@ successes is not a register.
    the deployed job still does not set `LOLSTATS_SITE_URL`
    (`deploy/base/config.yaml`), so the release depends on the deliberate default
    rather than on a declared value.
-3. **`riot.txt` cannot be published yet.** Reported under checkpoint 1. There is
-   nothing the code can do: the token is issued to the domain owner.
+3. **`riot.txt` cannot be published yet - and is not a gate.** Reported under
+   checkpoint 1, with the decision recorded under amendment 2: the honest
+   absence is a documented open operational requirement owned by the deploy lane,
+   and gate check 5 gates the *claim*, not the errand. The token is issued to the
+   domain owner.
 4. **No licence inventory exists.** Reported under checkpoint 6.
 5. **No off-site backup of the raw archive exists.** The archive is the project's
    only non-regenerable asset, because Riot retains matches for two years and
@@ -596,3 +736,23 @@ a compliance change, not a copy change.
 - Three decisions were recorded: `docs/decisions/ADR-008-no-third-party-ingestion.md`,
   `ADR-009-operator-identity-and-governing-law.md` and
   `ADR-010-public-preview-posture.md`.
+- **The gate gained a second corpus, on 2026-09-17.** `web/dist` holds zero
+  `<form>` elements - the tier renders the filter bar - so check 4's form rule
+  was vacuous against the only corpus it read, and check 3's script-free count
+  was 1038 of 1063 in the same direction. `scripts/capture-served-pages.sh` now
+  captures the HTML a running tier returns (routes discovered from the tier's own
+  `/sitemap.xml`, every response asserted `200` with an honest `Content-Length`
+  and an HTML `Content-Type`) into `LOLSTATS_SERVED_DIST`, and checks 3 and 4
+  assert over both corpora. `make compliance-served` runs the whole thing on
+  loopback with the fixture artifact tree, so CI runs it too. The invariant that
+  replaced "a page contains a form" is that every control the page offers changes
+  the document **without JavaScript**, asserted dynamically by
+  `scripts/verify-serving.sh` check 4 against the live tier. See "Amendment 2"
+  above, which also records the `/riot.txt` decision: absence is a documented
+  open operational requirement, not a gate.
+- **The negative-control suite grew from seven controls to ten**, adding the two
+  the coordinator asked for - a fabricated third-party analytics `<script>` on an
+  origin no denylist knows, and a filter-bar-shaped form with no server-side
+  path - plus the opposite direction, the tier's own filter bar, which must pass.
+  `make compliance-negative-control` and `make compliance-gnu` (now including the
+  captured served corpus) both run in CI.

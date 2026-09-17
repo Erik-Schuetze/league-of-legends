@@ -27,6 +27,16 @@
 #   LOLSTATS_DIST                     scan this build instead of web/dist. Used to check
 #                                     the demo, no-data and live builds separately; it
 #                                     changes only which files are read, never a rule
+#   LOLSTATS_SERVED_DIST              a directory of pages captured from a *running* tier
+#                                     (scripts/capture-served-pages.sh, `make
+#                                     compliance-served`). Checks 3 and 4 then also scan
+#                                     that corpus, every rule unchanged. It is a second
+#                                     corpus rather than a replacement: the built tree is
+#                                     what the tier renders from, and the served HTML is
+#                                     what a reader actually receives, and the two differ
+#                                     in exactly the place the amendment is about - the
+#                                     tier emits the no-JS <form> the reference tree does
+#                                     not, so check 4 against web/dist alone is vacuous
 #   LOLSTATS_CONTACT_EMAIL            the published contact address
 #
 # Where a check can only be satisfied by a decision that is not the code's to
@@ -41,6 +51,10 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 #   LOLSTATS_DIST=.agent-artifacts/provfix/dist-final-demo sh scripts/compliance-check.sh
 DIST="${LOLSTATS_DIST:-$ROOT/web/dist}"
 if [ "${LOLSTATS_DIST:-}" != "" ] && [ "${DIST#/}" = "$DIST" ]; then DIST="$ROOT/$DIST"; fi
+# The optional second corpus: pages captured from a running tier. See the
+# environment note at the top of this file, and `make compliance-served`.
+SERVED_DIST="${LOLSTATS_SERVED_DIST:-}"
+if [ -n "$SERVED_DIST" ] && [ "${SERVED_DIST#/}" = "$SERVED_DIST" ]; then SERVED_DIST="$ROOT/$SERVED_DIST"; fi
 LEGAL="$ROOT/web/src/lib/legal.ts"
 SITE="$ROOT/web/src/lib/site.ts"
 # Scratch space for the scans. It is named after this process so that two
@@ -348,6 +362,36 @@ else
 		fail "$external_resources external resource reference(s) or tracker name(s) found:"
 		trim < "$WORK/external-resources-uniq.txt" | sed 's/^/      /' | head -20
 	fi
+	# The same scan over the pages a running tier actually served, when a capture
+	# of them is offered. The built tree and the served HTML are not the same
+	# document - the tier renders the filter bar the reference tree leaves to a
+	# client island, and it can add a header, a banner or a script of its own at
+	# render time - so a clean built tree is not evidence about what a reader
+	# receives. Same extractor, same origin filter, same control above.
+	if [ -n "$SERVED_DIST" ]; then
+		served_pages=$(find "$SERVED_DIST" -type f -name '*.html' | wc -l | tr -d ' ')
+		if [ "$served_pages" -lt 8 ]; then
+			fail "the served corpus has $served_pages page(s); that is too few to be evidence that the tier serves nothing third-party"
+		else
+			: > "$WORK/served-resource-tags.txt"
+			find "$SERVED_DIST" -type f -name '*.html' -print0 |
+				xargs -0 cat 2>/dev/null | resource_tags_of > "$WORK/served-resource-tags.txt"
+			served_tags=$(count_lines "$WORK/served-resource-tags.txt")
+			external_of "$WORK/served-resource-tags.txt" > "$WORK/served-external.txt"
+			sort -u < "$WORK/served-external.txt" > "$WORK/served-external-uniq.txt" 2>/dev/null || cp "$WORK/served-external.txt" "$WORK/served-external-uniq.txt"
+			served_external=$(count_lines "$WORK/served-external-uniq.txt")
+			find "$SERVED_DIST" -type f -name '*.html' -print0 > "$WORK/served-pages.bin"
+			served_zero_script=$(list_grep "$WORK/served-pages.bin" -L '<script' | wc -l | tr -d ' ')
+			if [ "$served_tags" -eq 0 ]; then
+				fail "the served corpus has $served_pages page(s) and the extractor read no resource tag in them, so its clean result is evidence of nothing"
+			elif [ "$served_external" -eq 0 ]; then
+				pass "the served corpus agrees: all $served_tags resource tags across $served_pages served page(s) are same-origin, and $served_zero_script of them carry no <script> at all"
+			else
+				fail "$served_external external resource reference(s) or tracker name(s) in the served pages:"
+				trim < "$WORK/served-external-uniq.txt" | sed 's/^/      /' | head -20
+			fi
+		fi
+	fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -466,6 +510,42 @@ else
 	fail "$forms_bad form(s) are not a no-JS server-side path and $controls_outside named control(s) sit outside a form:"
 	trim < "$WORK/forms-bad.txt" | sed 's/^/      /' | head -10
 	trim < "$WORK/controls-outside-form.txt" | sed 's/^/      /' | head -10
+fi
+
+# The same two rules over the pages a running tier actually served. This is the
+# corpus they were written for: the reference tree in web/dist carries no <form>
+# at all (its filter bar is a client island), so against web/dist alone every
+# form rule above is vacuous - a form that does not exist cannot violate them.
+# The tier renders the no-JS GET form, so only the served corpus can show that
+# the route a reader gets satisfies R2 and R3, and only it can show that a form
+# accepted here is the one the tier really emits.
+if [ -n "$SERVED_DIST" ]; then
+	served_pages_forms=$(find "$SERVED_DIST" -type f -name '*.html' | wc -l | tr -d ' ')
+	find "$SERVED_DIST" -type f -name '*.html' -print0 > "$WORK/served-forms-pages.bin"
+	list_grep "$WORK/served-forms-pages.bin" -HoIE "$FORM_TAG" > "$WORK/served-forms.txt" 2>/dev/null || true
+	served_forms=$(count_lines "$WORK/served-forms.txt")
+	: > "$WORK/served-forms-bad.txt"
+	while IFS= read -r formline; do
+		[ -n "$formline" ] || continue
+		if ! form_is_nojs_path "${formline#*:}"; then
+			printf '%s\n' "$formline" >> "$WORK/served-forms-bad.txt"
+		fi
+	done < "$WORK/served-forms.txt"
+	served_forms_bad=$(count_lines "$WORK/served-forms-bad.txt")
+	find "$SERVED_DIST" -type f -name '*.html' -print0 | xargs -0 cat 2>/dev/null | strip_forms |
+		grep -ohIE "$NAMED_CONTROL" > "$WORK/served-controls-outside-form.txt" 2>/dev/null || true
+	served_controls_outside=$(count_lines "$WORK/served-controls-outside-form.txt")
+	if [ "$served_pages_forms" -lt 8 ]; then
+		fail "the served corpus has $served_pages_forms page(s); that is too few to be evidence about the forms the tier serves"
+	elif [ "$served_forms" -eq 0 ]; then
+		fail "the served corpus has $served_pages_forms page(s) and no <form> in any of them, so its agreement proves nothing: either the tier stopped shipping the no-JS filter bar or the capture is not the tier's HTML"
+	elif [ "$served_forms_bad" -eq 0 ] && [ "$served_controls_outside" -eq 0 ]; then
+		pass "the served corpus agrees: every one of the $served_forms form(s) the tier served is a GET form on this origin, and every named control is inside one ($served_controls_outside outside)"
+	else
+		fail "$served_forms_bad served form(s) are not a no-JS server-side path and $served_controls_outside served named control(s) sit outside a form:"
+		trim < "$WORK/served-forms-bad.txt" | sed 's/^/      /' | head -10
+		trim < "$WORK/served-controls-outside-form.txt" | sed 's/^/      /' | head -10
+	fi
 fi
 
 # ---------------------------------------------------------------------------

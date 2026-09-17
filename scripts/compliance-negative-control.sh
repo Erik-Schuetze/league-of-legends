@@ -104,6 +104,16 @@ fail_line() {
 # The page the plant goes into, restored from the pristine copy between probes.
 restore_page() { cp "$DIST/$plant_page" "$SCRATCH/$plant_page"; }
 plant() { printf '%s\n' "$1" >> "$SCRATCH/$plant_page"; }
+# plant_inside puts the fragment before the closing </html>, for the controls
+# whose plant must leave a *well-formed* page: the gate asserts that a page ends
+# with </html>, so appending to the end of the file would fail it for a reason
+# that has nothing to do with the control. Escapes the two characters sed reads
+# in a replacement.
+plant_inside() {
+	frag=$(printf '%s' "$1" | sed -e 's/[\\&]/\\\\&/g')
+	sed -e "s|</html>|$frag</html>|" "$SCRATCH/$plant_page" > "$SCRATCH/$plant_page.inside" &&
+		mv "$SCRATCH/$plant_page.inside" "$SCRATCH/$plant_page"
+}
 
 # ---------------------------------------------------------------------------
 printf '\ncontrol 0: the clean copy must pass, or every probe below proves nothing\n'
@@ -194,6 +204,62 @@ if sed 's|data-state="demo"|data-state="live"|g' "$DIST/$plant_page" > "$SCRATCH
 	fail_line 'live page(s) carry no live banner'
 else
 	bad 'the page could not be made into a live page without a live banner, so the control proved nothing'
+fi
+restore_page
+
+# ---------------------------------------------------------------------------
+printf '\ncontrol 7: a fabricated analytics script from an arbitrary third-party origin (check 3)\n'
+# The other half of check 3's rule, and the one the tracker-name list cannot
+# cover: an origin nobody has heard of. The check must catch it because it
+# asserts the *origin* of every executable resource a page loads, not a list of
+# known trackers, so a script hosted on a hostname invented here - and therefore
+# on no denylist anywhere - is still a third-party script that phones home.
+plant '<script src="https://third-party.example/analytics.js" defer></script>'
+if grep -qF 'third-party.example/analytics.js' "$SCRATCH/$plant_page"; then
+	run_gate
+	fail_line 'external resource reference(s) or tracker name(s) found'
+else
+	bad 'the fabricated third-party <script> did not land in the page'
+fi
+restore_page
+
+# ---------------------------------------------------------------------------
+printf '\ncontrol 8: a form whose controls have no server-side no-JS fallback (check 4)\n'
+# The amendment allows a <form> only when it is a no-JS server-side path. This
+# plants the shape the amendment is meant to reject: a form carrying real
+# controls - a search box and a sort selector, exactly the filter bar's own
+# widgets - with no method and no action, so the controls exist, look like the
+# tier's, and submit nowhere the server can answer without JavaScript.
+plant '<form class="ds-filter-bar" data-negcontrol><input type="search" name="q"><select name="sort"><option value="pick_rate">pick rate</option></select></form>'
+if grep -qF 'data-negcontrol' "$SCRATCH/$plant_page"; then
+	run_gate
+	fail_line 'form(s) are not a no-JS server-side path'
+else
+	bad 'the JS-only form did not land in the page'
+fi
+restore_page
+
+# ---------------------------------------------------------------------------
+printf '\ncontrol 9: a page carrying the tier filter bar itself passes (check 4, the amendment is not a lacuna)\n'
+# The direction the amendment has to keep: the tier's filter bar is a real
+# <form>, and a rule that rejected every form would fail the page a reader
+# actually gets. The markup below is copied from a live response
+# (?sort=pick_rate is a real query the tier answers), so this control fails if a
+# future tightening of check 4 starts rejecting the tier's own controls.
+# The fragment goes before </html> so the page stays well-formed: check 4 is not
+# what this control is about, and the end-of-document rule would otherwise
+# decide the outcome.
+plant_inside '<form class="ds-filter-bar ds-print-hidden" action="/tier-list/mid" method="get" aria-label="Filters"><input id="filter-q" type="search" name="q"><select id="filter-sort" name="sort"><option value="win_rate" selected>win rate</option><option value="pick_rate">pick rate</option></select><select id="filter-dir" name="dir"><option value="desc" selected>desc</option></select><select id="filter-per" name="per"><option value="0" selected>all</option></select></form>'
+if grep -qF 'id="filter-sort"' "$SCRATCH/$plant_page"; then
+	run_gate
+	if [ "$gate_status" -eq 0 ]; then
+		good "the tier's own no-JS GET filter bar passes the amended check 4, so the amendment is not a lacuna"
+	else
+		bad "the tier's own filter bar fails the amended check 4, which would reject the page a reader receives:"
+		grep -m5 '^FAIL' "$LOG" | sed 's/^/      /'
+	fi
+else
+	bad 'the filter bar did not land in the page, so the control proved nothing'
 fi
 restore_page
 

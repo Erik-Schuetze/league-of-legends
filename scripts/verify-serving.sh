@@ -75,6 +75,9 @@ SITE_SRC="$ROOT/internal/webtier/site.go"
 
 BASE_URL=${1:-${LOLSTATS_SERVE_URL:-${LOLSTATS_SITE_URL:-http://127.0.0.1:18099}}}
 BASE_URL=${BASE_URL%/}
+# Digest of the page as served with no query string, set while check 4 probes a
+# discovered-value control and empty everywhere else.
+PROBE_BASELINE=''
 NO_AGG=${LOLSTATS_EXPECT_NO_AGG:-0}
 AGG_ROOT=${LOLSTATS_AGG_ROOT:-}
 # Only used to build a probe URL when the served patch cannot imply one (a fault
@@ -459,10 +462,15 @@ fi
 # ---------------------------------------------------------------------------
 if [ "$NO_AGG" != 1 ]; then
 	check '4. Interactive controls have a no-JS server-side path'
-	# The filter bar is a plain GET form that submits to its own path, and the
-	# query it produces returns different content from the server. Both halves
-	# matter: a form that posts nowhere is not a server-side path, and a query
-	# the handler ignores is not one either.
+	# The rule this check enforces is not "the page contains a <form>": it is that
+	# a reader with JavaScript disabled can still sort, filter and page through
+	# the ladder. So the controls are read out of the served markup - the form's
+	# own action, method, control names and option values - and each control is
+	# then driven over HTTP with no JavaScript anywhere in sight: a control whose
+	# parameter changes nothing in the response is not a server-side path, and the
+	# page that carries it is decoration. Values are discovered rather than
+	# hardcoded, so a rename in the template changes what is probed instead of
+	# quietly probing a parameter the tier ignores.
 	FILTER_PATH='/tier-list/mid/'
 	do_fetch "$FILTER_PATH" "$BASE_URL$FILTER_PATH"
 	cp "$FETCH_BODY" "$WORK/filter.plain"
@@ -472,16 +480,115 @@ if [ "$NO_AGG" != 1 ]; then
 	else
 		pass "$FILTER_PATH: the filter is a GET form to its own path: $(printf '%s' "$form" | cut -c1-110)"
 	fi
-	do_fetch "$FILTER_PATH?sort=games&dir=asc" "$BASE_URL$FILTER_PATH?sort=games&dir=asc"
-	cp "$FETCH_BODY" "$WORK/filter.asc"
-	if [ "$FETCH_STATUS" != 200 ]; then
-		fail "$FILTER_PATH?sort=games&dir=asc: HTTP $FETCH_STATUS, expected 200 from the server-side sort"
-	elif ! html_response_ok "$FILTER_PATH?sort=games&dir=asc" "$FETCH_BODY"; then
-		:
-	elif cmp -s "$WORK/filter.plain" "$WORK/filter.asc"; then
-		fail "$FILTER_PATH?sort=games&dir=asc: the server returned the page unchanged, so the sort control has no server-side effect"
+	# select_values <file> <name> - the option values of the first <select
+	# name="<name>"> in the document. The served pages are one line each, so this
+	# is a scan over a single record: find the select, take the block up to its
+	# </select>, and print each option's value.
+	select_values() {
+		awk -v want="$2" '
+			{
+				line = $0
+				pat = "<select[^>]*name=\"" want "\"[^>]*>"
+				if (!match(line, pat)) { next }
+				rest = substr(line, RSTART + RLENGTH)
+				if (match(rest, /<\/select>/)) { block = substr(rest, 1, RSTART - 1) } else { block = rest }
+				while (match(block, /<option[^>]*value="[^"]*"/)) {
+					tag = substr(block, RSTART, RLENGTH)
+					sub(/.*value="/, "", tag)
+					sub(/"$/, "", tag)
+					if (tag != "") { print tag }
+					block = substr(block, RSTART + RLENGTH)
+				}
+			}' "$1"
+	}
+	# digest <file> - a short content digest, so the evidence says which two bodies
+	# differed rather than only that they did.
+	digest() {
+		if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -c1-16
+		elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -c1-16
+		else cksum "$1" | tr -d ' ' | cut -c1-16
+		fi
+	}
+	# A parameter is a server-side path only if the server answers a different
+	# document for at least two of the values the control offers. One value per
+	# parameter is not enough: a query the handler ignores returns the identical
+	# page, and that is exactly the failure this look for.
+	probe_param() { # probe_param <label> <param> <values...>
+		probe_label=$1
+		probe_param_name=$2
+		shift 2
+		probe_count=0
+		probe_digests=''
+		probe_failed=0
+		# PROBE_BASELINE, when set, is the digest of the page as served with no
+		# query at all. A single probed value is then enough provided it differs
+		# from that baseline - the only fair test for a control whose values are
+		# discovered rather than enumerated (the text filter), because there is no
+		# second filtered value to compare against.
+		if [ -n "$PROBE_BASELINE" ]; then
+			probe_digests=" unfiltered:$PROBE_BASELINE"
+		fi
+		for value in "$@"; do
+			query="$probe_param_name=$value"
+			do_fetch "$FILTER_PATH?$query" "$BASE_URL$FILTER_PATH?$query"
+			probe_count=$((probe_count + 1))
+			if [ "$FETCH_STATUS" != 200 ]; then
+				fail "$FILTER_PATH?$query: HTTP $FETCH_STATUS, expected 200 from the server-side $probe_label"
+				probe_failed=1
+				continue
+			fi
+			if ! html_response_ok "$FILTER_PATH?$query" "$FETCH_BODY"; then
+				probe_failed=1
+				continue
+			fi
+			cp "$FETCH_BODY" "$WORK/filter.$probe_count.$probe_param_name"
+			probe_digests="$probe_digests $query:$(digest "$FETCH_BODY")"
+		done
+		if [ "$probe_failed" -eq 1 ]; then
+			return 1
+		fi
+		distinct=$(printf '%s\n' $probe_digests | sed 's/.*://' | LC_ALL=C sort -u | wc -l | tr -d ' ')
+		if [ "$distinct" -lt 2 ]; then
+			fail "$FILTER_PATH: the $probe_label control has no server-side effect: $probe_count value(s) of '$probe_param_name' returned the same document ($probe_digests)"
+			return 1
+		fi
+		pass "$FILTER_PATH: the $probe_label is server-side ($probe_count value(s) of '$probe_param_name', $distinct distinct document(s)):$probe_digests"
+		return 0
+	}
+	# The sort control: the values its own <select> offers, capped so a long list
+	# does not turn this into a crawl. The default value is included deliberately
+	# - a control that only works when it is changed is not a control.
+	sort_values=$(select_values "$WORK/filter.plain" sort | head -4)
+	dir_values=$(select_values "$WORK/filter.plain" dir | head -2)
+	per_values=$(select_values "$WORK/filter.plain" per | head -3)
+	# A text filter has no option values: take the first champion the page links
+	# to, which is by construction a value the server must be able to filter on.
+	# The tier's champion links are /champions/<slug>/<role> with no trailing
+	# slash, and the pages are one line each, so the first match of grep -o is the
+	# first link in document order.
+	champion_slug=$(grep -o 'href="/champions/[a-z0-9-]*/' "$WORK/filter.plain" | head -1 |
+		sed -e 's|^href="/champions/||' -e 's|/$||')
+	if [ -z "$sort_values" ]; then
+		fail "$FILTER_PATH: the served page names no <select name=\"sort\"> option, so the sort control the tests are about is not in the page a reader gets"
 	else
-		pass "$FILTER_PATH?sort=games&dir=asc: HTTP 200, $FETCH_BYTES bytes, different from the unsorted page, same cache policy"
+		# shellcheck disable=SC2086
+		probe_param 'sort' 'sort' $sort_values
+	fi
+	if [ -n "$dir_values" ]; then
+		# shellcheck disable=SC2086
+		probe_param 'direction' 'dir' $dir_values
+	fi
+	if [ -n "$per_values" ]; then
+		# shellcheck disable=SC2086
+		probe_param 'page size' 'per' $per_values
+	fi
+	if [ -n "$champion_slug" ]; then
+		# The text filter is compared against the unfiltered page rather than
+		# against another filtered one: filtering to one champion must return
+		# something other than the whole ladder.
+		PROBE_BASELINE=$(digest "$WORK/filter.plain")
+		probe_param 'text filter' 'q' "$champion_slug"
+		PROBE_BASELINE=''
 	fi
 fi
 

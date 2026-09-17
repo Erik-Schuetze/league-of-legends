@@ -566,7 +566,7 @@ served manifest does not carry them.
 | `schema` | `1`. A change here is a new major version of the tree, not an edit |
 | `source` | `riot-match-v5`. The provenance the pages read their labelling from: only this value lets a page describe MATCH-V5, and every other value renders the demo or no-data language |
 | `generated_at` | RFC 3339 build time |
-| `latest` | The partition every route without an explicit patch reads. A partition is the envelope fields plus `cells_published`, `build_run_id`, `git_sha`, `champions[]` and `matchup_roles[]` |
+| `latest` | The partition every route without an explicit patch reads. A partition is the envelope fields plus `min_cell_n`, `cells_published`, `suppressed_cells`, `build_run_id`, `git_sha`, `champions[]` and `matchup_roles[]` - so the suppression numbers are nested here, one set per partition, and are **not** top-level keys |
 | `partitions[]` | Every published partition, including `latest`. One entry in v1 |
 | `min_cell_n` | `100`. The suppression floor: a cell with `n` below it is not emitted, and the reader cannot reconstruct it |
 | `cells_published` | Cells actually published in that partition |
@@ -607,14 +607,33 @@ Two failure modes are contract, not implementation detail:
   byte-compares the served manifest against a deliberately corrupt fixture for
   exactly this reason.
 
-**Known gap, 2026-09-17.** The deployed snapshot publishes **no `v1/static/`
-tree**: `/agg/v1/static/<version>/champions.json` is 404 for both `16.18.1` and
-`16.18`, and the pages therefore fall back to the copy of Data Dragon checked
-into `web/src/fixtures/v1/static`. The serving tier is correct - it serves what
-exists - but the publisher's static sync is not yet writing the projection, so
-the fallback is live rather than latent. `scripts/verify-serving.sh` reports
-this as a WARN against the deployed tier and as a checked assertion against the
-fixture tree, so the gap is visible without pretending the tier is at fault.
+Every row above is asserted against a **running** tier rather than read off the
+source: `scripts/verify-serving.sh` requests each route, checks the declared and
+delivered `Content-Length` agree, re-requests with `If-None-Match` for the `304`,
+sends a stale validator for the byte-identical `200`, and starts the binary a
+second time over a corrupt root for the 503. It also asserts the property the
+no-JS filter depends on - that a control's values change the document the server
+returns - and `make compliance-served` asserts the amended compliance checks 3
+and 4 over the captured responses (docs/compliance.md, amendment 2).
+
+**Static tree, 2026-09-17 (re-measured).** The snapshot serving from
+`svc/lolstats-go-web` now publishes its Data Dragon projection:
+`/agg/v1/static/16.18.1/champions.json` and `.../patches.json` both answer `200`
+with `Cache-Control: public, max-age=3600`. Earlier the same day, against the
+snapshot the Service was serving before that publish, the same two URLs answered
+`404` and the pages fell back to the copy of Data Dragon checked into
+`web/src/fixtures/v1/static`; `scripts/verify-serving.sh` reported that as a WARN
+rather than a failure, which is the behaviour the note here asked for.
+
+Two things that stay true regardless of that publish, and are contract rather
+than defect:
+
+- **The path carries the Data Dragon version, not the game patch.** `16.18.1` is
+  the version the manifest names; `/agg/v1/static/16.18/champions.json` is `404`
+  by design. A reader that substitutes the patch version gets a miss.
+- **A missing projection is a 404, not an invented 200.** The tier serves what
+  exists; the fallback to the checked-in fixtures is the build's business, not
+  the server's.
 
 ## 5. CI image contract
 

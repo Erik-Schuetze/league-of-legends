@@ -320,7 +320,7 @@ migrate:
 # ---- additions: gates lane (web reference build + fail-closed render parity) ----
 # Appended at the end, and declared on its own .PHONY line, so this addition
 # stays append-only like the blocks above it.
-.PHONY: web-deps web-dist test-parity verify-serving verify-serving-local compliance-negative-control compliance-gnu
+.PHONY: web-deps web-dist test-parity verify-serving verify-serving-local compliance-negative-control compliance-gnu compliance-served capture-served-pages
 
 # `web-install` runs `npm ci` unconditionally, which is right for a clean build
 # and wasteful for a second `make` in the same checkout. This target only
@@ -461,6 +461,50 @@ verify-serving-local: build
 compliance-negative-control:
 	sh scripts/compliance-negative-control.sh
 
+# Capture the HTML a running tier serves into bin/served-pages. Point it at the
+# cluster through the same port-forward the serving contract uses:
+#   kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80 &
+#   make capture-served-pages
+capture-served-pages:
+	@LOLSTATS_SERVE_URL="$${LOLSTATS_SERVE_URL:-http://127.0.0.1:18099}" \
+		sh scripts/capture-served-pages.sh
+
+# The amended checks 3 and 4 over the pages the tier actually served, which is
+# the corpus they were written for. Against web/dist alone both are vacuous in
+# one direction: the reference tree's filter bar is a client island and that
+# tree carries no <form> at all, so "every form is a no-JS server-side path" had
+# nothing to be wrong about. The tier renders the no-JS GET form, so this target
+# starts the tier on loopback with the fixture artifact tree (no cluster, no
+# PVC), captures its pages, and runs the same gate over them with
+# LOLSTATS_SERVED_DIST. It is a second corpus and not a replacement: web/dist is
+# what the tier renders from, the served HTML is what a reader receives, and
+# both are scanned in the same run.
+compliance-served: web-dist build
+	@port=$${LOLSTATS_SERVED_PORT:-18097}; pid=""; \
+	cleanup() { [ -n "$$pid" ] && kill "$$pid" 2>/dev/null; }; \
+	trap cleanup EXIT INT TERM; \
+	( export LOLSTATS_AGG_FIXTURES=only; \
+	  export LOLSTATS_WEB_ADDR="127.0.0.1:$$port"; \
+	  [ -n "$$LOLSTATS_SITE_URL" ] && export LOLSTATS_SITE_URL; \
+	  exec ./bin/lolstats-web ) >bin/compliance-served.log 2>&1 & \
+	pid=$$!; \
+	i=0; \
+	while [ $$i -lt 40 ]; do \
+		if curl -fsS "http://127.0.0.1:$$port/healthz" >/dev/null 2>&1; then break; fi; \
+		kill -0 "$$pid" 2>/dev/null || break; \
+		i=$$((i+1)); sleep 0.5; \
+	done; \
+	if ! curl -fsS "http://127.0.0.1:$$port/healthz" >/dev/null 2>&1; then \
+		echo "FAIL: bin/lolstats-web did not answer /healthz on 127.0.0.1:$$port; see bin/compliance-served.log" >&2; \
+		exit 1; \
+	fi; \
+	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" \
+		LOLSTATS_SERVED_DIST="$(CURDIR)/bin/served-pages" \
+		sh scripts/capture-served-pages.sh || exit 1; \
+	LOLSTATS_SERVED_DIST="$(CURDIR)/bin/served-pages" \
+		sh scripts/compliance-check.sh || exit 1; \
+	echo "ok: the amended checks hold over the pages the tier served, as well as over the built tree"
+
 # The compliance gate under GNU userland, which is what the CI runner has and
 # what this machine is not. The gate's scans hand a NUL-delimited list of paths
 # to grep, and an empty list is answered differently by the two implementations:
@@ -480,8 +524,15 @@ compliance-gnu:
 		echo "skipped: the container runtime is not answering, so the gate ran only under $(uname -s) grep"; \
 	else \
 		echo "== the compliance gate under GNU userland (debian:12-slim) =="; \
+		corpus=""; \
+		if [ -n "$$(ls -A bin/served-pages 2>/dev/null)" ]; then \
+			corpus="-e LOLSTATS_SERVED_DIST=/w/bin/served-pages"; \
+			echo "     including the served corpus at bin/served-pages: $$(find bin/served-pages -name '*.html' | wc -l | tr -d ' ') page(s)"; \
+		else \
+			echo "     no served corpus captured, so the served half of checks 3 and 4 does not run here; 'make compliance-served' captures one"; \
+		fi; \
 		cat scripts/compliance-check.sh | docker run --rm -i --user "$$(id -u):$$(id -g)" \
-			-v "$(CURDIR):/w" -w /w debian:12-slim \
+			-v "$(CURDIR):/w" -w /w $$corpus debian:12-slim \
 			sh -c 'grep --version | head -1; sh /w/scripts/compliance-check.sh' || exit 1; \
 	fi
 

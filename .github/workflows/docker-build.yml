@@ -137,6 +137,24 @@ jobs:
       - name: Compliance negative controls
         run: make compliance-negative-control
 
+      # The same two amended checks over the HTML the tier itself served. This
+      # is CI-safe by construction: the target starts bin/lolstats-web on
+      # 127.0.0.1 with the checked-in fixture artifact tree, so there is no
+      # cluster, no PVC and no network. It matters because web/dist is not the
+      # corpus the rules are about - the reference tree carries no <form> at
+      # all, and the tier's no-JS filter bar exists only in the response a
+      # reader gets (docs/compliance.md, amendment 2 of 2026-09-17).
+      - name: Compliance gate over the served pages
+        run: make compliance-served
+
+      # The gate's scans hand a NUL-delimited list of paths to grep, and GNU
+      # grep answers an empty list from its own standard input. This runner has
+      # GNU userland and the author's machine does not, so the portability half
+      # of that control runs here: the same script under Debian, with a
+      # deliberately non-empty stdin.
+      - name: Compliance gate under GNU userland
+        run: make compliance-gnu
+
   build-and-push:
     needs: verify
     # Nothing is published from a pull request; it runs the verify job and stops.
