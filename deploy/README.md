@@ -461,7 +461,7 @@ Prometheus object's own namespace. A rule placed in `lolstats` would apply
 cleanly, look correct in `kubectl get prometheusrules -A`, and be loaded by
 nothing.
 
-Twelve rules in four groups:
+Nine rules in three groups:
 
 | group | alert | what it fires on | severity | for |
 | --- | --- | --- | --- | --- |
@@ -471,12 +471,9 @@ Twelve rules in four groups:
 | | `LolstatsIngestMetricsAbsent` | the ingest Deployment wants replicas and its metrics are not there | critical | 10m |
 | `lolstats-build` | `LolstatsBuildNotScheduled` | `kube_cronjob_status_last_schedule_time` **or** `kube_cronjob_next_schedule_time` more than 26h in the past | critical | 30m |
 | | `LolstatsBuildJobFailed` | `kube_job_status_failed > 0` for an `lolstats-aggregate-*` job | critical | 5m |
-| | `LolstatsBuildStuck` | `kube_job_status_active > 0` for more than 5h | warning | 5h |
-| | `LolstatsBuildFailures` | `increase(lolstats_build_failures_total[6h]) > 0` - **inert, see below** | critical | 10m |
-| `lolstats-riot-api` | `LolstatsRiotRateLimited` | `429` above 5% of requests over 15m | warning | 15m |
-| | `LolstatsRiotAuthFailures` | `403` above 1% of requests over 15m | warning | 15m |
-| | `LolstatsRiotKeyRevoked` | `403` above 0.01/s **and** `2xx` at zero | critical | 10m |
-| `lolstats-riot-key` | `LolstatsRiotKeyOld` | `lolstats_riot_key_age_seconds > 12h` - **inert, see below** | warning | 30m |
+| `lolstats-riot-api` | `LolstatsRiotRateLimited` | `429` share above 3% of requests **and** traffic at least 0.01 req/s, over 15m | warning | 15m |
+| | `LolstatsRiotAuthFailures` | `401`/`403` above 1% of requests over 15m | warning | 15m |
+| | `LolstatsRiotKeyRevoked` | `401`/`403` above 0.01/s **and** `2xx` at zero | critical | 10m |
 
 Every rule has `for:`, a `severity`, a `summary`, a `description` naming the next
 command or runbook, and two extra annotations - `empty_means` (what an empty
@@ -486,47 +483,31 @@ expressions are written to be diagnosable at the Prometheus UI and
 `LolstatsIngestMetricsAbsent` exists as the backstop for the case where the
 *cause* of the emptiness is that the metrics are not being produced.
 
-Thresholds come from the configured cadence, not from taste:
-`DefaultPollInterval = 15s` and `DefaultReportInterval = 60s` in
-`internal/crawl`, the aggregate CronJob at 01:00 with a 26-hour budget for "it
-did not even start", and its `activeDeadlineSeconds: 7200` plus generous margin
-for "it started and is not finishing".
+Thresholds come from the configured cadence and from measurement, not from
+taste: `DefaultPollInterval = 15s` and `DefaultReportInterval = 60s` in
+`internal/crawl`, and the aggregate CronJob at 01:00 with a 26-hour budget for
+"it did not even start". `LolstatsRiotRateLimited` was re-thresholded the same
+way: the old `share > 0.05` alone was unreachable, because the highest 15m 429
+share ever recorded on this key is `0.0160`.
 
-Two honest caveats, both recorded in the rule file itself:
+### Three rules were removed on 2026-09-17 - do not re-add them
 
-- **`LolstatsBuildFailures` cannot fire.** `lolstats_build_failures_total` is
-  registered by the aggregate binary, which runs as a Job with no Service and is
-  never scraped - only the long-running `lolstats-ingest` Service has a
-  ServiceMonitor. The rule is kept because it will start working the day the
-  aggregate metrics have somewhere to come from, and the three kube-state-metrics
-  rules above cover the same question in the meantime. Making it scrapable is a
-  deployment change, not a code change: either put a Service in front of the
-  Job's metrics port (`LOLSTATS_METRICS_ADDR`, `:9090`, alive only while a build
-  runs) with a ServiceMonitor that selects it, or have the aggregate push to a
-  gateway that is scraped instead. Both need a manifest that does not exist yet;
-  this Prometheus is configured only by ServiceMonitors (`serviceMonitorSelector:
-  {}`, no extra scrape configuration), so neither option is config-free.
-- **`LolstatsRiotKeyOld` cannot fire either, and the cause is a code defect
-  rather than a deployment gap.** `lolstats_riot_key_age_seconds` is registered
-  by the ingest worker - which *is* scraped - but nothing ever writes it:
-  `internal/crawl/worker.go` refreshes it from inside an assertion that the
-  fetcher implements `Age() (time.Duration, bool)`, while the value the ingest
-  binary passes there is a `*riot.Client`, whose only age surface is
-  `KeyProvider.Age() time.Duration` - one result, not the two the assertion asks
-  for - so the assertion never succeeds and the gauge is scraped as a constant
-  `0`. The unit test that covers this path passes only because its fake fetcher
-  implements the two-value form (`internal/crawl/fakes_test.go`), which is why
-  CI does not catch it. Fixing that assertion belongs to the ingestion
-  workstream, and would still not turn this into an expiry clock:
-  `lolstats_riot_key_age_seconds` counts from when *this process* first saw the
-  key currently configured, so it resets to `0` on every restart and is `0` when
-  no key is configured - a key that was already 20 hours old at pod start never
-  trips it. A real expiry alert needs a metric derived from the key's own
-  `expires_at`; `LOLSTATS_RIOT_API_KEY_EXPIRES_AT` is parsed by `internal/config`
-  and consumed by nothing, so that is a code change owned by the ingestion
-  workstream, not a rule. Until then, the observable symptom of an expiry is a
-  sustained 403, which is what `LolstatsRiotKeyRevoked` watches, and the
-  practical control is a calendar alarm (`docs/runbooks/key-rotation.md`).
+They were removed because they could never fire, and a rule that cannot fire
+manufactures coverage that does not exist. The whole `lolstats-riot-key` group
+went with `LolstatsRiotKeyOld`. Each removal is reversible only with the wiring
+in the last column below, and `docs/runbooks/enable-alert-delivery.md` carries
+the measured evidence for all three.
+
+| removed rule (group) | why it could not fire | what it would take to return |
+| --- | --- | --- |
+| `LolstatsBuildStuck` (`lolstats-build`) | **Hold unreachable.** `lolstats-aggregate`'s Jobs carry `activeDeadlineSeconds: 7200`, which the Job API applies to the Job as a whole, so `kube_job_status_active > 0` cannot persist for any sane `for:`. Measured with 30s and 60s probe Jobs: the deadline kill drops `kube_job_status_active` to `0` within one scrape and sets `kube_job_status_failed = 1`, which `LolstatsBuildJobFailed` already covers. The CronJob has never been scheduled, so there is no measured build duration to derive a hold from either. | a measured build duration longer than the deadline, or a liveness signal that survives the deadline kill |
+| `LolstatsBuildFailures` (`lolstats-build`) | **Inert producer.** `lolstats_build_failures_total` is a lazily-created `CounterVec` child (`internal/obs/obs.go:161`) whose only writer is the aggregate binary (`internal/aggregate/build.go:171`), and that binary runs as a CronJob nothing scrapes: no `ports:` in its Job template, no Service, no PodMonitor. `count(lolstats_build_failures_total)` is `0` series - it has never been scraped. | somewhere for the aggregate's metrics to come from: a Service in front of the Job's metrics port (`LOLSTATS_METRICS_ADDR`, `:9090`, alive only while a build runs) with a ServiceMonitor that selects it, or a Pushgateway / long-lived aggregate worker that is scraped instead. Both need a manifest that does not exist yet - this Prometheus is configured only by ServiceMonitors (`serviceMonitorSelector: {}`, no extra scrape configuration), so neither is config-free. |
+| `LolstatsRiotKeyOld` (`lolstats-riot-key`, the whole group) | **Dead gauge.** `lolstats_riot_key_age_seconds` is scraped as a constant `0` while `/readyz` reports the true age (observed `138s` and `10980s` at different moments, `/metrics` reading `0` in both). Its only writer sits behind a two-value `Age() (time.Duration, bool)` assertion that only the test fake satisfies (`internal/crawl/fakes_test.go`), never the real ingest client, so CI does not catch it. | the gauge fix **in flight in another lane** (`internal/riot`, `internal/crawl`) plus a value observed to track `/readyz`. A real expiry alert would instead need a metric derived from the key's own `expires_at` - `LOLSTATS_RIOT_API_KEY_EXPIRES_AT` is parsed by `internal/config` and consumed by nothing. Until then the observable symptom of an expiry is a sustained auth rejection, which is what `LolstatsRiotKeyRevoked` watches, and the practical control is a calendar alarm (`docs/runbooks/key-rotation.md`). |
+
+Standing rule, so this does not happen again: before a rule is added or
+restored, prove against the live Prometheus that the metric it reads **exists**
+(a rule over a series no scraped process produces can never fire) and that its
+`for:` is shorter than the failure it detects and longer than healthy operation.
 
 ### What is NOT covered: nothing is delivered
 
@@ -546,8 +527,8 @@ checked with `promtool check rules` run against the `spec.groups` block extracte
 from the manifest (`promtool` cannot read a `PrometheusRule` directly); there is
 no committed `promtool test rules` case for them and no CI job, so a later edit is
 re-checked by reading. That way, the day an Alertmanager exists, the alerting is
-already in place - with the two rules above that cannot fire recorded as such
-rather than counted as coverage.
+already in place - and the three rules that could not fire were removed rather
+than counted as coverage (see above).
 
 The Alertmanager and the receiver for it are an **opt-in** bundle in
 `homecluster/monitoring/alertmanager/`, deliberately not applied by ArgoCD because
