@@ -1,0 +1,193 @@
+# The exceptions to default-deny-all. Each one names a flow that exists in
+# deploy/base, so this file can be read as "here is everything lolstats talks
+# to". Following the shape of homecluster/go-get-a-job/networkpolicy.yaml:
+#
+#   * namespace selectors use the automatic kubernetes.io/metadata.name label,
+#     so no namespace has to be labelled by hand for these to keep working.
+#   * NetworkPolicy is fail-open: if the CNI does not enforce it these objects
+#     apply cleanly and do nothing. k3s ships kube-router's policy controller
+#     and this cluster runs it, but confirm rather than assume.
+#   * there are no FQDN rules, because those need Cilium. The Riot API and Data
+#     Dragon have no stable published address range, so that egress is scoped by
+#     port 443 instead of by destination - which also means a ConfigMap-edited
+#     base URL pointed at another HTTPS host would still be permitted. What
+#     bounds the damage is that no other port is allowed at all.
+---
+# Every pod needs to resolve names, including the ones with no other egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  labels:
+    app.kubernetes.io/name: lolstats
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # CoreDNS is reached through its ClusterIP, and a CNI that evaluates egress
+    # policy before service DNAT sees the ClusterIP as the destination rather
+    # than the CoreDNS pod. This is the cluster's service CIDR
+    # (`kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'` returns an
+    # address inside it), on the DNS port only.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.0/16
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# The only pods that ever fetch anything from the public internet: the worker and
+# the three jobs that talk to Riot. The aggregate build reads the archive, the
+# site build reads the archive, maintenance reads the archive, and the web tier
+# reads the volume - none of them has a reason to open a socket outward, so this
+# rule does not cover them, and adding a component means deciding explicitly
+# whether it belongs in this list.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-riot-egress
+  labels:
+    app.kubernetes.io/name: lolstats
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - ingest
+          - discover-seeds
+          - static-sync
+          - backfill
+  policyTypes:
+    - Egress
+  egress:
+    # Riot API (euw1/europe) and Data Dragon, both HTTPS, both behind CDNs whose
+    # addresses change without notice.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        - ipBlock:
+            cidr: ::/0
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# Anything in this namespace may reach anything else in it, on the ports this
+# stack actually opens. The Postgres hop is why this exists: the worker and four
+# of the jobs hold a DSN, and a default-deny that covered egress without this
+# rule would leave them unable to open a connection while every manifest still
+# looked correct.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-namespace-egress
+  labels:
+    app.kubernetes.io/name: lolstats
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 8080
+    # Same service-DNAT caveat as the DNS rule, for the one in-namespace Service
+    # that is reached by name rather than by its own IP.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Postgres accepts connections from this namespace and nothing else. The Service
+# is ClusterIP, so this is the second of the two barriers in front of it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-ingress
+  labels:
+    app.kubernetes.io/name: lolstats
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Prometheus scrapes the worker's /metrics endpoint directly at the pod address,
+# so this is an ingress rule on the container port. The monitoring namespace is
+# named explicitly: a podSelector that matched "anything" would let anything in
+# the cluster read the metrics port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-metrics-ingress
+  labels:
+    app.kubernetes.io/name: lolstats
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: lolstats
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090
+---
+# The one way in from outside the namespace: the shared Caddy in namespace `web`,
+# which reverse-proxies lol.erik-schuetze.dev to lolstats-web. 8080 is the
+# container's listen port and 80 is the Service's, listed together so the rule
+# does not depend on whether the CNI evaluates it before or after service DNAT -
+# the same reason go-get-a-job lists both.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-ingress
+  labels:
+    app.kubernetes.io/name: lolstats
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: web
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 80

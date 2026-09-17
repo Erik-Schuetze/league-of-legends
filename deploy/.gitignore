@@ -1,0 +1,14 @@
+# Scope this to deploy/: nothing outside it is mine to ignore.
+#
+# The real Secrets from deploy/base/secret.example.yaml live here on the machine
+# that applies them and never in the repository. The examples stay tracked, so
+# the negation is explicit rather than implied.
+secret.yaml
+**/secret.yaml
+!**/secret.example.yaml
+
+# Local-only edits to a manifest, for trying something out without committing it.
+*.local.yaml
+
+# Rendered output from `kubectl kustomize`, useful to diff by hand.
+/rendered/

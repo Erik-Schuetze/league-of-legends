@@ -1,0 +1,22 @@
+# Exists so that Prometheus has something to discover. A ServiceMonitor selects
+# Services, not pods, and the CronJobs in this namespace share the same binary
+# and the same metric names - scraping them would mean either a second Service
+# per job or a PodMonitor whose targets disappear within a minute, so this
+# Service covers the long-running worker only. See deploy/README.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: lolstats-ingest
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: ingest
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: ingest
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP

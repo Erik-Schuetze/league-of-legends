@@ -1,0 +1,20 @@
+# Default deny for both directions. The cluster runs kube-router with
+# NetworkPolicy support, and the namespace is the boundary: everything in it is
+# one project that talks to each other and to exactly three things outside
+# itself (DNS, Riot, and the Prometheus that scrapes this namespace).
+#
+# Egress is denied as well as ingress on purpose. Without it, a compromised
+# worker could reach every other service in the homelab, and the fact that the
+# archive is the only data this project owns would not limit the blast radius of
+# a dependency vulnerability.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  labels:
+    app.kubernetes.io/name: lolstats
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

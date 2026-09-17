@@ -1,0 +1,86 @@
+# Derives agg/v1/** from the raw archive. This is the job that reads the whole
+# archive, so it gets the largest memory allocation in the stack and the lowest
+# concurrency: one DuckDB pass over two years of payloads is a burst, and the
+# node it lands on is an N100 shared with the rest of the homelab.
+#
+# 01:00, ahead of discover-seeds (02:10), static-sync (03:10) and site-build
+# (03:40): the dependency between "aggregate finished" and "the site was built
+# from it" is expressed as ordering in the night, not as a workflow engine,
+# which is why activeDeadlineSeconds is bounded well below the next job.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lolstats-aggregate
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: aggregate
+spec:
+  schedule: "0 1 * * *"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # Two hours: long enough for a full pass, short enough that an overrun
+      # cannot still be running when the site build reads the tree at 03:40.
+      activeDeadlineSeconds: 7200
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lolstats
+            app.kubernetes.io/component: aggregate
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: aggregate
+              # TODO(plan section 10, Phase 1): pin to a digest once a tag exists.
+              image: ghcr.io/erik-schuetze/league-of-legends:latest
+              command: ["/lolstats-aggregate"]
+              # `build` with no flags: the patch and bracket come from
+              # LOLSTATS_AGG_PATCH and LOLSTATS_AGG_BRACKET, so promoting a new
+              # patch is a ConfigMap change and not a manifest change.
+              args: ["build"]
+              envFrom:
+                - configMapRef:
+                    name: lolstats-config
+              env:
+                - name: GOMEMLIMIT
+                  value: 2GiB
+                # The raw archive is the only input, so this job holds no Riot
+                # key and no network egress beyond DNS.
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 2Gi
+                limits:
+                  cpu: "2"
+                  memory: 3Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                # DuckDB spills to /tmp when a pass does not fit in memory; that
+                # is the one writable path it gets.
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/lolstats
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: lolstats-data
+            - name: tmp
+              emptyDir: {}

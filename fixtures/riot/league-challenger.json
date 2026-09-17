@@ -1,0 +1,9 @@
+{
+  "tier": "CHALLENGER",
+  "queue": "RANKED_SOLO_5x5",
+  "name": "Fixtures Challenger",
+  "entries": [
+    {"puuid": "fixture-puuid-11", "leaguePoints": 1042},
+    {"puuid": "fixture-puuid-12", "leaguePoints": 998}
+  ]
+}

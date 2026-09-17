@@ -1,0 +1,36 @@
+# Build artifacts
+/bin/
+/dist/
+
+# Verbose agent output. Kept out of the repository on purpose: it is evidence
+# for a single task, not part of the project's history.
+/.agent-artifacts/
+
+# Local data / secrets
+.env
+deploy/secret.yaml
+*.pem
+*.key
+
+# Local planning notes, never shared/committed
+/backlog.local.md
+
+# Web
+/web/node_modules/
+/web/dist/
+/web/.astro/
+/web/.vercel/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.iml
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Python (used only for ad-hoc data inspection, never a dependency)
+__pycache__/

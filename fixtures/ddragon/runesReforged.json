@@ -1,0 +1,10 @@
+[
+  {
+    "id": 8000,
+    "key": "Precision",
+    "name": "Precision",
+    "slots": [
+      {"runes": [{"id": 8005, "name": "Press the Attack"}, {"id": 8008, "name": "Lethal Tempo"}]}
+    ]
+  }
+]

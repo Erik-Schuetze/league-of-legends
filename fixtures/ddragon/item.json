@@ -1,0 +1,8 @@
+{
+  "type": "item",
+  "version": "16.20.1",
+  "data": {
+    "1001": {"name": "Boots", "gold": {"total": 300}},
+    "3153": {"name": "Blade of the Ruined King", "gold": {"total": 3300}}
+  }
+}

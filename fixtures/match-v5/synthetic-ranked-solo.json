@@ -1,0 +1,467 @@
+{
+  "metadata": {
+    "matchId": "EUW1_0000000000",
+    "participants": [
+      "fixture-puuid-01",
+      "fixture-puuid-02",
+      "fixture-puuid-03",
+      "fixture-puuid-04",
+      "fixture-puuid-05",
+      "fixture-puuid-06",
+      "fixture-puuid-07",
+      "fixture-puuid-08",
+      "fixture-puuid-09",
+      "fixture-puuid-10"
+    ]
+  },
+  "info": {
+    "gameCreation": 1789000000000,
+    "gameDuration": 1874,
+    "gameVersion": "16.18.612.9234",
+    "queueId": 420,
+    "participants": [
+      {
+        "puuid": "fixture-puuid-01",
+        "championId": 266,
+        "championName": "Aatrox",
+        "teamId": 100,
+        "teamPosition": "TOP",
+        "individualPosition": "TOP",
+        "win": true,
+        "item0": 3153,
+        "item1": 6333,
+        "item2": 3071,
+        "item3": 3111,
+        "item4": 3047,
+        "item5": 3053,
+        "item6": 3340,
+        "summoner1Id": 4,
+        "summoner2Id": 12,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8000,
+              "selections": [
+                { "perk": 8010 },
+                { "perk": 9111 },
+                { "perk": 9104 },
+                { "perk": 8299 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8400,
+              "selections": [{ "perk": 8444 }, { "perk": 8451 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5005 }, { "perk": 5008 }, { "perk": 5001 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-02",
+        "championId": 64,
+        "championName": "LeeSin",
+        "teamId": 100,
+        "teamPosition": "JUNGLE",
+        "individualPosition": "JUNGLE",
+        "win": true,
+        "item0": 6692,
+        "item1": 3111,
+        "item2": 6333,
+        "item3": 3071,
+        "item4": 3053,
+        "item5": 0,
+        "item6": 3364,
+        "summoner1Id": 11,
+        "summoner2Id": 4,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8000,
+              "selections": [
+                { "perk": 8010 },
+                { "perk": 9111 },
+                { "perk": 9104 },
+                { "perk": 8014 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8200,
+              "selections": [{ "perk": 8226 }, { "perk": 8210 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5005 }, { "perk": 5008 }, { "perk": 5002 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-03",
+        "championId": 103,
+        "championName": "Ahri",
+        "teamId": 100,
+        "teamPosition": "MIDDLE",
+        "individualPosition": "MIDDLE",
+        "win": true,
+        "item0": 6655,
+        "item1": 3020,
+        "item2": 4645,
+        "item3": 3089,
+        "item4": 3175,
+        "item5": 3135,
+        "item6": 3340,
+        "summoner1Id": 4,
+        "summoner2Id": 14,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8100,
+              "selections": [
+                { "perk": 8112 },
+                { "perk": 8139 },
+                { "perk": 8138 },
+                { "perk": 8106 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8200,
+              "selections": [{ "perk": 8226 }, { "perk": 8210 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5008 }, { "perk": 5008 }, { "perk": 5001 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-04",
+        "championId": 222,
+        "championName": "Jinx",
+        "teamId": 100,
+        "teamPosition": "BOTTOM",
+        "individualPosition": "BOTTOM",
+        "win": true,
+        "item0": 6672,
+        "item1": 3006,
+        "item2": 3031,
+        "item3": 6673,
+        "item4": 3036,
+        "item5": 3072,
+        "item6": 3340,
+        "summoner1Id": 4,
+        "summoner2Id": 7,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8000,
+              "selections": [
+                { "perk": 8005 },
+                { "perk": 9103 },
+                { "perk": 9104 },
+                { "perk": 8014 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8200,
+              "selections": [{ "perk": 8226 }, { "perk": 8237 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5005 }, { "perk": 5008 }, { "perk": 5002 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-05",
+        "championId": 412,
+        "championName": "Thresh",
+        "teamId": 100,
+        "teamPosition": "UTILITY",
+        "individualPosition": "UTILITY",
+        "win": true,
+        "item0": 3869,
+        "item1": 3190,
+        "item2": 3107,
+        "item3": 3110,
+        "item4": 3067,
+        "item5": 3047,
+        "item6": 3364,
+        "summoner1Id": 4,
+        "summoner2Id": 3,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8400,
+              "selections": [
+                { "perk": 8465 },
+                { "perk": 8446 },
+                { "perk": 8473 },
+                { "perk": 8451 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8300,
+              "selections": [{ "perk": 8347 }, { "perk": 8410 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5001 }, { "perk": 5002 }, { "perk": 5002 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-06",
+        "championId": 86,
+        "championName": "Garen",
+        "teamId": 200,
+        "teamPosition": "TOP",
+        "individualPosition": "TOP",
+        "win": false,
+        "item0": 3047,
+        "item1": 6333,
+        "item2": 3071,
+        "item3": 3053,
+        "item4": 3111,
+        "item5": 3065,
+        "item6": 3340,
+        "summoner1Id": 4,
+        "summoner2Id": 12,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8000,
+              "selections": [
+                { "perk": 8010 },
+                { "perk": 9111 },
+                { "perk": 9105 },
+                { "perk": 8299 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8400,
+              "selections": [{ "perk": 8446 }, { "perk": 8451 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5005 }, { "perk": 5008 }, { "perk": 5001 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-07",
+        "championId": 32,
+        "championName": "Amumu",
+        "teamId": 200,
+        "teamPosition": "JUNGLE",
+        "individualPosition": "JUNGLE",
+        "win": false,
+        "item0": 3047,
+        "item1": 3111,
+        "item2": 3068,
+        "item3": 3075,
+        "item4": 3065,
+        "item5": 0,
+        "item6": 3340,
+        "summoner1Id": 4,
+        "summoner2Id": 11,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8400,
+              "selections": [
+                { "perk": 8437 },
+                { "perk": 8446 },
+                { "perk": 8429 },
+                { "perk": 8451 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8100,
+              "selections": [{ "perk": 8143 }, { "perk": 8105 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5001 }, { "perk": 5001 }, { "perk": 5002 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-08",
+        "championId": 84,
+        "championName": "Akali",
+        "teamId": 200,
+        "teamPosition": "MIDDLE",
+        "individualPosition": "MIDDLE",
+        "win": false,
+        "item0": 3152,
+        "item1": 4645,
+        "item2": 3089,
+        "item3": 3020,
+        "item4": 3116,
+        "item5": 3135,
+        "item6": 3340,
+        "summoner1Id": 4,
+        "summoner2Id": 12,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8100,
+              "selections": [
+                { "perk": 8112 },
+                { "perk": 8143 },
+                { "perk": 8138 },
+                { "perk": 8106 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8200,
+              "selections": [{ "perk": 8226 }, { "perk": 8210 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5008 }, { "perk": 5008 }, { "perk": 5002 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-09",
+        "championId": 81,
+        "championName": "Ezreal",
+        "teamId": 200,
+        "teamPosition": "BOTTOM",
+        "individualPosition": "BOTTOM",
+        "win": false,
+        "item0": 3508,
+        "item1": 3006,
+        "item2": 6673,
+        "item3": 3031,
+        "item4": 3072,
+        "item5": 3036,
+        "item6": 3340,
+        "summoner1Id": 4,
+        "summoner2Id": 3,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8000,
+              "selections": [
+                { "perk": 8005 },
+                { "perk": 9103 },
+                { "perk": 9104 },
+                { "perk": 8014 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8300,
+              "selections": [{ "perk": 8304 }, { "perk": 8347 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5005 }, { "perk": 5008 }, { "perk": 5002 }]
+            }
+          ]
+        }
+      },
+      {
+        "puuid": "fixture-puuid-10",
+        "championId": 89,
+        "championName": "Leona",
+        "teamId": 200,
+        "teamPosition": "UTILITY",
+        "individualPosition": "UTILITY",
+        "win": false,
+        "item0": 3869,
+        "item1": 3190,
+        "item2": 3107,
+        "item3": 3110,
+        "item4": 3067,
+        "item5": 3047,
+        "item6": 3364,
+        "summoner1Id": 4,
+        "summoner2Id": 14,
+        "perks": {
+          "styles": [
+            {
+              "description": "primaryStyle",
+              "style": 8400,
+              "selections": [
+                { "perk": 8465 },
+                { "perk": 8446 },
+                { "perk": 8473 },
+                { "perk": 8451 }
+              ]
+            },
+            {
+              "description": "subStyle",
+              "style": 8300,
+              "selections": [{ "perk": 8304 }, { "perk": 8347 }]
+            },
+            {
+              "description": "statMod",
+              "style": 5000,
+              "selections": [{ "perk": 5001 }, { "perk": 5002 }, { "perk": 5002 }]
+            }
+          ]
+        }
+      }
+    ],
+    "teams": [
+      {
+        "teamId": 100,
+        "bans": [
+          { "championId": 350, "pickTurn": 1 },
+          { "championId": 99, "pickTurn": 2 },
+          { "championId": 122, "pickTurn": 3 },
+          { "championId": 145, "pickTurn": 4 },
+          { "championId": 43, "pickTurn": 5 }
+        ]
+      },
+      {
+        "teamId": 200,
+        "bans": [
+          { "championId": 24, "pickTurn": 6 },
+          { "championId": 157, "pickTurn": 7 },
+          { "championId": 0, "pickTurn": 8 },
+          { "championId": 523, "pickTurn": 9 },
+          { "championId": 0, "pickTurn": 10 }
+        ]
+      }
+    ]
+  }
+}

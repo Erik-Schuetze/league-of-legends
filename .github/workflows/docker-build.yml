@@ -1,0 +1,200 @@
+name: Build and push
+
+# Publishes the three images this project runs (docs/contracts.md section 5):
+# the Go binaries, the Node/Astro source the nightly site build renders from,
+# and Caddy with the cache-handler module (plan section 11, gate G0.5). One
+# workflow with a matrix rather than three files, because all three share a tag
+# scheme, a label set and a registry login - three copies of that would drift.
+# The `verify` job gates all of them: nothing is published unless the Go and
+# Astro checks pass.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  # So an image can be republished without a commit - after a failed tag push,
+  # or when only the Caddy module pin changed. A manual run on main publishes
+  # sha-<short> and latest; it cannot publish a semver tag, because those come
+  # from the git ref.
+  workflow_dispatch:
+
+# Least privilege for the whole workflow; only the job that pushes adds the
+# one permission it needs on top of this.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR repository paths must be lowercase and the owner's GitHub login is not
+  # (`Erik-Schuetze`), so the matrix spells the path out instead of deriving it
+  # from github.repository. These have to match the image references in
+  # deploy/base exactly.
+  IMAGE_OWNER: erik-schuetze
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Actions are pinned to full commit SHAs. A tag such as @v4 is a mutable
+      # ref that the action's owners, or anyone who compromises their account,
+      # can repoint at new code that would then run here with this workflow's
+      # token. The trailing comment records the release the SHA came from, and
+      # .github/dependabot.yml keeps both in sync.
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: web/package.json
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: fmt vet
+        run: make fmt vet
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test-race
+
+      # The linter and govulncheck are pinned in the Makefile and invoked
+      # through `go run`, so CI runs the same versions a contributor does.
+      - name: Lint
+        run: make lint
+
+      - name: Vulnerability scan
+        run: make vuln
+
+      # The generated types are committed, so a Go struct change that was not
+      # regenerated shows up here as a diff rather than as a frontend that
+      # reads a field the API does not emit.
+      - name: Check generated types are current
+        run: |
+          make types
+          git diff --exit-code -- web/src/types
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build site
+        working-directory: web
+        run: npm run build
+
+  build-and-push:
+    needs: verify
+    # Nothing is published from a pull request; it runs the verify job and stops.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # One image failing should not hide whether the other two built.
+      fail-fast: false
+      matrix:
+        include:
+          - image: league-of-legends
+            context: .
+            dockerfile: Dockerfile
+          - image: league-of-legends-site
+            # The Astro source is this image's entire payload, and the root
+            # .dockerignore excludes web/ from every other context.
+            # build/site/Dockerfile.dockerignore keeps a local node_modules/ and
+            # dist/ from being uploaded and copied over the image's own.
+            context: web
+            dockerfile: build/site/Dockerfile
+          - image: league-of-legends-caddy
+            context: .
+            dockerfile: build/caddy/Dockerfile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to the container registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag scheme is frozen in docs/contracts.md section 5. A release tag
+      # publishes the semver name unchanged so a manifest can copy it, plus the
+      # short SHA so the exact commit is always reachable.
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # The commit time, not the build time. Two builds of the same commit then
+      # produce the same org.opencontainers.image.created label, so a label
+      # diff is always a real change rather than a clock reading.
+      - name: Read the commit timestamp
+        id: commit
+        run: echo "created=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # The cluster is amd64 only; building a second architecture would
+          # double the build time to publish an image nothing can run.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ steps.commit.outputs.created }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A package pushed with GITHUB_TOKEN starts out private, regardless of the
+      # repository's own visibility, and the cluster pulls these anonymously -
+      # there is no imagePullSecret anywhere in it, and the kubelet has no
+      # credential to offer. Without this step the first ArgoCD sync produces
+      # nothing but ImagePullBackOff on every pod, which is a confusing way to
+      # discover a one-line API call. `packages: write`, already granted above,
+      # is the permission this endpoint needs.
+      #
+      # It does not fail the job: the images are pushed at this point, and a
+      # red run over a visibility change would report the wrong thing as broken.
+      # The step is verified out of band instead, by pulling the image back with
+      # no credentials at all (`docker pull` after a `docker logout ghcr.io`),
+      # which is the only test that reflects what the kubelet will do.
+      - name: Make the published package public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/user/packages/container/${{ matrix.image }}" \
+            -f visibility=public \
+            && echo "package ${{ matrix.image }} is public" \
+            || echo "::warning title=package visibility::could not set ${{ matrix.image }} to public; set it by hand in the package settings or grant the operator token write:packages"
