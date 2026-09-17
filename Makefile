@@ -1,5 +1,8 @@
 MODULE  := github.com/Erik-Schuetze/league-of-legends
-BINARIES := lolstats-ingest lolstats-aggregate
+# lolstats-web is the server-rendered web tier: it renders the published
+# aggregates with Go templates instead of a Node build step, so it is a third
+# binary in the same image (see Dockerfile) and is built by the same target.
+BINARIES := lolstats-ingest lolstats-aggregate lolstats-web
 IMAGE   := lolstats:latest
 ENV     ?= dev
 

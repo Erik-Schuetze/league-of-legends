@@ -24,6 +24,10 @@ resources:
 # See deploy/README.md for the full TODO list; there is a matching TODO on each
 # image reference in the base.
 images:
+  # One image, three binaries: /lolstats-ingest, /lolstats-aggregate and
+  # /lolstats-web. The Go web tier (deploy/base/web/go-deployment.yaml) selects
+  # the third with `command`, so this single pin covers it as well - there is no
+  # second reference to keep in step.
   - name: ghcr.io/erik-schuetze/league-of-legends
     newTag: latest
   - name: ghcr.io/erik-schuetze/league-of-legends-site

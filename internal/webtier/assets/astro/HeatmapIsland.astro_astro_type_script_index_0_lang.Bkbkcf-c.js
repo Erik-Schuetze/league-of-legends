@@ -1,0 +1,1 @@
+import{n as e,t}from"./preload-helper.DJSjwBkS.js";e(`[data-island="heatmap"]`,()=>t(()=>import(`./heatmap-island.client.Ba_X43a2.js`),[]),e=>e.initHeatmapIsland);

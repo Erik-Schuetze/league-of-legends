@@ -1,0 +1,14 @@
+{{- /* error.tmpl is the fault page: what this tier renders when it cannot render the real page.
+
+       Two forms. The shelled form is wrapped in the site's shell, so a reader who hits a fault still has the
+       banner, the nav and the footer, and the fault kind is on the article. The standalone form exists for the
+       case where the shell itself cannot be built - the loader could not read a manifest, so there is no patch,
+       no state and no nav to render - and it therefore carries its own stylesheet and says plainly that the
+       chrome is missing.
+
+       Both forms put the fault kind in data-fault, the status in data-status and the server's own account of the
+       failure in the body, so the page is checkable from a shell as well as readable in a browser. Neither is
+       indexable: an error page in a search index is worse than no page. */ -}}
+{{- define "faultBody" -}}<h1>{{ .Heading }}</h1><div class="fallback-empty" role="note" data-fault="{{ .Kind }}" data-status="{{ .Status }}"><p><strong>{{ .Lead }}</strong></p><p>{{ .Explanation }}</p></div><h2>What this server reported</h2><p class="state-banner__body"><code data-fault-detail="{{ .Kind }}">{{ .Detail }}</code></p><p>Requested path: <code>{{ .Path }}</code> &middot; HTTP <strong>{{ .Status }}</strong> &middot; fault <code>{{ .Kind }}</code>.</p><h2>What would make this page work</h2><p>{{ .Remedy }}</p>{{ if .HasRoutes }}<h2>Every route this site serves</h2><ul class="fallback-champion-links">{{ range .Routes }}<li><a href="{{ .Href }}">{{ .Name }}</a></li>{{ end }}</ul>{{ if .RoutesNote }}<p>{{ .RoutesNote }}</p>{{ end }}{{ end }}{{- end -}}
+{{- define "page:error" -}}<article>{{ template "faultBody" . }}</article>{{- end -}}
+{{- define "page:error-standalone" -}}<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ .Title }}</title><meta name="description" content="{{ .Description }}"><meta name="robots" content="noindex,nofollow"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="{{ .Stylesheet }}"><style>{{ .ScopedCSS }}</style></head><body data-state="{{ .State }}" data-source="{{ .Source }}"><a class="fallback-skip" href="#main">Skip to content</a><main id="main"><article>{{ template "faultBody" . }}</article><p>This page is not wrapped in the site's usual banner, navigation and footer, because the aggregate snapshot could not be read and those are rendered from it. Everything on this page was written by the web tier that answered the request.</p></main></body></html>{{- end -}}

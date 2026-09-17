@@ -1,0 +1,31 @@
+# The Go web tier's own address, and deliberately not the one the shared Caddy
+# in namespace `web` points at.
+#
+# `lolstats-web` (web/service.yaml) is the live name: the shared Caddy's upstream
+# is written as `lolstats-web.lolstats.svc.cluster.local:80`, so adding this tier
+# to *that* Service - or selecting these pods from it - would put the new tier in
+# front of the public URL before anyone has compared its output with the site it
+# replaces. The selector below is a distinct component label, so the two
+# Services never select each other's pods and this one is reached only by name:
+#
+#   kubectl -n lolstats port-forward svc/lolstats-go-web 8080:80
+#
+# Switching the public route is one edit to web/service.yaml's selector, made
+# after parity is verified, and nothing in this file changes when it happens.
+apiVersion: v1
+kind: Service
+metadata:
+  name: lolstats-go-web
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: web-go
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: web-go
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

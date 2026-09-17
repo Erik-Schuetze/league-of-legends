@@ -1,0 +1,168 @@
+# The server-rendered web tier: the same pages as the static site, assembled per
+# request from the published aggregate snapshot.
+#
+# It is a second Deployment rather than a replacement, on purpose. The live
+# `lolstats-web` Service still points at the static tier, and this one has its own
+# Service (go-service.yaml) that nothing routes to yet, so both can be probed
+# side by side and the switch is a selector edit made once, after parity is
+# proven. Running both also means the comparison can be made against the same
+# snapshot at the same time rather than against a screenshot.
+#
+# Two replicas for the same reason the static tier has two: this is the only
+# component with a public URL, and a rolling restart of one leaves the other
+# answering. maxUnavailable 0 keeps that true during a rollout; /readyz is a
+# real data check, so a pod that cannot read the snapshot is held out of the
+# Service instead of taking half the traffic and answering 503.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lolstats-go-web
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: web-go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lolstats
+      app.kubernetes.io/component: web-go
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lolstats
+        app.kubernetes.io/component: web-go
+    spec:
+      # Longer than the process's 15s shutdown grace (cmd/lolstats-web), so the
+      # listener drains and finishes the responses in flight rather than being
+      # killed mid-write.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # The distroless `nonroot` uid the image declares, same as the ingest
+        # worker: the volume is mounted read-only and every file in it is
+        # world-readable, so this needs no ownership of anything.
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          # The same image as the rest of the stack; this binary differs only in
+          # where `command` points. Pin is in overlays/homelab/kustomization.yaml.
+          image: ghcr.io/erik-schuetze/league-of-legends:latest
+          # The image's ENTRYPOINT is /lolstats-ingest, so the tier is chosen
+          # here. An explicit absolute path, not a subcommand: this binary has
+          # none, and a typo is a start-up failure rather than a worker that
+          # quietly crawls instead of serving.
+          command: ["/lolstats-web"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            # LOLSTATS_AGG_ROOT, LOLSTATS_SITE_URL, LOLSTATS_METRICS_ADDR and
+            # LOLSTATS_AGG_FIXTURES come from here. The last one is the deployed
+            # "render the labelled preview" switch (deploy/base/config.yaml
+            # explains when to flip it), which is also what makes this pod
+            # comparable to the static site it is replacing: both are rendering
+            # the checked-in demo tree today.
+            - configMapRef:
+                name: lolstats-config
+          env:
+            - name: LOLSTATS_WEB_ADDR
+              value: ":8080"
+            # Where the demo tree is inside this image (the Dockerfile copies
+            # it to this path). Named explicitly rather than discovered: the
+            # discovery walk up from the working directory is a development
+            # convenience, and in a container it would be a guess about the cwd.
+            #
+            # A missing directory here is a startup warning and a 503 on the
+            # ladder pages, never a table with missing rows. The Data Dragon
+            # projection the champion pages name items, runes and spells from
+            # needs no path: it is embedded in the binary
+            # (internal/webtier/data.go), with a test that fails if the copy in
+            # web/src/data ever drifts from it.
+            - name: LOLSTATS_FIXTURES_DIR
+              value: /web/src/fixtures
+            # Under the 384Mi limit below with room for the runtime and the
+            # per-request page buffers, which are not heap the limit measures.
+            # The file cache has its own bound (64MiB, internal/webtier/artifacts.go).
+            - name: GOMEMLIMIT
+              value: 224MiB
+          resources:
+            # Rendering is CPU-bound and bursty, and the process keeps only the
+            # snapshot's newest partitions resident, so the reservation is small
+            # relative to the limit. This is the second-smallest allocation in
+            # the stack, after the Caddy file server.
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          securityContext:
+            # PodSecurity `restricted` in full: no privilege escalation, every
+            # capability dropped, no writable root filesystem. The tier writes
+            # nothing anywhere - it has no state, no cache directory and no
+            # temp files - so a write attempt failing is the correct outcome and
+            # is also what makes a path traversal in the artifact reader
+            # useless.
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/lolstats
+              readOnly: true
+            # The read-only root filesystem leaves no writable path at all, and
+            # GOTRACEBACK-style diagnostics and any future temp file expect one.
+            # An emptyDir here keeps that failure local instead of turning into
+            # an unexplained crash under a read-only /.
+            - name: tmp
+              mountPath: /tmp
+          # Readiness is the data check, not a liveness check with a different
+          # name: /readyz reads the newest partition's tier list and answers 503
+          # when it cannot. That is what keeps a pod whose PVC read is broken
+          # out of the Service while the other replica keeps serving.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Liveness is about the process. It stays on /healthz deliberately: a
+          # pod that has lost the volume can still serve the pages that do not
+          # need it, and restarting it would not bring the artifact back.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # The process compiles its templates at start-up and resolves the
+          # snapshot before it listens, so the first seconds are busy and the
+          # probe would otherwise race them.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: lolstats-data
+        - name: tmp
+          emptyDir: {}
