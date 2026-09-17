@@ -54,7 +54,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lolstat
 # the download is verified against a per-architecture sha256 of the release
 # zip, so a repointed or tampered release asset fails the build instead of
 # shipping. See docs/aggregation.md and docs/decisions/ADR-007.
-FROM debian:12-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS duckdb
+FROM debian:13-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS duckdb
 
 # TARGETARCH is a predefined *global* build argument, and a stage only sees one
 # if it declares it. Without this line the download step dies at
