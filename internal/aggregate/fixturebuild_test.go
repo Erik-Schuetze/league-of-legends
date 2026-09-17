@@ -654,8 +654,14 @@ func checkAuditRow(t *testing.T, result BuildResult, auditRoot string) {
 	}
 	record := readAuditRecord(t, auditRoot, result.BuildRunID)
 
+	// The patch is the first thing checked, because it is the value the store
+	// validates before it will open the row at all: a run recorded with an empty
+	// patch is not a row the operator can read. It must be the patch of the
+	// partition that was published, and the build is not given one up front -
+	// fixtureBuildOptions leaves it empty, so this is the resolved choice.
 	for field, want := range map[string]any{
 		"status":           "ok",
+		"patch":            result.Partition.Patch,
 		"cells_total":      float64(fixtureExpectedCounts.CellsTotal),
 		"cells_published":  float64(fixtureExpectedCounts.CellsPublished),
 		"cells_suppressed": float64(fixtureExpectedCounts.CellsSuppressed),

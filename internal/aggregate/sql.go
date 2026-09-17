@@ -122,6 +122,13 @@ func participantRoleSQL(teamPosition, individualPosition string) string {
 // stats would never be counted, and the audit row would lose its reason. A
 // guarded extraction yields NULL envelope fields instead, which is the row the
 // gate is built to count and refuse.
+//
+// participants is the one envelope field no later phase reduces: it is the
+// length of the payload's participant array, and it is here so that the patch
+// can be chosen from the envelope before any payload is unfolded (see
+// envelopePatchListSQL). The feature spill produces one row per participant of
+// every match the envelope kept, so this count is also what makes the two patch
+// lists comparable column by column.
 func envelopeSQL(parts []string) string {
 	guarded := func(expression string) string {
 		return "CASE WHEN json_valid(payload) THEN " + expression + " END"
@@ -132,6 +139,17 @@ func envelopeSQL(parts []string) string {
 	number := func(path, kind string) string {
 		return "CAST(" + guarded("json_extract(payload, "+quoteLiteral(path)+")") + " AS " + kind + ")"
 	}
+	// arrayLen counts the members of an array in the payload, and yields NULL
+	// when there is no such array: json_array_length fails the statement on a
+	// value that is not one, so the type is checked first. A row whose
+	// participants member is missing or is not an array is a row the participant
+	// extraction cannot read either, and the spill reports it with its own error
+	// rather than this statement failing on it first.
+	arrayLen := func(path string) string {
+		array := "json_extract(payload, " + quoteLiteral(path) + ")"
+		return "CASE WHEN json_valid(payload) AND json_type(" + array + ") = 'ARRAY'" +
+			" THEN CAST(json_array_length(" + array + ") AS INTEGER) ELSE NULL END"
+	}
 	return fmt.Sprintf(`SELECT
   part,
   part_row,
@@ -140,7 +158,8 @@ func envelopeSQL(parts []string) string {
   platform_id,
   queue_id,
   game_creation_ms,
-  payload_valid
+  payload_valid,
+  participants
 FROM (
   SELECT filename AS part,
          file_row_number AS part_row,
@@ -149,6 +168,7 @@ FROM (
          %s AS platform_id,
          %s AS queue_id,
          %s AS game_creation_ms,
+         %s AS participants,
          json_valid(payload) AS payload_valid
   FROM read_parquet(%s, union_by_name = true, filename = true, file_row_number = true)
 ) extracted
@@ -160,6 +180,7 @@ QUALIFY ROW_NUMBER() OVER (
 		text("$.info.platformId"),
 		number("$.info.queueId", "INTEGER"),
 		number("$.info.gameCreation", "BIGINT"),
+		arrayLen("$.info.participants"),
 		fileList(parts))
 }
 
@@ -305,10 +326,11 @@ WHERE %s`,
 
 // bansSQL unnests teams[].bans[] into one row per banned champion.
 //
-// The patch is carried on the row rather than filtered here, because the patch
-// the build publishes is chosen after the extraction runs: it defaults to the
-// newest patch in the window, which is not known until the window has been
-// read.
+// The patch is carried on the row rather than filtered here: the spill is
+// patch-free so that it is a function of the window alone, because the window is
+// what the patch is chosen from - it cannot also be scoped by the choice it
+// feeds (see envelopePatchListSQL). The reductions apply the patch when they
+// read these rows back (banReduceFilter).
 //
 // Zero champion ids are filtered out. Riot uses 0 for "no ban" in queues that
 // allow fewer than five bans per side, and counting those would inflate
@@ -344,16 +366,49 @@ WHERE %s AND CAST(json_extract(b.value, '$.championId') AS INTEGER) > 0`,
 // so a match played on the boundary patch but crawled after a partition
 // rotation still lands in the right build.
 func filterSQL(region, platform string, queue int, window aggmodel.Window, patch string) string {
-	conditions := []string{
+	conditions := append([]string{
 		"m.game_version IS NOT NULL",
 		"m.match_id IS NOT NULL",
-		"m.payload IS NOT NULL",
-		platformCondition("m", platformFilter(region, platform)),
-		queueCondition("m", queue),
-		fmt.Sprintf("CAST(epoch_ms(m.game_creation_ms) AS DATE) BETWEEN DATE %s AND DATE %s",
-			quoteLiteral(window.From), quoteLiteral(window.To)),
-		patchCondition("m", patch),
+		"m.payload IS NOT NULL"},
+		scopeConditions("m", region, platform, queue, window)...)
+	conditions = append(conditions, patchCondition("m", patch))
+	return strings.Join(nonEmpty(conditions), "\n    AND ")
+}
+
+// scopeConditions renders the predicates that select one window: the region, the
+// queue and the date range.
+//
+// They are shared, rather than repeated, because the window is selected over two
+// different relations - the payload spill, where a row carries its payload, and
+// the envelope, where it does not - and a window that meant two different things
+// depending on which relation it was read from would be a build whose patch and
+// whose published rows came from different populations.
+func scopeConditions(alias, region, platform string, queue int, window aggmodel.Window) []string {
+	return []string{
+		platformCondition(alias, platformFilter(region, platform)),
+		queueCondition(alias, queue),
+		fmt.Sprintf("CAST(epoch_ms(%s.game_creation_ms) AS DATE) BETWEEN DATE %s AND DATE %s",
+			alias, quoteLiteral(window.From), quoteLiteral(window.To)),
 	}
+}
+
+// envelopeFilterSQL is filterSQL over the envelope rather than over the payload
+// spill.
+//
+// Two conditions differ, and both are because the envelope has no payload
+// column. "carries a usable payload" is the payload_valid flag envelopeSQL
+// spilled instead of a re-parsed json_valid, and "contributes a participant" is
+// the participants count being a positive number: the unnest the feature spill
+// runs produces one row per member of that array, and no rows at all when there
+// is no array, so a match with no participants carries no patch either - it is
+// the empty window the build refuses rather than an empty partition it publishes.
+func envelopeFilterSQL(region, platform string, queue int, window aggmodel.Window) string {
+	conditions := append([]string{
+		"m.game_version IS NOT NULL",
+		"m.match_id IS NOT NULL",
+		"m.payload_valid",
+		"m.participants > 0"},
+		scopeConditions("m", region, platform, queue, window)...)
 	return strings.Join(nonEmpty(conditions), "\n    AND ")
 }
 
@@ -497,16 +552,42 @@ ORDER BY 1, 2, 3`,
 }
 
 // patchListSQL lists the patches the extracted window holds, with the number of
-// participant rows each contributed, so the build can pick the newest patch
-// deterministically when the operator did not name one.
+// matches and of participant rows each contributed, so the build can pick the
+// newest patch deterministically when the operator did not name one.
 func patchListSQL(featuresPath string) string {
 	return fmt.Sprintf(`SELECT
   p.patch,
+  CAST(count(DISTINCT p.match_id) AS INTEGER) AS matches,
   CAST(count(*) AS INTEGER) AS participant_rows
 FROM %s p
 WHERE p.patch IS NOT NULL
 GROUP BY p.patch
 ORDER BY p.patch`, parquetOf(featuresPath))
+}
+
+// envelopePatchListSQL is patchListSQL over the envelope instead of over the
+// feature spill: the same window, the same matches, counted before any payload
+// has been unfolded.
+//
+// This is what lets the build choose the patch before it extracts, and choosing
+// the patch before it extracts is what lets the audit row name the partition the
+// build is about to publish: the store refuses a run whose patch is empty, so a
+// row opened before the choice is a row that is not written at all whenever the
+// operator did not pin a patch.
+//
+// The patch expression is deliberately the one participantsSQL derives, guard
+// included: a match with no readable game version has no patch, and a NULL group
+// would reach the chooser as a patch it has to reject as malformed rather than
+// as a row that simply carries none.
+func envelopePatchListSQL(envelopePath, filters string) string {
+	return fmt.Sprintf(`SELECT
+  CAST(split_part(m.game_version, '.', 1) || '.' || split_part(m.game_version, '.', 2) AS VARCHAR) AS patch,
+  CAST(count(*) AS INTEGER) AS matches,
+  CAST(sum(m.participants) AS INTEGER) AS participant_rows
+FROM %s m
+WHERE %s
+GROUP BY 1
+ORDER BY 1`, parquetOf(envelopePath), filters)
 }
 
 // archiveStatsSQL reports archive-wide counts. They are not scoped to the
