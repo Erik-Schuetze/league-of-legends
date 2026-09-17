@@ -98,7 +98,11 @@ failures=0
 pass() { printf 'PASS  %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; failures=$((failures + 1)); }
 note() { printf '      %s\n' "$1"; }
-warn() { printf 'WARN  %s\n' "$1"; }
+# There is deliberately no warn(): every finding here is a pass or a failure of
+# the run, because a warning that still exits 0 is how this drill came to report
+# success while comparing nothing (see the negative control below). Kept as a
+# comment rather than deleted helpfully, so the next person adding a soft finding
+# has to decide against the rule on purpose.
 section() { printf '\n== %s\n' "$1"; }
 die() { printf 'backup-verify: FATAL: %s\n' "$1" >&2; exit 1; }
 
@@ -483,8 +487,14 @@ if [ "${lost:-0}" -gt 0 ]; then
         note "first line of that diff: $first"
     fi
 else
-    warn "skipped: the source has no matches rows, so a full comparison is vacuous."
-    warn "re-run this after the crawler has persisted matches (see docs/runbooks/rebuild-aggregates.md)"
+    # A drill that compared nothing is not a passed drill. This used to be a
+    # warning that still exited 0, so `make backup-verify` could report success
+    # over an archive with no matches rows at all - the same defect shape as the
+    # `skipped: docker is not installed` this workstream removed from
+    # `make compliance-gnu`: the precondition is absent, so the check does not
+    # happen, and the run says it was fine.
+    fail "no matches rows exist to delete, so the negative control cannot run and the dump/restore comparison above proves nothing about loss detection."
+    note "persist some matches, then re-run (see docs/runbooks/rebuild-aggregates.md)"
 fi
 
 section "result"

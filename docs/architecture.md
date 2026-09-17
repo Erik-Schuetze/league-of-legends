@@ -92,7 +92,7 @@ exception and no route of its own in the shared proxy.
 | `/healthz` | 200 `ok`, `Cache-Control: no-store`; this is the readiness and liveness probe |
 | `/metrics` | Prometheus text, `lolstats_`-prefixed, `Cache-Control: no-store` |
 | HTML routes | `Cache-Control: private, max-age=60, stale-while-revalidate=300`, a quoted `ETag`, `Vary: Accept-Encoding`; a matching `If-None-Match` is answered `304` with no body, a stale validator is answered with the byte-identical 200 |
-| `/agg/v1/static/**` | Data Dragon JSON published by the static sync, `Cache-Control: public, max-age=3600` - safe to cache publicly because it is immutable upstream data with no reader in it |
+| `/agg/v1/static/**` | Data Dragon JSON, reserved for the static sync. **Conditional, amended 2026-09-17**: *published* - `Cache-Control: public, max-age=3600`, safe to cache publicly because it is immutable upstream data with no reader in it; *unpublished* (today's state) - `404` with `Cache-Control: no-store`, and the pages are unaffected because the tier renders from the Data Dragon projection embedded in the binary (`internal/webtier/data.go`). `docs/contracts.md` section 4 is the authority; gap 8 of `docs/compliance.md` records why the contract was amended rather than the tree published |
 | `/agg/v1/manifest.json` | `Cache-Control: public, max-age=60`; the 60s matches the nightly build's directory-rename publish, so a stale entry cannot outlive one publish cycle |
 | `agg/v1` absent | 503 with a **visible** error page (`data-fault="no-snapshot"`), `no-store` - a page that cannot be rendered correctly is never served as a 200 |
 
@@ -102,9 +102,18 @@ exception and no route of its own in the shared proxy.
 tree) asserts every row of that table, and asserts it against the deployed
 Service rather than against the source: the gate grew out of a static-site
 script whose file paths and `Cache-Status` expectations no longer described
-anything the tier does. The local variant starts the binary a second time over a
-deliberately corrupt aggregate root, because "503 rather than a truncated 200" is
-the kind of property that only a live probe can establish.
+anything the tier does. The local variant starts the binary a third time over a
+copy of the fixture tree with `v1/static` removed, so both states of the
+conditional row above are executed rather than described, and a second time over
+a deliberately corrupt aggregate root, because "503 rather than a truncated 200"
+is the kind of property that only a live probe can establish.
+
+No row is a warning. A row that the deployed tier is in neither state of - a
+`404` whose miss a cache may keep, a `200` at the wrong policy, a `5xx` - fails
+the gate, and `make serving-static-control` is the standing proof of that failure
+direction: it stands in its own origin serving the projection with no
+`Cache-Control`, and again with the projection absent and the `404` still
+uncacheable, and requires the gate to reject both.
 
 It also asserts the property the tier exists for: **the page works with
 JavaScript disabled.** The filter bar is a `method="get"` form, and check 4 reads

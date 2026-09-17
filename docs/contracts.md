@@ -579,12 +579,15 @@ served manifest does not carry them.
 | `cells_published` | Cells actually published in that partition |
 | `suppressed_cells` | Cells withheld by `min_cell_n`. Published on purpose, so a thin patch is visible to the operator and to the page rather than looking like an empty region |
 
-The deployed snapshot as of 2026-09-17 publishes exactly one partition -
-`16.18` / `EUW` / `420` / `all` - with `min_cell_n: 100`, **130 cells published
-and 511 suppressed**. That is a real tree, and it is why the contract can cite
-numbers rather than placeholders: `cells_published` far below the champion-role
-cross product is the expected state of a young archive, and it is disclosed
-rather than hidden.
+The deployed snapshot as of 2026-09-17T23:19:48Z (`build_run_id` 19,
+`git_sha` `9526227`) publishes exactly one partition - `16.18` / `EUW` / `420` /
+`all` - with `min_cell_n: 100`, **244 cells published and 522 suppressed**, over
+the 173 champion ids in `latest.champions`. Those numbers are a reading of one
+published tree, not constants: they move with every publish, and what is frozen
+is the *presence* of the keys and their meaning. That it is a real tree is why
+the contract can cite numbers rather than placeholders: `cells_published` far
+below the champion-role cross product is the expected state of a young archive,
+and it is disclosed rather than hidden.
 
 ### 4.4 How the tree is served
 
@@ -601,7 +604,7 @@ every intermediate cache will do with the bytes:
 | Path | Response |
 | --- | --- |
 | `/agg/v1/manifest.json` and the other artifacts under `p/` | `Cache-Control: public, max-age=60`, with an `ETag` |
-| `/agg/v1/static/<ddragon_version>/**.json` | `Cache-Control: public, max-age=3600` - immutable upstream data with no reader in it, so it is safe to cache publicly for longer |
+| `/agg/v1/static/<ddragon_version>/**.json` | `Cache-Control: public, max-age=3600` - immutable upstream data with no reader in it, so it is safe to cache publicly for longer. **Conditional on the prefix being published**: the tier serves the projection at that policy whenever the tree carries it, and answers an unpublished path under the reserved prefix with `404` and `Cache-Control: no-store` rather than an invented `200` (see the static-projection amendment below) |
 | HTML | `Cache-Control: private, max-age=60, stale-while-revalidate=300`, `ETag`, `Vary: Accept-Encoding`; a matching `If-None-Match` is `304` |
 
 Two failure modes are contract, not implementation detail:
@@ -617,30 +620,85 @@ Two failure modes are contract, not implementation detail:
 Every row above is asserted against a **running** tier rather than read off the
 source: `scripts/verify-serving.sh` requests each route, checks the declared and
 delivered `Content-Length` agree, re-requests with `If-None-Match` for the `304`,
-sends a stale validator for the byte-identical `200`, and starts the binary a
-second time over a corrupt root for the 503. It also asserts the property the
+sends a stale validator for the byte-identical `200`, starts the binary a second
+time over a corrupt root for the 503, and asserts both published and unpublished
+states of the static projection (see below). It also asserts the property the
 no-JS filter depends on - that a control's values change the document the server
 returns - and `make compliance` asserts the amended compliance checks 3
 and 4 over the captured responses (docs/compliance.md, amendment 2).
 
-**Static tree, 2026-09-17 (re-measured).** The snapshot serving from
-`svc/lolstats-go-web` now publishes its Data Dragon projection:
-`/agg/v1/static/16.18.1/champions.json` and `.../patches.json` both answer `200`
-with `Cache-Control: public, max-age=3600`. Earlier the same day, against the
-snapshot the Service was serving before that publish, the same two URLs answered
-`404` and the pages fell back to the copy of Data Dragon checked into
-`fixtures/site/v1/static`; `scripts/verify-serving.sh` reported that as a WARN
-rather than a failure, which is the behaviour the note here asked for.
+**Amendment: the Data Dragon projection is reserved, and not published. Amended
+2026-09-17, last reviewed 2026-09-17. Reason: this section froze a prefix the
+deployed Service does not serve, and the gate reported the disagreement as a
+`WARN` and still exited `0`, so the frozen wording outlived the served reality it
+described.**
 
-Two things that stay true regardless of that publish, and are contract rather
-than defect:
+Measured against `svc/lolstats-go-web` through
+`kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80` at
+2026-09-17T23:30:33Z, every Data Dragon URL this section used to promise answers
+`404` from the tier's own error page, with the tier's honest-absence policy:
 
-- **The path carries the Data Dragon version, not the game patch.** `16.18.1` is
-  the version the manifest names; `/agg/v1/static/16.18/champions.json` is `404`
-  by design. A reader that substitutes the patch version gets a miss.
-- **A missing projection is a 404, not an invented 200.** The tier serves what
-  exists; the fallback to the checked-in fixtures is the build's business, not
-  the server's.
+```
+$ curl -sD - -o /dev/null http://127.0.0.1:18099/agg/v1/static/16.18.1/patches.json
+HTTP/1.1 404 Not Found
+Cache-Control: no-store
+Content-Type: text/html; charset=utf-8
+```
+
+`16.18.1`, `16.18`, `16.19.1`, the bare `/agg/v1/static/` and a nonsense version
+were all probed and all answer the same way; `.../champions.json` is `404` too.
+The rest of the tree is served, at its own policy
+(`/agg/v1/manifest.json` and `/agg/v1/p/16.18/EUW/420/all/tierlist.json` are both
+`200` with `Cache-Control: public, max-age=60`), so what is absent is one
+projection, not the artifact and not the tier.
+
+Two properties follow, and both of them are contract:
+
+- **The prefix stays reserved, and the version in the path is the Data Dragon
+  version, not the game patch.** `internal/aggmodel/paths.go` defines
+  `v1/static/<ddragon_version>/{champions,items,runes,summoner-spells,patches}.json`,
+  the tier serves that prefix at `public, max-age=3600` whenever the published
+  tree carries it, and `/agg/v1/static/16.18/champions.json` is a miss by design.
+- **No page depends on it.** The tier renders champion, item, rune and spell
+  metadata from a Data Dragon projection **embedded in the binary**
+  (`internal/webtier/data/`, read through `internal/webtier/data.go`), preferring
+  a published copy when one exists and falling back to the embedded one
+  otherwise. So the pages are complete whether or not the projection is
+  published, and the fallback is the server's business after all - the earlier
+  wording here put it in the build's hands and that was wrong.
+
+The gate no longer waves this through. `scripts/verify-serving.sh` check 5
+asserts whichever of the two conformant shapes it observes and fails on anything
+else:
+
+- **published**: `200`, exactly `Cache-Control: public, max-age=3600`, a declared
+  `Content-Length` that matches the bytes delivered, and a JSON body;
+- **unpublished**: `404` **and** `Cache-Control: no-store` on every probed
+  version, with the absence stated in the check's own output;
+- **anything else fails**: a `404` without `no-store`, a `200` with the wrong
+  policy, a `5xx`, or a version that could not be derived and probed at all.
+  A published version alongside `404`s for the patch-version candidates is *not*
+  a failure - the path carries the Data Dragon version and not the game patch, so
+  the candidates routinely disagree - but each probed version has to be in one of
+  the two conformant shapes.
+
+The failure direction of that check is itself a control, because a check that
+only ever passes is the defect this amendment was written against:
+`make serving-static-control` (`scripts/serving-static-control.sh`) stands in its
+own HTTP origin - python3's file server, no cluster and no network - serving the
+projection with no `Cache-Control` at all, and again with the projection absent
+and the `404` still uncacheable, and requires check 5 to reject both and the gate
+to exit non-zero. It fails closed when it cannot create the origin it needs, and
+the positive direction runs against the real tier in `make verify-serving-local`
+once over the fixture tree (projection published) and once over a copy with
+`v1/static` removed (projection absent).
+
+Both states are exercised, not just described: `make verify-serving-local` runs
+the fixture tree, which does publish the projection, and then runs the same gate
+a second time over a copy of it with `v1/static` removed, where the absence
+verdict is the required result. Publishing the projection is an open requirement
+of the publisher rather than a defect of the tier, and it is recorded as such in
+docs/compliance.md ("Honest gaps and known weaknesses", item 8).
 
 ## 5. CI image contract
 

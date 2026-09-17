@@ -22,7 +22,13 @@ make compliance          # or: sh scripts/compliance-check.sh
 make compliance-served   # an alias: there is one corpus now, not two
 make compliance-negative-control   # one planted violation at a time
 make capture-served-pages          # refresh the served corpus from a running tier
-make compliance-gnu      # the same gate in a GNU userland, when docker is present
+make compliance-gnu      # the same gate in a GNU userland; fails closed without docker
+make serving-static-control        # the negative control for the serving contract's
+                                   # Data Dragon check: a served projection with no
+                                   # cache policy and a cacheable 404, both rejected
+make precondition-failclosed-control   # hides docker from PATH and requires
+                                   # `make compliance-gnu` to fail and say so
+make gate-controls       # both controls, in the order CI runs them
 ```
 
 `scripts/compliance-check.sh` is a POSIX `sh` script with no network access and
@@ -141,10 +147,34 @@ FAIL  4. The free tier is genuinely free and ungated: no account, no paywall
 ```
 
 That is one check failing on ten GET forms and nothing else, which is exactly
-the "a normal dynamic app is unlaunchable" risk. The amended gate on the same
-tree: `RESULT: PASS - 0 launch-blocking violations(s)`, check 3 reporting 480
-resource tags across 150 pages, check 4 reporting 10 forms and 0 of 0 named
+the "a normal dynamic app is unlaunchable" risk. The amended gate on that same
+mirror, quoted verbatim rather than summarised:
+
+```
+RESULT: PASS - 0 launch-blocking violations          # exit 0
+```
+
+That is the coordinator's re-run of the committed script on 2026-09-17, over a
+1,058-page mirror of the live pages: 3,334 resource tags, 10 forms, 0 of 0 named
 controls outside a form.
+
+### Every count in this page is a dated reading, not an invariant
+
+Read the figures below as what one capture saw on one day, because that is what
+they are, and they move with the corpus the gate was pointed at:
+
+| Reading of `make compliance` | pages | resource tags | forms |
+| --- | --- | --- | --- |
+| the mirror the amendment was written against | 150 | 480 | 10 |
+| the coordinator's re-run of the committed script, 2026-09-17 | 1,058 | 3,334 | 10 |
+| this checkout's own capture, 2026-09-17, quoted verbatim below | 1,063 | 3,214 | 15 |
+
+The script is the same in all three; the corpus is not, and a larger corpus
+carries proportionally more tags because most of them are one `<img>` per
+champion row. A count that changes between runs is therefore not a regression -
+a **floor** changing would be, and where this page states a floor it says so.
+Where a quote appears it is the raw line the script printed, dated, and where a
+figure was re-checked the re-check is named.
 
 ### What replaced the two rules
 
@@ -265,20 +295,28 @@ route                          scripts  forms
 
 Both shapes are legitimate and neither is a defect: `/champions/ahri` is static
 content, and the sort/filter controls on a tier list are real server-side forms.
-The gate's own capture of the tier's pages (63 pages sampled from the 1067 the
-tier's own `/sitemap.xml` advertises, on loopback over the fixture artifact tree)
-agrees and is the evidence CI now produces:
+The gate's own capture of the pages a tier served is the evidence CI produces,
+and its closing lines on 2026-09-17 over a 1,063-page corpus (`make compliance`,
+raw output in `bin/`, capture line
+`captured 1063 HTML page(s) … (1063 route(s) selected of 1063)`) were:
 
 ```
-PASS  the served corpus agrees: all 193 resource tags across 63 served page(s)
-      are same-origin, and 59 of them carry no <script> at all
-PASS  the served corpus agrees: every one of the 3 form(s) the tier served is a
-      GET form on this origin, and every named control is inside one (0 outside)
+PASS  no executable third-party resource and no tracker: all 3214 resource tags
+      across 1063 pages are same-origin, and the control flagged the analytics
+      and third-party-font probes as designed
+PASS  every form in the served pages is a GET form on this origin (15 checked)
+      and every named control is inside one (0 of 0 outside); no credential
+      field, no auth route and no paywall
+RESULT: PASS - 0 launch-blocking violations
 ```
 
-The 3 forms are the filter bars on `/tier-list/<role>/` and
-`/patch/<ver>/tier-list/<role>/`; the 59 script-free pages are the champion
-pages. A corpus smaller than 8 pages, or one from which the check extracts
+The 15 forms are the filter bars on `/tier-list/<role>/` and
+`/patch/<ver>/tier-list/<role>/` plus the tier's own search inputs; the
+script-free pages are the champion pages. Those counts are today's reading of
+today's corpus and they will differ on any other mirror - an earlier reading of a
+150-page corpus reported 193 resource tags and 3 forms, and the coordinator's
+1,058-page mirror reported 3,334 tags and 10 forms. What does not change is the
+floor: a corpus smaller than 8 pages, or one from which the check extracts
 nothing, **fails**: a scan that passes because it read nothing is the failure
 mode the floors exist for.
 
@@ -320,16 +358,26 @@ site-verification token is configured, so the file the token would go in is not
 offered. A placeholder would be a false claim of verification. The reference
 build returns 404 for the same reason.
 
-**Decision: the absence of `/riot.txt` is not a gate.** It is a documented open
-operational requirement, owned by the deploy lane, that becomes satisfiable only
+**Decision: the absence of `/riot.txt` is not a gate. It is a documented open
+operational requirement**, owned by the deploy lane, that becomes satisfiable only
 after the domain owner starts a production-key application and is issued a token
-(see checkpoint 1 and gap 3 below). What the gate does instead is fail-closed on
-the two states that *are* code: gate check 5 passes when no token is configured
-and no `/riot.txt` is published, and it fails when a `/riot.txt` appears without
-a configured token, or when a configured token is not published, or when any page
-claims Riot has verified the site while no token is configured. The claim is
-gated; the errand is not invented. The tier's own half is proved in code, not by
-argument: `internal/webtier/fixtures_test.go` fails if `/riot.txt` is published
+(see checkpoint 1 and gap 3 below). Confirmed deliberately rather than by
+omission, in both scripts:
+
+- `scripts/compliance-check.sh` check 5 gates the *claim*, not the errand. Against
+  the 1,063-page corpus on 2026-09-17 it printed
+  `PASS  no /riot.txt is published, so the site does not offer a verification file it cannot own`,
+  and it fails when a `/riot.txt` appears without a configured token, when a
+  configured token is not published, or when any page claims Riot has verified the
+  site while no token is configured.
+- `scripts/verify-serving.sh` does **not** assert `/riot.txt` at all; the capture
+  step records `/riot.txt: HTTP 404, which is the tier's answer when it publishes
+  no such file` as a note, not a check. There is no gate that fails while the
+  token is absent, and none was added: a gate over it would fail for a reason no
+  code change can fix.
+
+The tier's own half is proved in code, not by argument:
+`internal/webtier/fixtures_test.go` fails if `/riot.txt` is published
 without a token and fails if it is not published once
 `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set. That assertion moved there on
 2026-09-18, from the `parity_test.go` this paragraph used to name - see gap 7.
@@ -620,15 +668,26 @@ Gate check 2 is the automated form: it extracts those references from the served
 HTML and CSS, then removes the Data Dragon origin and fails if anything remains.
 The captured corpus of 2026-09-18 carries 1038 `<img>` tags pointing at the Data
 Dragon CDN and **zero** other absolute image origins; nothing else is loaded from
-a third party, and the remaining references are same-origin.
+a third party, and the remaining references are same-origin. (That 1038 is the
+reading of that day's corpus, not a floor - see "Every count in this page is a
+dated reading" above.)
 
 No build fetches Data Dragon any more. The static data is checked in under
 `projection/`, embedded by `internal/webtier/data.go`, and the frozen tree
 reserves `/agg/v1/static/<ddragon_version>/` for it (`docs/contracts.md` section
-4; the serving gate warns if that prefix is absent from the served root). The
-tier reads its own copy at render time and makes no outbound request, so no
-visitor's page view causes a Riot request; the build-time
+4). The tier reads its own copy at render time and makes no outbound request, so
+no visitor's page view causes a Riot request; the build-time
 `web/scripts/fetch-ddragon.mjs` went with the Astro tree on 2026-09-18.
+
+**The serving gate asserts which of the two states that prefix is in, and fails
+on anything else** (2026-09-17; it used to print a warning and still exit 0, which
+let a frozen contract outlive the served reality it described). Both states are
+contract: *published* - `200` at exactly `public, max-age=3600` with an honest
+`Content-Length` and a JSON body; *unpublished* - the reserved prefix answers
+`404` with `Cache-Control: no-store`, never an invented `200` and never a
+cacheable `404`. Live on 2026-09-17 the deployed tier is in the second state, and
+the gate says so rather than warning: no version is published under
+`/agg/v1/static/` and every probe answers `404` + `no-store`, which is gap 8.
 
 ## Standing constraints
 
@@ -692,7 +751,12 @@ successes is not a register.
    only non-regenerable asset, because Riot retains matches for two years and
    timelines for one. A tested off-site restore is a launch gate and it is not
    mine to build; `scripts/backup-verify.sh` verifies restores but no off-site
-   medium has been chosen (plan open question 3).
+   medium has been chosen (plan open question 3). Its restore drill is not a
+   launch gate and runs in no workflow, so it is out of the gate class fixed on
+   2026-09-17 - but it had the same defect shape and was fixed anyway: an empty
+   source used to print `WARN skipped ... vacuous` and still exit `0` over a
+   comparison against nothing, and now fails closed (changelog, entry "(d)").
+   What remains genuinely open is the medium, not the drill's honesty.
 6. ~~**The public-preview posture was this workstream's reading, not a decision
    the owner had confirmed.**~~
    **Closed 2026-09-17.** The owner answered plan question 6 by choosing
@@ -744,6 +808,29 @@ successes is not a register.
    > and skipped. Until it was resolved, the `verify` job stopped at `Test` and
    > the compliance steps after it did not run in CI.
 
+
+8. **The Data Dragon projection is reserved in the contract and not published by
+   the deployment - and the gate fails on any state between the two.**
+   Amended 2026-09-17. `docs/contracts.md` section 4 froze
+   `/agg/v1/static/<ddragon_version>/…` at `public, max-age=3600`, and the
+   deployed Service does not serve that prefix at all: on 2026-09-17,
+   `/agg/v1/static/16.18.1/patches.json`, `/agg/v1/static/16.18/…` and the bare
+   prefix each answered `404` with `Cache-Control: no-store`, while
+   `/agg/v1/manifest.json` answered `200`. The pages are nevertheless complete,
+   because the tier renders from the Data Dragon projection embedded in the
+   binary (`internal/webtier/data.go`, `internal/webtier/data/`), not from that
+   prefix - so the served site does not depend on it, and the contract was
+   amended rather than the tree being published to satisfy a document. What makes
+   this a gap and not a closed item: the prefix stays **reserved** for the
+   projection (`internal/aggmodel/paths.go`), no publisher writes it today, and
+   what the gate now does about it is assert *which* state the tier is in and fail
+   on anything else - `200` at exactly `public, max-age=3600`, or `404` at exactly
+   `no-store`. The failure mode this replaced was a `WARN` that still exited `0`,
+   which is how the frozen contract came to outlive the served reality it
+   described without CI saying so. Evidence: `bin/live-static-probe2.txt` (the raw
+   live responses), `bin/vsl-run1.log` (the gate's three states over the fixture
+   tree, exit 0) and `make serving-static-control` (the failure direction: a
+   served projection with no cache policy, and a cacheable `404`, each rejected).
 
 ## Non-endorsement disclaimer text
 
@@ -797,6 +884,40 @@ a compliance change, not a copy change.
   publish a Dataset `measurementTechnique` in any other state.
   Gate check 11 asserts that every built page carries the labelling its declared
   state requires, so a page cannot lose its banner or claim a state it is not in.
+- **Three gates that could not fail were repaired on 2026-09-17.** They share one
+  cause: a precondition that is absent produced a green run instead of a red one.
+  (a) The serving contract's Data Dragon check reported an unpublished
+  `/agg/v1/static/` prefix as a `WARN` and still exited `0`, so a frozen contract
+  could outlive the served reality it described - see gap 8, the amendment in
+  `docs/contracts.md` section 4, and `make serving-static-control` for the
+  failure direction. (b) `make compliance-gnu` printed `skipped: docker is not
+  installed` and exited `0`, so the GNU-userland half of the gate could disappear
+  while the CI step that runs it stayed green; it now depends on a `require-docker`
+  guard that fails closed with a reason, and `make
+  precondition-failclosed-control` proves it by hiding docker from `PATH` for real
+  and requiring the failure to name the missing tool. (c) The parity control the
+  class was reported against, `make test-parity` with `WEB_DIST_SKIP=1`, no longer
+  exists: its gate and its reference tree were retired on 2026-09-17/18
+  (`8e23d67`, `65f2983`; gap 7), so it was not revived - what was fixed is the
+  shape it left behind, in the surviving places above and below. (d)
+  `scripts/backup-verify.sh` printed `WARN skipped: the source has no matches
+  rows, so a full comparison is vacuous.` and exited `0`, so the drill printed
+  `PASS dump and restore agree (6 tables, 0 row(s) in matches)` over a dump it
+  had compared against nothing; the warning is now a `FAIL` and the `warn()`
+  helper is gone from the script by design, so a third defect of the same shape
+  cannot be added without deciding against the rule on purpose. Exercised live
+  in both directions rather than argued: the drill normally seeds 251 `matches`
+  rows, so the vacuous branch is reachable only against an empty source, and the
+  before/after pair was taken by running the shipped script with its single seed
+  line commented out (the drill cannot be pointed at an empty source any other
+  way) - unchanged it exits `0` on `PASS ... 0 row(s) in matches`, changed it
+  exits `1` naming the reason; the seeded run still exits `0`. Raw evidence:
+  `bin/serving-static-control-first.log`, `bin/pfc-first.log`,
+  `bin/serving-static-control-nopython.log` (the serving control with `python3`
+  absent: exit 1, a failure and not a skip), `bin/cgnu-before.log` vs
+  `bin/cgnu-after.log`,
+  `bin/bv-noseed-before.log` vs `bin/bv-noseed-after.log`, and
+  `bin/bv-seeded-after.log`.
 - **Checks 3 and 4 were amended on 2026-09-17** for the server-rendered tier,
   and `scripts/compliance-negative-control.sh` / `make
   compliance-negative-control` were added as the standing proof that the
