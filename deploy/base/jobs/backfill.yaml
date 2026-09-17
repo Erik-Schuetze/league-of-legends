@@ -126,6 +126,18 @@ spec:
                       # A backfill that only reprocesses the archive must work
                       # without a key; one that re-fetches needs it.
                       optional: true
+                # A backfill is run by hand, which makes it the one place where a
+                # person is watching: with the deadline recorded
+                # (RIOT_API_KEY_EXPIRES_AT in the same Secret) the run stops with
+                # "the Riot API key expired at ..." instead of reporting a page
+                # of 401s as fetch failures. Optional, so nothing changes until
+                # an operator records a deadline.
+                - name: LOLSTATS_RIOT_API_KEY_EXPIRES_AT
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-riot
+                      key: RIOT_API_KEY_EXPIRES_AT
+                      optional: true
               resources:
                 # Deliberately larger than the worker: a manual backfill is a
                 # burst that someone is waiting on, and it is not running while

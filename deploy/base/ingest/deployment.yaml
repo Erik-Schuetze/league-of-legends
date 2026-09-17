@@ -87,6 +87,22 @@ spec:
                   # with no Riot key in the cluster. The worker reports the
                   # missing key and stays up instead of crash-looping.
                   optional: true
+            # The key is a development key, and Riot expires those every 24
+            # hours. Nothing running in the cluster can observe that deadline for
+            # itself - the only party that knows is the operator who rotated it -
+            # so when they write the deadline down (as RIOT_API_KEY_EXPIRES_AT
+            # in the same Secret, an RFC 3339 timestamp) the worker stops before
+            # spending the day's request budget on refused calls, logs how far
+            # past the deadline it is, and reports it on /readyz. Optional, so a
+            # Secret that has never recorded a deadline behaves exactly as
+            # before: the key's death is then discovered the way Riot reports it,
+            # as a 401 on the first call.
+            - name: LOLSTATS_RIOT_API_KEY_EXPIRES_AT
+              valueFrom:
+                secretKeyRef:
+                  name: lolstats-riot
+                  key: RIOT_API_KEY_EXPIRES_AT
+                  optional: true
           ports:
             - name: metrics
               containerPort: 9090

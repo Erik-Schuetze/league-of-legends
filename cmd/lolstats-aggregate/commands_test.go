@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/Erik-Schuetze/league-of-legends/internal/aggmodel"
 	"github.com/Erik-Schuetze/league-of-legends/internal/aggregate"
+	"github.com/Erik-Schuetze/league-of-legends/internal/config"
+	"github.com/Erik-Schuetze/league-of-legends/internal/obs"
 )
 
 // The binary is the only place the subcommands are wired to flags, so these
@@ -208,4 +211,42 @@ func TestUsageMentionsEverySubcommand(t *testing.T) {
 			t.Errorf("usage does not document the %s subcommand", sub)
 		}
 	}
+}
+
+// TestBuildRefusesToPublishFromAStalledCrawl covers the failure mode the archive
+// cannot show on its own: an expired key or a stopped crawler freezes the raw
+// tree without changing it, so every later build is a cheap success that
+// republishes the same cells under a new generated_at. The site then swaps a
+// dated snapshot for a freshly stamped copy of itself, which reads as "the
+// pipeline is alive".
+//
+// The guard is driven here through the environment method directly: the flag
+// layer around it is one DurationVar, and the part that can be wrong is which
+// way an unanswerable check fails.
+func TestBuildRefusesToPublishFromAStalledCrawl(t *testing.T) {
+	t.Run("no DSN is a developer build, not a failed one", func(t *testing.T) {
+		// A machine with no Postgres cannot check freshness at all. Refusing
+		// there would break `make` targets that only want the demo artifacts,
+		// so this half is a warning - the deployed posture always has a DSN.
+		env := environment{log: obs.NewLogger(config.Config{})}
+		if err := env.requireFreshCrawl(context.Background(), 26*time.Hour); err != nil {
+			t.Fatalf("requireFreshCrawl without a DSN = %v, want nil", err)
+		}
+	})
+
+	t.Run("a DSN that cannot answer fails closed", func(t *testing.T) {
+		// "The check could not run" must not degrade into "publish anyway":
+		// that is exactly the silent stale snapshot the guard exists for.
+		cfg := config.Config{}
+		cfg.Postgres.DSN = "postgres://nobody@127.0.0.1:1/nothing?sslmode=disable&connect_timeout=1"
+		cfg.Postgres.ConnTimeout = time.Second
+		env := environment{cfg: cfg, log: obs.NewLogger(cfg)}
+		err := env.requireFreshCrawl(context.Background(), 26*time.Hour)
+		if err == nil {
+			t.Fatal("requireFreshCrawl against an unreachable database returned nil")
+		}
+		if !strings.Contains(err.Error(), "checking crawl freshness") {
+			t.Errorf("error = %q, want it to name the freshness check", err)
+		}
+	})
 }

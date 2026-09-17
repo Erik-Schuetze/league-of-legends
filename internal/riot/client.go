@@ -58,10 +58,30 @@ type Options struct {
 	PlatformBaseURL string
 	RegionalBaseURL string
 
-	// Timeout covers the whole request including reading the body. A match
+	// Timeout bounds one HTTP round trip, including reading the body. A match
 	// summary is around 100 KB, so ten seconds is generous; a request that
 	// has not finished by then is a request that is not going to.
+	//
+	// It deliberately does not bound the whole call. Riot's Retry-After is an
+	// instruction not to send yet, not a slow round trip, and a call whose
+	// entire budget was ten seconds could never pay it: see RetryWaitBudget.
 	Timeout time.Duration
+
+	// RetryWaitBudget bounds the waiting one call may do on top of Timeout:
+	// Riot's own Retry-After, which is the number that actually arrives on a
+	// development key.
+	//
+	// The two clocks are different and conflating them was a real defect. A
+	// development key answers 429 with `Retry-After: 15-16s`, while the
+	// deployed per-call deadline is ten seconds, so every throttled call was
+	// released with "retry-after outlasts the call's own deadline", every row
+	// was requeued, and no pass ever converged. Sixty seconds clears the
+	// measured figure several times over and matches the crawler's own
+	// maxRateLimitPause. A Retry-After longer than this is Riot disciplining
+	// the key, and the call is released with the suspension attached so its
+	// caller can schedule the row past it instead of shortening the wait until
+	// the key is refused outright.
+	RetryWaitBudget time.Duration
 	// MaxAttempts counts the first try. It bounds 5xx retries, 429 waits and
 	// transport failures alike.
 	MaxAttempts int
@@ -97,6 +117,14 @@ const (
 	defaultUserAgent    = "lolstats-ingest/1.0 (+https://github.com/Erik-Schuetze/league-of-legends)"
 )
 
+// DefaultRetryWaitBudget is the exported form of the retry wait budget, so a
+// caller that owns the surrounding deadline - the crawl worker's job timeout -
+// can size itself against it instead of guessing. See Options.RetryWaitBudget.
+const DefaultRetryWaitBudget = 60 * time.Second
+
+// DefaultTimeout is the exported per-attempt deadline, for the same reason.
+const DefaultTimeout = defaultTimeout
+
 // Client is the Riot HTTP client. It satisfies contract.RiotClient through the
 // adapter in internal/crawl, which exists because internal/contract already
 // imports this package for the DTOs and could not be imported back.
@@ -125,6 +153,9 @@ func NewClient(opts Options) (*Client, error) {
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = defaultTimeout
+	}
+	if opts.RetryWaitBudget <= 0 {
+		opts.RetryWaitBudget = DefaultRetryWaitBudget
 	}
 	if opts.MaxAttempts <= 0 {
 		opts.MaxAttempts = defaultMaxAttempts
@@ -258,11 +289,22 @@ func (e endpoint) url() string {
 
 // do performs one API call, applying the limiter, the breaker, retries and the
 // body limit.
+//
+// Two deadlines are in play and they mean different things. Every HTTP round
+// trip is bounded by Timeout on its own; the deliberate waiting between
+// attempts - Riot's Retry-After, which is an instruction not to send yet - is
+// charged against RetryWaitBudget instead. The outer deadline below is only
+// their sum, so that a call can pay a 429 without either spending a job's whole
+// time budget on it or giving up on the wait entirely.
 func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 	requestURL := e.url()
 	parent := ctx
-	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout+c.opts.RetryWaitBudget)
 	defer cancel()
+
+	// paid is the deliberate waiting this call has already done. A Retry-After
+	// is only payable while adding it stays inside the budget.
+	var paid time.Duration
 
 	var lastErr error
 	for attempt := 1; attempt <= c.opts.MaxAttempts; attempt++ {
@@ -273,19 +315,29 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 		if !ok {
 			return nil, ErrNoAPIKey
 		}
-		if err := c.limiter.Wait(ctx); err != nil {
+		// One attempt gets one round trip's worth of time, not the whole call's
+		// budget: a per-call deadline on the HTTP request would let a stalled
+		// connection sit there for the entire retry budget.
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, c.opts.Timeout)
+		if err := c.limiter.Wait(attemptCtx); err != nil {
 			// The limiter holds the call until the next advertised slot. If
 			// that is further away than this call's deadline, the wait ends
 			// here rather than being paid for; the row is told which of the two
 			// deadlines expired so it can wait out the limiter instead of
 			// coming back into it.
+			cancelAttempt()
 			return nil, c.ownDeadline(parent, err, e.method)
 		}
 
-		body, status, header, err := c.attempt(ctx, requestURL, e.method, key)
+		body, status, header, err := c.attempt(attemptCtx, requestURL, e.method, key)
+		// Read the cause before cancelling: cancel() would overwrite it with
+		// context.Canceled and every transport failure would then be reported
+		// as an expired deadline.
+		cause := context.Cause(attemptCtx)
+		cancelAttempt()
 		if err != nil {
-			if ctxErr := context.Cause(ctx); ctxErr != nil {
-				return nil, c.ownDeadline(parent, ctxErr, e.method)
+			if cause != nil {
+				return nil, c.ownDeadline(parent, cause, e.method)
 			}
 			c.metrics.IncRiotRetry(e.method, "transport")
 			lastErr = err
@@ -310,36 +362,47 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 			// out the same 429 and then arrive together.
 			wait, suspended := c.rateLimitedWait(
 				ParseRetryAfter(header.Get(headerRetryAfter), c.opts.Clock.Now()),
-				c.backoff(attempt))
+				c.backoff(attempt),
+				c.opts.RetryWaitBudget-paid)
 			c.limiter.Penalize(wait)
 			c.metrics.IncRiotRetry(e.method, "429")
 			c.breaker.fail()
-			lastErr = &RateLimitedError{
+			limited := &RateLimitedError{
 				Method:     e.method,
 				Attempts:   attempt,
 				RetryAfter: wait,
 				Suspended:  suspended,
 			}
+			lastErr = limited
 			c.log.Warn("riot rate limited",
 				"method", e.method, "attempt", attempt, "retry_after", wait.String())
 			if suspended {
-				c.log.Warn("retry-after outlasts the call's own deadline; the call is released",
-					"method", e.method, "retry_after", wait.String(), "deadline", c.opts.Timeout.String())
+				// The wait is longer than a single call may spend. Sleeping
+				// until the call's own deadline and then reporting the deadline
+				// is what turned a 429 into a shutdown, and the deadline is
+				// only why the answer arrived early. The suspension is
+				// recorded on the limiter, which is what the caller reads to
+				// schedule the row past it, so the call ends here.
+				c.log.Warn("retry-after is longer than this call's retry wait budget; the call is released",
+					"method", e.method, "retry_after", wait.String(),
+					"budget", c.opts.RetryWaitBudget.String(), "already_waited", paid.String())
+				return nil, limited
 			}
 			if attempt == c.opts.MaxAttempts {
 				break
 			}
+			paid += wait
 			if err := c.sleep(ctx, wait); err != nil {
-				if suspended {
-					// Sleeping until the call's deadline and then reporting the
-					// deadline is what turned a 429 into a shutdown: the worker
-					// logged "job released before shutdown" for rows released
-					// ten seconds apart in a run where nothing was shutting
-					// down. The 429 is the answer; the expired deadline is only
-					// why the answer arrived early.
-					return nil, lastErr
+				if context.Cause(parent) != nil {
+					// The run itself is going away: the caller has to hear
+					// that, because it decides between handing the row back
+					// and retrying it on a schedule.
+					return nil, c.ownDeadline(parent, err, e.method)
 				}
-				return nil, err
+				// This call ran out of budget while sleeping. The 429 is
+				// still the answer, and it still carries the suspension.
+				limited.Suspended = true
+				return nil, limited
 			}
 			continue
 
@@ -372,7 +435,7 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 	}
 	var limited *RateLimitedError
 	if errors.As(lastErr, &limited) && !limited.Suspended && ctx.Err() != nil {
-		// The deadline expired while this call was still waiting out a
+		// The call's budget expired while this call was still waiting out a
 		// Retry-After. The sleep returns the context's error rather than the
 		// deadline itself, so the mark is made here as well, where every exit
 		// from the loop passes.
@@ -381,20 +444,21 @@ func (c *Client) do(ctx context.Context, e endpoint) ([]byte, error) {
 	return nil, lastErr
 }
 
-// rateLimitedWait decides how long to wait after a 429, and whether that wait is
-// longer than this call is allowed to take.
+// rateLimitedWait decides how long to wait after a 429, and whether that wait
+// fits in what is left of the call's retry wait budget.
 //
-// Riot's Retry-After is not capped: a long one is how a key is disciplined, and
-// the client's job is to honour it (the limiter caps what it will hold) rather
-// than to shorten it until the key is refused outright. The per-call deadline is
-// ten seconds, so a wait past it cannot be slept off inside this call: the
-// caller is told the suspension instead, and it schedules the retry past it.
-func (c *Client) rateLimitedWait(after, fallback time.Duration) (time.Duration, bool) {
+// Riot's Retry-After is not capped here: a long one is how a key is
+// disciplined, and the client's job is to report it (the limiter caps what it
+// will hold, and the crawler caps what it will pause for) rather than to shorten
+// it until the key is refused outright. What is capped is how long *this* call
+// will sit on it: past the budget the wait cannot be paid here, so the call is
+// released with the suspension attached and the caller schedules around it.
+func (c *Client) rateLimitedWait(after, fallback, remaining time.Duration) (time.Duration, bool) {
 	wait := after
 	if wait <= 0 {
 		wait = fallback
 	}
-	return wait, wait > c.opts.Timeout
+	return wait, wait > remaining
 }
 
 // ownDeadline decides what to return when a call failed for a reason one of the
