@@ -54,16 +54,31 @@ deploy/secret.yaml
 
 # `web/` is the retired Astro tree, and it is still built in order to be
 # measured: `npm install` runs inside it and the serve-time gates read its
-# `dist/`. None of those three outputs is ever committed. Measured 2026-09-17:
-# they left **10,862 untracked files** in the working tree while lane M3 was
-# editing the tree, i.e. one `git add -A` away from the repository — the same
-# class of trap as the `.zz-*` and gitlink incidents above, and the reason this
-# rule is written by pattern rather than left to the lane that creates the files.
-# The root `/dist/` rule earlier in this file does NOT cover `web/dist`: it is
-# anchored to the repository root.
+# `dist/`. None of those outputs is ever committed.
+#
+# These four rules are RESTORED, not new. They lived at `.gitignore:36-40` under
+# a `# Web` heading until commit `1d670fe` ("move the Astro tree's data out from
+# under web/") deleted them for a directory it had not deleted yet — `web/` still
+# holds 82 tracked files and is the tree lane M3 is still working in, so `web/`
+# is exactly where `npm install` and `astro build` still run. Measured
+# consequence, with the rules gone: **10,862 untracked files** in the working
+# tree (`web/node_modules/`, `web/dist/`, `web/.astro/`), one `git add -A` away
+# from being committed as project history — the same class of trap as the `.zz-*`
+# and nested-worktree-gitlink incidents above. Restored in `5524545` and
+# `web/.vercel/` here, so that `git status` is a usable signal again while the
+# tree is being dismantled.
+#
+# Keep them even after `web/` is gone: a rule for a deleted directory is a
+# harmless no-op, whereas its absence is a live trap the moment anything
+# recreates the path. The lesson is in the sequencing: an ignore rule may only be
+# retired *with* the tree it protects, never before it.
+#
+# Note the root `/dist/` rule earlier in this file does NOT cover `web/dist`: it
+# is anchored to the repository root.
 /web/node_modules/
 /web/dist/
 /web/.astro/
+/web/.vercel/
 
 # Go
 *.test
