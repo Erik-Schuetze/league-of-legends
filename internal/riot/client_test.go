@@ -1,11 +1,13 @@
 package riot
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -618,5 +620,70 @@ func TestKeyProviderAgeGrowsAndResetsOnChange(t *testing.T) {
 	}
 	if age := keys.Age(); age != 0 {
 		t.Fatalf("age after rotation = %s, want 0", age)
+	}
+}
+
+// The retry path has to say which 429s are only being waited out and which one
+// ended the call. The measured defect this pins: a full hour of ingest output
+// that was nothing but WARN "riot rate limited", one line a minute, every one
+// of them "attempt":1. Every shed fetch logged at WARN, including the ones the
+// client was about to wait a second for and retry into a success, so a crawler
+// running correctly at its key's ceiling read exactly like the permanent stall
+// it was mistaken for. The bumps are still counted - see
+// TestClientRecordsMetrics - because the 429 share is what the rate-limit
+// alert reads; only the bump that ends the call is the operator's warning.
+func TestAnAbsorbed429IsNotAWarningAndATerminalOneIs(t *testing.T) {
+	clock := NewFakeClock(testStart)
+
+	var buf bytes.Buffer
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		setRateHeaders(w, "20:1,100:120", "1:1,1:120", "20:1,100:120", "2:1,2:120")
+		if requests.Add(1) == 1 {
+			w.Header().Set(headerRetryAfter, "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeBody(w, `{"status":{"message":"rate limited"}}`)
+			return
+		}
+		writeBody(w, `["EUW1_0000000000"]`)
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv, clock, testKeys(), func(o *Options) {
+		o.Logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	})
+	if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p"}); err != nil {
+		t.Fatalf("MatchIDs: %v", err)
+	}
+	absorbed := buf.String()
+	if strings.Contains(absorbed, `"level":"WARN"`) {
+		t.Fatalf("a 429 the call went on to succeed past was logged as a warning: %s", absorbed)
+	}
+	if !strings.Contains(absorbed, `"msg":"riot rate limited; waiting out Riot's retry-after"`) {
+		t.Fatalf("the absorbed 429 left no record of itself: %s", absorbed)
+	}
+
+	// The same 429 on the call's last attempt is the warning: that call did not
+	// fetch, and the run is the thing that has to hear about it.
+	buf.Reset()
+	always := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		setRateHeaders(w, "20:1,100:120", "1:1,1:120", "20:1,100:120", "2:1,2:120")
+		w.Header().Set(headerRetryAfter, "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		writeBody(w, `{"status":{"message":"rate limited"}}`)
+	}))
+	defer always.Close()
+
+	exhausted := newTestClient(t, always, clock, testKeys(), func(o *Options) {
+		o.MaxAttempts = 2
+		o.Logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	})
+	if _, err := exhausted.MatchIDs(context.Background(), MatchListQuery{PUUID: "p"}); err == nil {
+		t.Fatal("every attempt was refused and the call returned no error")
+	}
+	terminal := buf.String()
+	if !strings.Contains(terminal, `"level":"WARN"`) ||
+		!strings.Contains(terminal, `"msg":"riot rate limited"`) {
+		t.Fatalf("the 429 that ended the call was not reported as a warning: %s", terminal)
 	}
 }

@@ -1,12 +1,15 @@
 package crawl
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1038,4 +1041,57 @@ func TestReportToleratesAStoreWithoutTheReportingSurface(t *testing.T) {
 	h.worker.reporter = nil
 
 	h.worker.report(context.Background(), true)
+}
+
+// A healthy crawl has to be readable from the log, not only from Prometheus.
+// The measured defect this pins: a full hour of ingest output that was 100%
+// WARN "riot rate limited" - one line a minute, every one of them attempt 1 -
+// on a crawler that was in fact fetching about forty-four matches a minute.
+// Nothing in that hour said the loop was alive, so an hour of healthy
+// throttling and an hour of genuine stall were the same bytes, which is the
+// silent staleness the pipeline is required to report instead of hiding. The
+// report interval's line names the numbers that freeze when the crawl stops,
+// and it is promoted to a warning once they have.
+func TestReportHeartbeatMakesAHealthyCrawlReadableAndAStalledOneLoud(t *testing.T) {
+	var buf bytes.Buffer
+	h := newHarness(t, nil)
+	h.worker.deps.Log = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	h.serveFixture(t, "EUW1_0000000000")
+	h.store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_0000000000"})
+	if _, err := h.worker.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	h.worker.report(context.Background(), true)
+	healthy := buf.String()
+	if got := strings.Count(healthy, "\n"); got != 1 {
+		t.Fatalf("a healthy crawl wrote %d report lines, want 1: %s", got, healthy)
+	}
+	for _, want := range []string{
+		`"level":"INFO"`,
+		`"msg":"crawl pipeline status"`,
+		`"matches_retained":1`,
+		`"staleness":"0s"`,
+	} {
+		if !strings.Contains(healthy, want) {
+			t.Fatalf("the status line does not carry %s: %s", want, healthy)
+		}
+	}
+
+	// The same line, once the newest fetch is older than the staleness alert
+	// holds for, is the warning: the counter and the age on it are the only
+	// things that move when the queue empties and the frontier stops
+	// yielding matches.
+	buf.Reset()
+	h.clock.Advance(StaleWarnAge + time.Minute)
+	h.worker.report(context.Background(), true)
+	stalled := buf.String()
+	if got := strings.Count(stalled, "\n"); got != 1 {
+		t.Fatalf("a stalled crawl wrote %d report lines, want 1: %s", got, stalled)
+	}
+	for _, want := range []string{`"level":"WARN"`, "crawl is not fetching", `"staleness":"1h1m0s"`} {
+		if !strings.Contains(stalled, want) {
+			t.Fatalf("a stalled crawl was not reported as one (%s missing): %s", want, stalled)
+		}
+	}
 }
