@@ -215,7 +215,13 @@ real filter bar must pass, so a future tightening cannot quietly reject the page
 a reader receives. The gate is run in CI
 (`.github/workflows/docker-build.yml`) plain, over the served corpus, and with
 the controls, so a future weakening of either rule - or a control that silently
-stops planting - fails the build.
+stops planting - fails the build. The same `make` targets also run as the whole
+of `.github/workflows/gates.yml` (`Launch gates`), because in the build workflow
+they sit after the Go test step: on 2026-09-17 an unrelated parity failure meant
+the `verify` job stopped before any of them ran, so the run showed nothing about
+the compliance gate either. A launch gate whose result cannot be read while some
+other check is red is not evidence, so the two signals are now independent while
+still being one definition per gate.
 
 ## Amendment 2: the served corpus, and what "interactive" actually means
 
@@ -661,6 +667,29 @@ successes is not a register.
    whichever way that question is answered, but it is this workstream's
    interpretation rather than a decision the product owner has confirmed. Until
    they do, the preview page is a position, not an approval.
+7. **The render-parity reference is out of step with the served design layer -
+   open, and owned by the design lanes.** `internal/webtier/parity_test.go`
+   compares the tier's bytes with `web/dist`, and the served sheet on `main` no
+   longer matches it: `internal/webtier/assets/astro/JsonLd.BEq7AnVK.css` says
+   `--surface:#f1eae0` (and emits `.ds-panel{background-color:var(--surface)}`)
+   where `web/dist/_astro/JsonLd.BEq7AnVK.css` says `--bg-light:#f1eae0`, and
+   `shell.tmpl` now appends the frozen `assets/css/*` layer after it. Every route
+   therefore mismatches at offset ~1700 and the `Test` step fails on `main` in
+   runs [35266202608](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266202608),
+   [35266466674](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266466674),
+   [35266653629](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35266653629),
+   [35267893161](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35267893161)
+   and [35269826778](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35269826778)
+   - identical at `8524dfe` and at the gates commit `0a247c6`, and reproducible
+   locally with `make test-parity` (exit 2). This is the gate working, not a
+   flake: it is exactly the class of change the parity tests exist to catch, and
+   it was invisible while they ran before `npm run build` and skipped. The
+   resolution is a decision this register does not own - either the Astro
+   reference moves with the design layer, or the reference is re-frozen against
+   the served output as part of retiring it (`docs/contracts.md` section 5) - but
+   the gate is fail-closed in both directions, so nothing can silently drop the
+   comparison. Until it is resolved, the `verify` job stops at `Test` and the
+   compliance steps after it do not run in CI.
 
 ## Non-endorsement disclaimer text
 
@@ -756,3 +785,15 @@ a compliance change, not a copy change.
   path - plus the opposite direction, the tier's own filter bar, which must pass.
   `make compliance-negative-control` and `make compliance-gnu` (now including the
   captured served corpus) both run in CI.
+- **The launch gates moved into their own workflow, on 2026-09-17.**
+  `.github/workflows/gates.yml` (`Launch gates`) runs `make verify-serving-local`,
+  `make compliance`, `make compliance-negative-control`, `make compliance-served`
+  and `make compliance-gnu` as a job of its own. The reason is attribution, not
+  convenience: in `docker-build.yml` these steps run after the Go test step, and a
+  red `Test` step - which is what happened on 2026-09-17, for a design-layer
+  parity mismatch owned by another lane - stops the job before any compliance
+  result is produced. `docker-build.yml` still carries every step, because its
+  `verify` job is what stands between a commit and a published image; the
+  workflow file's header records this. The immediate consequence is that the
+  compliance evidence for that date is readable even while the parity gate is
+  red.
