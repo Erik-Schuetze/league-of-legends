@@ -22,11 +22,34 @@ short. "Breaking" means something that used to work no longer does.
 - `sql/migrations/0001_init.up.sql` - the six control-plane tables.
 - `cmd/lolstats-ingest` and `cmd/lolstats-aggregate` - compiling subcommand
   skeletons.
-- `cmd/gen-types` - generates `web/src/types` from the Go structs.
-- `web/` - Astro project, static output, placeholder landing page.
+- `cmd/gen-types` - generates `schema/agg.d.ts` and `schema/agg.schema.json`
+  from the Go structs.
 - `docs/architecture.md`, `docs/data-sources.md`, `docs/compliance.md`.
 - `docs/decisions/ADR-001` to `ADR-004`.
 - `fixtures/` - hand-authored sample payloads with their provenance.
+
+### Removed
+
+- `web/**` - the Astro tree (218 files), deleted on 2026-09-18. Production has
+  served the Go SSR tier since the cutover: `lolstats-go-web` renders every route
+  from the published `agg/v1` snapshot, and the inner Caddy deployment, the
+  `site-build` CronJob and the `static-sync` CronJob were deleted from the
+  cluster. The published tree lives on NFS and is untouched by this change; the
+  tree in this repository was the *source* of a build nothing ran any more, and
+  it stayed load-bearing only for CI. Everything it was still needed for was
+  moved or retargeted as part of the same change: `web/src/fixtures` ->
+  `fixtures/site`, `web/src/data` -> `projection` and `web/src/types` -> `schema`
+  moved in the commits ahead of this entry, the compliance gate's reference
+  corpus -> the pages a running tier serves (`make served-pages`), the approved
+  wording -> `internal/webtier/brand.go` and `site.go` as the source of truth,
+  and the workflows and `Makefile` lost every Node, npm and `web/dist` step. The
+  retarget commits landed directly after the deletion rather than before it, so
+  CI was red for that interval; both commits are recorded on 2026-09-18. No Node
+  toolchain is required to build, test or publish this repository any more.
+- `make web-install`, `web-build`, `web-deps` and `web-dist`. The gate's corpus
+  is captured from a running tier by `make served-pages`; `make compliance`
+  depends on it. `make compliance-served` is kept as an alias of `make
+  compliance`, because there is one corpus now instead of two.
 
 ### Fixed
 

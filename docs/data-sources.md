@@ -199,14 +199,15 @@ other than `ddragon.leagueoflegends.com/cdn/` appears in the output.
   `docs/contracts.md` section 1.
 - **No MMR, ELO or skill-rating calculator.** Not in v1 and not on the roadmap.
   It is a hard Riot prohibition, and `scripts/compliance-check.sh` check 1 fails
-  the gate if one appears in Go, SQL, TS, Astro or JSON.
+  the gate if one appears in Go, SQL, TS, JSON, HTML or CSS.
 - **The free tier is free and ungated.** No account, no paywall, no data
   brokerage.
-- **Riot does not endorse this project.** The non-endorsement notice is rendered
-  by `Footer.astro` on every one of the 1063 built pages, and it is the frozen
-  `NON_ENDORSEMENT_TEXT` sentence itself rather than a paraphrase of it, because
-  the footer imports that constant from `web/src/lib/legal.ts`. The same sentence
-  is also rendered verbatim in the body of all four compliance pages. See
+- **Riot does not endorse this project.** The non-endorsement notice is composed
+  into the footer of every served page, and it is the approved sentence itself
+  rather than a paraphrase of it, because the footer and the legal pages both
+  render the `NonEndorsementText` constant in `internal/webtier/brand.go` - the
+  one copy of the wording, and the string the compliance gate reads. Check 6
+  fails on a page that states the notice in any other wording. See
   `docs/compliance.md` for the exact coverage rather than a summary of it.
 - **The data state is stated on the page.** Every page discloses its patch,
   region, queue, bracket and the aggregate manifest's `source` - `demo`,
