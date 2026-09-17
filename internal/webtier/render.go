@@ -214,6 +214,10 @@ type navView struct {
 	TierLinks    []navLink
 	MatchupLinks []navLink
 	Patch        string
+	// ExploreCurrent marks the Data explorer entry. It is derived from the
+	// canonical path as well as the active section because the data-explorer
+	// view does not set Active.
+	ExploreCurrent bool
 }
 
 type footerKV struct {
@@ -300,6 +304,10 @@ func bannerFor(site *Site, siteURL string, page *Page) bannerView {
 	}
 }
 
+// explorePath is the frozen URL of the data-explorer page; the nav links to it
+// before the route itself lands.
+const explorePath = "/explore"
+
 // navFor reproduces components/Nav.astro, including the rule that a link is
 // current when the active route matches with or without its trailing slash.
 func navFor(site *Site, active string, canonicalPath string, patch string) navView {
@@ -311,6 +319,7 @@ func navFor(site *Site, active string, canonicalPath string, patch string) navVi
 		href = "/matchups/" + RoleSlugString(role)
 		view.MatchupLinks = append(view.MatchupLinks, navLink{Label: RoleLabel(role), Href: href, Current: current(href)})
 	}
+	view.ExploreCurrent = current(explorePath) || isCurrent(canonicalPath, explorePath)
 	return view
 }
 
