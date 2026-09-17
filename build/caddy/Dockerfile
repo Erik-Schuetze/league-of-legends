@@ -38,15 +38,41 @@ ARG STORAGES_VERSION=v0.0.18
 ENV GOTOOLCHAIN=auto
 
 # --output is explicit because the default is the working directory, which is
-# not part of the image's contract with this file.
-RUN xcaddy build \
-      --output /usr/bin/caddy \
+# not part of the image's contract with this file. The destination is /out, not
+# the /usr/bin/caddy this builder image already ships, and that is a correctness
+# requirement rather than a layout preference: the builder's own caddy carries
+# `cap_net_bind_service=ep` on the file, an in-place build keeps that xattr, and
+# the COPY below would then carry it into the runtime stage. See the COPY.
+RUN mkdir -p /out \
+ && xcaddy build \
+      --output /out/caddy \
       --with github.com/caddyserver/cache-handler@${CACHE_HANDLER_VERSION} \
       --with github.com/darkweak/storages/otter/caddy@${STORAGES_VERSION}
 
 FROM caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
 
-COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+# The binary must arrive without file capabilities. Linux refuses to execve a
+# capability-tagged file when the caller's capability bounding set cannot carry
+# that capability, so a container that drops every capability - which is what
+# the namespace's restricted profile and deploy/base/web/deployment.yaml both
+# require - dies at startup with
+#
+#   exec /usr/bin/caddy: operation not permitted
+#
+# rather than ever running Caddy. The upstream caddy image tags its binary this
+# way so a root process can bind :80; this image never does - the Service maps
+# port 80 onto 8080 - so the tag is pure liability here. Taking the binary from
+# /out, which was created by xcaddy rather than by the base image, is what
+# leaves it off (verified: a COPY of a non-tagged source does not inherit the
+# destination's xattrs), and the assertion below fails the build if that ever
+# stops being true, because the alternative is discovering it as a crashloop.
+COPY --from=builder /out/caddy /usr/bin/caddy
+
+# getcap exits 0 and prints nothing for a file with no capabilities; this is a
+# read-only check, so unlike `setcap -r` it needs no capability in the build
+# sandbox (BuildKit's sandbox has no CAP_SETFCAP, so `setcap -r` cannot be used
+# here at all).
+RUN [ -z "$(getcap /usr/bin/caddy)" ]
 
 # The upstream image runs as root and owns /data and /config. The namespace
 # enforces the restricted Pod Security profile, which forbids that, so the
