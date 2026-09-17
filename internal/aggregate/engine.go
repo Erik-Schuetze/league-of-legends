@@ -54,19 +54,25 @@ const DuckDBBinEnv = "LOLSTATS_DUCKDB_BIN"
 // bounded too.
 const (
 	// DefaultDuckDBMemoryLimit is the ceiling applied when configuration names
-	// none: a third of the aggregate Job's 3 GiB pod limit. The remaining two
-	// thirds are the Go runtime's heap (the Job sets GOMEMLIMIT to 2 GiB), the
-	// page cache and DuckDB's own non-buffer allocations - a pass whose limit
-	// equals the pod limit is still killed. The fraction is not folklore: it is
-	// asserted against the manifest by
+	// none: two thirds of the aggregate Job's 3 GiB pod limit. The remaining
+	// third is everything the buffer manager does not count - the Go runtime's
+	// heap, the page cache and DuckDB's own non-buffer allocations - and a limit
+	// equal to the pod limit is still an OOM kill.
+	//
+	// The fraction is measured, not folklore, and so is the reason it is not a
+	// third. Over the live archive the extraction's heaviest statement - one
+	// batch's features COPY, whose projection carries runeStyleSQL's rune-style
+	// list - fails at a 1 GiB limit with "Out of Memory Error: failed to allocate
+	// data of size 2.0 MiB (1023.7 MiB/1.0 GiB used)" and completes at 1.5 GiB;
+	// the whole 26-batch extract (81 COPY statements) completes at 1.5 GiB and at
+	// 2 GiB inside this pod's 3 GiB limit. Batching by parts is what bounds that
+	// statement; this limit is what the bound is measured against, so the two are
+	// chosen together.
+	//
+	// It is asserted against the manifest by
 	// TestDuckDBDefaultsFitInsideThePodLimit, so lowering the pod limit without
 	// lowering this default fails the suite.
-	//
-	// The fraction is generous on purpose. The buffer manager is not the whole
-	// process - measured engine RSS is 2.2 GiB for the demo-scale build with this
-	// limit in force - so the ceiling has to leave the pod room for everything
-	// DuckDB does not count, not just for the Go reader.
-	DefaultDuckDBMemoryLimit = "1GiB"
+	DefaultDuckDBMemoryLimit = "2GiB"
 
 	// DefaultDuckDBThreads matches the Job's 2-CPU limit. DuckDB sizes its
 	// default pool from the host's core count - 10 on the measured node, so ten
@@ -228,12 +234,23 @@ func (s DuckDBSettings) resolve() (DuckDBSettings, error) {
 // Every value is a quoted literal or an integer, so nothing an operator can put
 // in the environment - a stray quote, a semicolon - can become a second
 // statement.
+//
+// preserve_insertion_order is off because the build never publishes the order of
+// the rows it reads: every statement that reads a spill either aggregates it or
+// sorts its result explicitly, and the one place order is load-bearing - the
+// de-duplication window in envelopeSQL - orders itself with ORDER BY part,
+// part_row rather than relying on the scan order. What the setting buys is that
+// DuckDB is allowed to emit rows as they arrive instead of materialising an
+// operator's whole output to keep the order it came in, which is memory the
+// buffer manager would otherwise have to hold; DuckDB's own out-of-memory
+// message names it as the first knob to turn.
 func (s DuckDBSettings) preamble() string {
 	return strings.Join([]string{
 		"SET memory_limit = " + quoteLiteral(s.MemoryLimit) + ";",
 		fmt.Sprintf("SET threads = %d;", s.Threads),
 		"SET temp_directory = " + quoteLiteral(s.TempDir) + ";",
 		"SET max_temp_directory_size = " + quoteLiteral(s.MaxTempSize) + ";",
+		"SET preserve_insertion_order = false;",
 	}, "\n") + "\n"
 }
 

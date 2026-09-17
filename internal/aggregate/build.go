@@ -323,8 +323,12 @@ type buildState struct {
 	window       aggmodel.Window
 	patch        string
 	stagedPaths  []string
+	envelopePath string
+	matchesDir   string
 	matchesPath  string
+	featuresDir  string
 	featuresPath string
+	bansDir      string
 	bansPath     string
 
 	archiveStats archiveStatsRow
@@ -360,6 +364,22 @@ func newBuildState(opts BuildOptions, generatedAt time.Time, staging string) (*b
 	if err != nil {
 		return nil, err
 	}
+	// The payload spill, the features and the bans are one file per batch of
+	// parts (see extract): DuckDB will not create the target directory of a
+	// COPY, and a glob over an empty directory is an error rather than an empty
+	// relation.
+	matchesDir, err := makeSpillDir(scratch, "matches")
+	if err != nil {
+		return nil, err
+	}
+	featuresDir, err := makeSpillDir(scratch, "features")
+	if err != nil {
+		return nil, err
+	}
+	bansDir, err := makeSpillDir(scratch, "bans")
+	if err != nil {
+		return nil, err
+	}
 	// The staged paths are not needed again: the spill statements name them.
 	return &buildState{
 		opts:        opts,
@@ -372,9 +392,22 @@ func newBuildState(opts BuildOptions, generatedAt time.Time, staging string) (*b
 		// overrides this, which is the one and only way a non-Riot source can
 		// appear in an artifact.
 		source:       aggmodel.SourceRiotMatchV5,
-		matchesPath:  filepath.Join(scratch, "matches.parquet"),
-		featuresPath: filepath.Join(scratch, "features.parquet"),
-		bansPath:     filepath.Join(scratch, "bans.parquet"),
+		envelopePath: filepath.Join(scratch, "envelope.parquet"),
+		matchesDir:   matchesDir,
+		matchesPath:  filepath.Join(matchesDir, "*.parquet"),
+		featuresDir:  featuresDir,
+		featuresPath: filepath.Join(featuresDir, "*.parquet"),
+		bansDir:      bansDir,
+		bansPath:     filepath.Join(bansDir, "*.parquet"),
 		stagedPaths:  staged,
 	}, nil
+}
+
+// makeSpillDir creates one phase's spill directory under the build scratch.
+func makeSpillDir(scratch, name string) (string, error) {
+	dir := filepath.Join(scratch, name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create the %s spill directory: %w", name, err)
+	}
+	return dir, nil
 }

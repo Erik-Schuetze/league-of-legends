@@ -52,6 +52,13 @@ spec:
             fsGroup: 65532
             seccompProfile:
               type: RuntimeDefault
+          # No database gate here, unlike maintain, aggregate, backfill,
+          # discover-seeds and backup-postgres. This job runs
+          # `runStaticSync` (internal/crawl/static.go), which reads the public
+          # Data Dragon CDN and writes the RAW archive; it opens no Postgres
+          # connection, so the cold-start dial race those Jobs gate against
+          # cannot happen to it, and an initContainer would only delay the run.
+          # The gate exists where a connection is opened, not on every Job.
           containers:
             - name: static-sync
               # TODO(plan section 10, Phase 1): pin to a digest once a tag exists.

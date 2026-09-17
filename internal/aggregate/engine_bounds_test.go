@@ -141,12 +141,21 @@ func TestDuckDBDefaultsFitInsideThePodLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse DefaultDuckDBMemoryLimit %q: %v", DefaultDuckDBMemoryLimit, err)
 	}
-	// Half, not "just under": the engine is one of several claimants on the
-	// cgroup, and the largest of the others (the Go heap) is not bounded by the
-	// engine's limit at all.
-	if defaultBytes > podBytes/2 {
-		t.Errorf("default DuckDB memory limit %d bytes is more than half the pod limit %d bytes; "+
+	// Two thirds, not "just under": the engine is one of several claimants on
+	// the cgroup, and the largest of the others (the Go heap) is not bounded by
+	// the engine's limit at all. The measured need sits below this bound - one
+	// batch's features COPY fails at 1 GiB and completes at 1.5 GiB, and the
+	// whole extraction completes at 2 GiB - so a default above two thirds is a
+	// statement about the pod's limit being wrong, and one equal to the pod
+	// limit is an OOM kill.
+	if 3*defaultBytes > 2*podBytes {
+		t.Errorf("default DuckDB memory limit %d bytes is more than two thirds of the pod limit %d bytes; "+
 			"a statement over the limit would still be an OOM kill", defaultBytes, podBytes)
+	}
+	if remaining := podBytes - defaultBytes; remaining < 1<<30 {
+		t.Errorf("the default DuckDB memory limit %d bytes leaves %d bytes of the pod's %d byte limit for "+
+			"the Go runtime, the page cache and DuckDB's non-buffer allocations; keep at least 1 GiB",
+			defaultBytes, remaining, podBytes)
 	}
 	if DefaultDuckDBThreads > cpus {
 		t.Errorf("default DuckDB threads %d exceeds the pod's %d CPUs", DefaultDuckDBThreads, cpus)

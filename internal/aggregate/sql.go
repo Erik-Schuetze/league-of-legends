@@ -58,13 +58,28 @@ func participantRoleSQL(teamPosition, individualPosition string) string {
 		"ELSE NULL END"
 }
 
-// matchesSQL loads the raw match parquet parts and normalises the envelope
-// fields every later statement needs, plus the payload for the two statements
-// that have to unnest nested arrays.
+// envelopeSQL reads the raw match parquet parts, normalises the envelope fields
+// every later statement needs, and de-duplicates the result. It does not carry
+// the payload - it carries a boolean saying whether the payload is JSON at all.
 //
-// The archive is read exactly once, into a parquet spill of its own: the raw
-// archive is immutable and in production lives in object storage, so each later
-// statement reads the spill rather than the archive.
+// It is the first half of the spill, split from payloadSQL because the two
+// halves have to be two statements: evaluating a JSON function on a payload row
+// while *also* passing that payload through is the one shape the engine cannot
+// afford inside the Job's memory budget. Measured on the real archive (154
+// parts, 268 MB) at the configured 1 GiB limit, one statement that extracts the
+// five envelope fields *and* projects the payload dies with "Out of Memory
+// Error" at 1023.9 MiB of the 1.0 GiB limit, and so does a keys-file variant of
+// it that still calls json_valid beside the payload; each half on its own
+// completes: the JSON work with the payload dropped from its output, and the
+// payload carried through a join against the keys with no JSON call of its own.
+// Splitting them is therefore not a style choice, it is what makes the build
+// fit. This is why the validity flag is computed here, where the payload is
+// already being parsed, and consumed in payloadSQL, which never parses it.
+//
+// Splitting is also what keeps the de-duplication correct rather than merely
+// affordable. The keys are collapsed here, over ~3 k keys, so the second
+// statement can be a plain join against a relation that is unique on
+// (part, part_row) and produce exactly one row per match.
 //
 // One row per match, not one row per archive record. The archive is append-only
 // parquet with no key, so the same match can be written to it twice - a re-walk
@@ -94,10 +109,11 @@ func participantRoleSQL(teamPosition, individualPosition string) string {
 // be read keeps a partition key of its own (its part and row number), so a row
 // the gate has to count as malformed is never collapsed into another row.
 //
-// A payload that is not valid JSON becomes NULL here instead of failing the
-// statement, so the build can count it and fail closed with a precise message
-// rather than with a DuckDB parse error. A truncated or corrupted payload is
-// exactly the input the fail-closed test feeds in.
+// A payload that is not valid JSON yields NULL envelope fields and a false
+// payload_valid here, and therefore a NULL payload in the second statement,
+// instead of failing either one, so the build can count it and fail closed with
+// a precise message rather than with a DuckDB parse error. A truncated or
+// corrupted payload is exactly the input the fail-closed test feeds in.
 //
 // Every extraction is guarded, not just the payload column. DuckDB's
 // json_extract and json_extract_string fail the entire statement on a payload
@@ -106,7 +122,7 @@ func participantRoleSQL(teamPosition, individualPosition string) string {
 // stats would never be counted, and the audit row would lose its reason. A
 // guarded extraction yields NULL envelope fields instead, which is the row the
 // gate is built to count and refuse.
-func matchesSQL(parts []string) string {
+func envelopeSQL(parts []string) string {
 	guarded := func(expression string) string {
 		return "CASE WHEN json_valid(payload) THEN " + expression + " END"
 	}
@@ -116,34 +132,76 @@ func matchesSQL(parts []string) string {
 	number := func(path, kind string) string {
 		return "CAST(" + guarded("json_extract(payload, "+quoteLiteral(path)+")") + " AS " + kind + ")"
 	}
-	return fmt.Sprintf(`WITH archive AS (
+	return fmt.Sprintf(`SELECT
+  part,
+  part_row,
+  match_id,
+  game_version,
+  platform_id,
+  queue_id,
+  game_creation_ms,
+  payload_valid
+FROM (
   SELECT filename AS part,
          file_row_number AS part_row,
-         CAST(payload AS VARCHAR) AS payload
+         %s AS match_id,
+         %s AS game_version,
+         %s AS platform_id,
+         %s AS queue_id,
+         %s AS game_creation_ms,
+         json_valid(payload) AS payload_valid
   FROM read_parquet(%s, union_by_name = true, filename = true, file_row_number = true)
-), keyed AS (
-  SELECT part, part_row, payload,
-         %s AS match_id
-  FROM archive
-)
-SELECT
-  match_id,
-  %s AS game_version,
-  %s AS platform_id,
-  %s AS queue_id,
-  %s AS game_creation_ms,
-  %s AS payload
-FROM keyed
+) extracted
 QUALIFY ROW_NUMBER() OVER (
   PARTITION BY COALESCE(match_id, part || '#' || CAST(part_row AS VARCHAR))
   ORDER BY part, part_row) = 1`,
-		fileList(parts),
 		text("$.metadata.matchId"),
 		text("$.info.gameVersion"),
 		text("$.info.platformId"),
 		number("$.info.queueId", "INTEGER"),
 		number("$.info.gameCreation", "BIGINT"),
-		guarded("CAST(payload AS VARCHAR)"))
+		fileList(parts))
+}
+
+// payloadSQL is the second half of the spill: the payload of every match
+// envelopeSQL kept, with the envelope fields joined back on.
+//
+// The join is against the spilled keys rather than a second extraction, so this
+// statement evaluates no JSON path at all: the archive is re-read for the
+// payload column and the ~3 k keys are the join's build side, which is the
+// shape the measurement above showed to fit where the single-statement version
+// did not.
+//
+// Whether a payload may be carried is decided by the `payload_valid` flag
+// envelopeSQL spilled, not by a second `json_valid` here. That is not a
+// micro-optimisation: `json_valid` builds a JSON document from the 1.4 MB
+// payload of every match, and a statement that both parses the payload and
+// carries it out is the one shape that exhausted the 1 GiB engine limit even
+// after the spill was split - measured, at 1023.9 MiB of the 1.0 GiB limit, in
+// both the single-statement original and a keys-file-plus-join variant. Parsing
+// the payload to a boolean in the keys-only statement (which discards the
+// payload) and passing the payload through unparsed in this one fits, because
+// neither half does both at once.
+//
+// The flag keeps the semantics the single-statement version had: a payload that
+// is not valid JSON is stored as NULL here, so the unnesting statements see a
+// row they can filter on `payload IS NOT NULL` instead of a row that fails
+// their own json_extract with a parse error before the gate that is meant to
+// report it has had a chance to run.
+func payloadSQL(envelopePath string, parts []string) string {
+	return fmt.Sprintf(`SELECT
+  e.match_id,
+  e.game_version,
+  e.platform_id,
+  e.queue_id,
+  e.game_creation_ms,
+  CASE WHEN e.payload_valid THEN CAST(a.payload AS VARCHAR) END AS payload
+FROM (
+  SELECT filename, file_row_number, payload
+  FROM read_parquet(%s, union_by_name = true, filename = true, file_row_number = true)
+) a
+JOIN %s e ON a.filename = e.part AND a.file_row_number = e.part_row`,
+		fileList(parts), parquetOf(envelopePath))
 }
 
 // runeStyleSQL renders the rune build key for one participant: the primary
@@ -162,6 +220,12 @@ QUALIFY ROW_NUMBER() OVER (
 // stat-shard description are accepted because the staged fixture set uses
 // "statMod" while the documented value is "statMods"; the ordering check above
 // is what keeps the meaning fixed, not the spelling of that one word.
+//
+// The two list branches are the most expensive projection in the extraction: on
+// the live archive, replacing this CASE with a NULL list of the same type is the
+// difference between a batch's features COPY failing under a 1 GiB engine limit
+// and completing under it (see extract). The measurement is why the extraction
+// batches by parts at all, so treat a change here as a change to that bound.
 func runeStyleSQL(alias string) string {
 	at := func(path string) string { return fmt.Sprintf("json_extract(%s.value, '%s')", alias, path) }
 	text := func(path string) string { return fmt.Sprintf("json_extract_string(%s.value, '%s')", alias, path) }
