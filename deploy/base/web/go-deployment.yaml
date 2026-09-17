@@ -159,9 +159,14 @@ spec:
             - name: tmp
               mountPath: /tmp
           # Readiness is the data check, not a liveness check with a different
-          # name: /readyz reads the newest partition's tier list and answers 503
-          # when it cannot. That is what keeps a pod whose PVC read is broken
-          # out of the Service while the other replica keeps serving.
+          # name: /readyz answers 503 when the manifest advertises a newest
+          # partition whose tierlist.json cannot be read, which is the failure
+          # that takes the ladder pages down, so a pod in that state is kept out
+          # of the Service while the other replica keeps serving. It answers 200
+          # for a volume with no manifest at all, deliberately: the site pages
+          # (/, /about, /legal/*) are real without a snapshot and a tier that
+          # has never seen one is not failing - the ladder routes answer 503 per
+          # request in that state (internal/webtier/server.go, /readyz).
           readinessProbe:
             httpGet:
               path: /readyz

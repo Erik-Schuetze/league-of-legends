@@ -42,6 +42,13 @@ func (r *Renderer) proseBase(site *Site) proseBase {
 
 type aboutView struct {
 	proseBase
+	// ChampionsPublished is the number of champions that hold a published cell
+	// in the snapshot, which is what "cells published: N across M champions"
+	// counts. It is not len(proseBase.Partition.Champions): that list is the
+	// partition's champion index (every champion the aggregation looked at),
+	// and the live snapshot publishes 130 cells across 120 champions while its
+	// index lists 173 ids.
+	ChampionsPublished  int
 	IntroTail           template.HTML
 	SourceSentence      template.HTML
 	StateDescription    template.HTML
@@ -78,8 +85,13 @@ func (r *Renderer) AboutPage() (*Page, error) {
 	if latest := site.Latest(); latest != nil {
 		queue = latest.Queue
 	}
+	championsPublished, err := publishedChampions(site)
+	if err != nil {
+		return nil, err
+	}
 	view := aboutView{
 		proseBase:           r.proseBase(site),
+		ChampionsPublished:  championsPublished,
 		IntroTail:           Prose(aboutIntroTail(site)),
 		SourceSentence:      Prose(dataSourceSentence(site)),
 		StateDescription:    Prose(stateDescription(site)),
@@ -111,6 +123,33 @@ func (r *Renderer) AboutPage() (*Page, error) {
 		Body:          body,
 		JSONLD:        jsonld,
 	}, nil
+}
+
+// publishedChampions counts the champions that hold a published cell in the
+// newest partition - the champions behind "cells published: N across M
+// champions".
+//
+// The manifest's champion list is the partition's index, not its published
+// champions, so its length answers a different question: on the live snapshot
+// it is 173 where the published cells cover 120 champions, and a page that
+// prints 173 beside 130 cells is making a claim its own artifact contradicts.
+// The tier list is where the cells are, so the count is taken from there and a
+// tier that cannot read it has nothing to say about its cells: the caller fails
+// closed rather than printing a number it does not have.
+func publishedChampions(site *Site) (int, error) {
+	latest := site.Latest()
+	if latest == nil {
+		return 0, nil
+	}
+	tierList, err := site.TierList(SegOf(*latest))
+	if err != nil {
+		return 0, err
+	}
+	seen := make(map[int]struct{}, len(tierList.Cells))
+	for _, cell := range tierList.Cells {
+		seen[cell.ChampionID] = struct{}{}
+	}
+	return len(seen), nil
 }
 
 // DisclaimerPage renders /disclaimer.
