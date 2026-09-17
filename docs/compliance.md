@@ -8,10 +8,10 @@ open; there is no "probably fine".
 
 Two facts frame everything below:
 
-- **Nothing in this project is live.** No public deployment exists, no production
-  key has been granted, and no Riot API data has been ingested.
-- **No Riot production key has been applied for.** The site therefore renders a
-  deliberately labelled preview and states its data state honestly on the page.
+- **The site serves real crawled Riot match data**, deliberately, from the owner's
+  **development** key behind the password gate - owner decision **D-1**, 2026-09-17.
+- **The compliance workstream is waived** - owner decision **D-4**, 2026-09-17; this
+  register is the record of what was checked and decided, not an open obligation.
 
 Last reviewed: **2026-09-17**. Next review due: **2026-12-17**.
 
@@ -352,7 +352,13 @@ free and ungated; no MMR/ELO calculator anywhere; no data-broker behaviour.
 | No MMR/ELO calculator anywhere | met | gate check 1: 1370 files scanned, 4 rating mentions, all 4 exempt negations of the standing prohibition, 0 rating-like identifiers or keys. The count moves as the other workstreams add files; the run in the evidence log, not this number, is the evidence |
 | No data-broker behaviour | met | gate check 9: the published artifact schema (`web/src/types/agg.d.ts`, `agg.schema.json`) declares no PUUID and no served JSON file carries one; `web/dist` contains no raw-archive path |
 
-**Next step (owner).** Ratify the preview posture and then start the
+**Next step (owner).** None. **Superseded 2026-09-17:** the owner answered plan
+question 6 by choosing publication - real crawled Riot data is served from the
+**development** key behind the existing password gate (**D-1**) - and **waived**
+the compliance workstream (**D-4**). The paragraph below is the position that held
+until then, kept as history.
+
+**Next step (owner), as at the time.** Ratify the preview posture and then start the
 production-key application. The position the site implements - the preview stays
 up, labelled as a preview, and real crawled data is not published until a key is
 approved - is recorded in
@@ -612,7 +618,10 @@ one of them is a decision that needs an ADR:
   artifacts. A visitor's page view never causes a Riot API call.
 - **No MMR, ELO or skill-rating calculator.** Not in v1, not on the backlog, and
   gate check 1 fails the build if one appears in any form.
-- **No paid tier and no gating.** The published data is free and unauthenticated.
+- **No paid tier.** ~~No gating~~: the published data is free and needs no
+  account, but the site currently sits behind a password gate while it serves
+  real data from the development key (**D-1**, and the requirement is waived with
+  the rest of the workstream by **D-4**, 2026-09-17).
 - **`n` is published on every statistic,** and thin cells are suppressed rather
   than shown. See `docs/contracts.md` section 1.
 - **The data state is disclosed on the page, not inferred by the reader.** Every
@@ -660,14 +669,16 @@ successes is not a register.
    timelines for one. A tested off-site restore is a launch gate and it is not
    mine to build; `scripts/backup-verify.sh` verifies restores but no off-site
    medium has been chosen (plan open question 3).
-6. **The public-preview posture is recorded but not owner-ratified.**
-   `docs/decisions/ADR-010-public-preview-posture.md` records the posture the
-   site implements - publicly reachable and clearly labelled, preview data only,
-   real crawled data unpublished until a production key is approved - in the
-   absence of an answer to plan question 6. The ADR is written to be correct
-   whichever way that question is answered, but it is this workstream's
-   interpretation rather than a decision the product owner has confirmed. Until
-   they do, the preview page is a position, not an approval.
+6. ~~**The public-preview posture was this workstream's reading, not a decision
+   the owner had confirmed.**~~
+   **Closed 2026-09-17.** The owner answered plan question 6 by choosing
+   publication: real crawled Riot data is served from the **development** key
+   behind the existing password gate (**D-1**), and the compliance workstream is
+   **waived** (**D-4**). `docs/decisions/ADR-010-public-preview-posture.md` keeps
+   its original posture as history and now carries `Status: Superseded`; the value
+   that holds is in `deploy/base/web/go-deployment.yaml`. What the gap recorded
+   was that the posture was this workstream's interpretation rather than the
+   owner's decision - that is the part that changed.
 7. **The render-parity reference is out of step with the served design layer -
    open, and owned by the design lanes.** `internal/webtier/parity_test.go`
    compares the tier's bytes with `web/dist`, and the served sheet on `main` no
