@@ -96,6 +96,26 @@ type Site struct {
 
 func (s *Site) State() DataState { return s.state }
 
+// PostureWord names the snapshot in the vocabulary the pages use, so a document
+// written for machines cannot describe the data differently from the page that
+// shows it. It is one reading of the same manifest the banner and data-state
+// attribute come from: crawled Riot match data is live, the checked-in sample
+// is preview, and a tier with no snapshot at all is none.
+//
+// It exists because /robots.txt used to assert its snapshot state as a literal,
+// which is correct for exactly as long as the deployment's posture happens to
+// match the word that was typed.
+func (s *Site) PostureWord() string {
+	switch s.state {
+	case StateLive:
+		return "live"
+	case StateDemo:
+		return "preview"
+	default:
+		return "none"
+	}
+}
+
 // Source is the manifest's declared source, or "" when it does not declare one.
 func (s *Site) Source() string { return s.source }
 

@@ -116,26 +116,61 @@ func (r *Renderer) Sitemap() ([]byte, error) {
 	return []byte(body), nil
 }
 
-// Robots is /robots.txt. The Sitemap line is derived from the configured
-// canonical origin, so it cannot disagree with the sitemap's own URLs.
+// Robots is /robots.txt. Every claim in it that a reader could check against
+// the data is read from the same manifest the pages are rendered from: which
+// posture is being served, what the manifest declares about its own source, the
+// window and generation time, and - when the snapshot is the labelled sample -
+// the banner sentence that says so. The Sitemap line is derived from the
+// configured canonical origin, so it cannot disagree with the sitemap's own URLs.
+//
+// Two statements this file used to make were literals rather than readings, and
+// both were wrong once the tier stopped being an Astro build: that every page
+// here is "static", and that the snapshot state is whatever "live" meant when
+// the line was typed. The second is the one that matters, because it is the
+// same claim the PREVIEW banner makes in HTML, and a crawler-facing file that
+// contradicts the pages it describes is the honesty defect this project exists
+// to avoid. Neither survives as a constant: the state line, the source line and
+// the preview sentence are all derived, in the site's own words.
 func (r *Renderer) Robots() ([]byte, error) {
 	site, err := r.Site()
 	if err != nil {
 		return nil, err
 	}
-	body := strings.Join([]string{
-		"# Every page here is public, static and meant to be indexed.",
+	lines := []string{
+		"# Every page here is public and meant to be indexed.",
+		"# This tier is not static: each page is rendered per request from the snapshot",
+		"# named below, so what the sitemap lists is what is published now rather than an",
+		"# earlier build of it. A route this snapshot cannot back says so on the page and",
+		"# carries meta robots noindex.",
 		"User-agent: *",
 		"Allow: /",
 		"",
 		"Sitemap: " + r.siteURL + "/sitemap.xml",
 		"",
-		"# Snapshot state at build time: " + string(site.State()) + ".",
+		"# Snapshot state: " + site.PostureWord() + ".",
+	}
+	if site.State() == StateNoData {
+		lines = append(lines,
+			"# No aggregate snapshot has been published yet, so these pages carry no match",
+			"# statistics: every route renders its real layout with an explicit empty state,",
+			"# and the sitemap advertises the prose routes only.")
+	} else {
+		lines = append(lines, "# "+site.ProvenanceLine())
+		if source := site.Source(); source != "" {
+			lines = append(lines, "# The manifest declares source \""+source+"\".")
+		} else {
+			lines = append(lines, "# The manifest does not declare where this snapshot came from.")
+		}
+		if preview := site.Banner().PreviewText; preview != "" {
+			lines = append(lines, "# "+preview)
+		}
+	}
+	lines = append(lines,
 		"# Structurally identical pages are never emitted twice: the patch-specific",
 		"# tier list of the newest patch declares the latest tier list as canonical.",
 		"",
-	}, "\n")
-	return []byte(body), nil
+	)
+	return []byte(strings.Join(lines, "\n")), nil
 }
 
 // RiotToken is /riot.txt. Riot's site-verification flow asks for a token at a
