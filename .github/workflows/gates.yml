@@ -1,0 +1,95 @@
+name: Launch gates
+
+# The launch-blocking compliance and serving gates, in their own workflow.
+#
+# Why a second workflow and not only the steps in `docker-build.yml`'s `verify`
+# job: these gates answer a different question from the Go test suite, and in the
+# `verify` job they run *after* it, so an unrelated unit-test failure - a parity
+# mismatch in a design layer, say - means they never run at all and the run shows
+# nothing about them. A launch gate whose result cannot be read while any other
+# check is red is not evidence. Here they are the whole job, so a red result
+# points at the gate that failed instead of at whatever stopped the job earlier.
+#
+# Both places run the same `make` targets, so there is one definition of each
+# gate and two independent signals about it. `docker-build.yml` still carries them
+# because its `verify` job is what stands between a commit and a published image.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Actions are pinned to full commit SHAs for the same reason
+      # docker-build.yml does: a tag is a mutable ref. The trailing comment
+      # records the release the SHA came from.
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: web/package.json
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The compliance gate scans the build the site publishes, so the reference
+      # tree is an input to it, not just to the parity tests. `make web-dist`
+      # installs web/node_modules with npm ci when it is missing.
+      - name: Build the Astro reference tree (web/dist)
+        run: make web-dist
+
+      # The serving contract and the served-corpus compliance scan both start
+      # bin/lolstats-web, so the tier has to be built before either runs.
+      - name: Build
+        run: make build
+
+      # The serving contract of the deployed Go tier: /healthz and /metrics
+      # uncached, the HTML cache/ETag/304 policy, the Data Dragon static policy,
+      # and a 503 with a visible page - never a truncated 200 - when the
+      # aggregate root is missing. Started on loopback over the checked-in
+      # fixture artifact tree, so no cluster, no PVC and no network.
+      - name: Serving contract
+        run: make verify-serving-local
+
+      # Checks 1-13, including the two amended on 2026-09-17 (docs/compliance.md,
+      # amendments 1 and 2).
+      - name: Compliance gate
+        run: make compliance
+
+      # The proof that the amendment is not a weakening: one planted violation
+      # at a time, each of which the amended gate must still fail on, plus a page
+      # with every <script> removed, which must pass, and the tier's own no-JS
+      # filter bar, which must pass.
+      - name: Compliance negative controls
+        run: make compliance-negative-control
+
+      # The same two amended checks over the HTML the tier itself served, which
+      # is the corpus they were written for.
+      - name: Compliance gate over the served pages
+        run: make compliance-served
+
+      # The gate's scans hand a NUL-delimited list of paths to grep, and GNU grep
+      # answers an empty list from its own standard input. This runner has a GNU
+      # userland and the author's machine does not, so the portability half of
+      # that control runs here, with a deliberately non-empty stdin.
+      - name: Compliance gate under GNU userland
+        run: make compliance-gnu

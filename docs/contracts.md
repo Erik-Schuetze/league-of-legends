@@ -706,6 +706,22 @@ wrong reason:
   reference tree was built *after* the test step, all three called `t.Skip` and
   gated nothing; a `SKIP` is a failure here, and `make test-parity
   WEB_DIST_SKIP=1` is the negative control that proves it.
+
+  CI shows the gate is now load-bearing. Run
+  [35269826778](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35269826778)
+  executes `TestRenderParity` and fails it on a design-token rename in the served
+  sheet - `parity_test.go:160: render mismatch for home (35481 reference bytes,
+  35570 rendered bytes)`, and the same for the other ten routes plus
+  `TestInteractiveRenderParity` - on a commit that the old ordering would have
+  passed with all three tests skipping.
+
+  Two consequences follow, and both are visible in the ownership map below
+  rather than being this document's to decide. The reference tree is `web/dist`:
+  (a) a change to the served design layer has to move the Astro side with it, or
+  the gate is red - correctly, because the two renderers are meant to be
+  byte-identical while the reference exists; and (b) removing `web/**` makes every
+  parity test skip, which `make test-parity` reports as a failure, so the
+  retirement commit has to land its replacement baseline in the same change.
 - **The serving contract and the compliance gate.** `make verify-serving-local`
   starts the tier over the checked-in fixture tree and again over a deliberately
   corrupt aggregate root, and `make compliance` plus `make
@@ -715,6 +731,13 @@ wrong reason:
   (macOS), so check 12 asserts that both an empty list and a real list behave and
   `make compliance-gnu` re-runs the gate in a GNU userland locally; the reason is
   recorded in `docs/compliance.md`.
+
+Both of those also run as a job of their own in `.github/workflows/gates.yml`
+(`Launch gates`). In `docker-build.yml` they sit *after* the test step, so a Go
+test failure stops the job before either produces a result - which is what
+happened on 2026-09-17, when a parity mismatch in a design layer that is not this
+lane's left the compliance result unwritten. One definition of each gate, two
+independent signals about it.
 
 ## 6. Ownership map
 
