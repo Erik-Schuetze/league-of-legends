@@ -80,7 +80,7 @@ func homeIntroTail(site *Site) string {
 func emptyReason(site *Site) string {
 	if site.Latest() == nil {
 		return "No aggregate snapshot has been published yet, so there are no match statistics to read. " +
-			"This page reads the published artifacts at build time and will fill in as soon as one exists."
+			"This page will fill in as soon as one exists."
 	}
 	partition := site.Latest()
 	return "The published snapshot for patch " + partition.Patch + " (" + partition.Region + ", queue " +
