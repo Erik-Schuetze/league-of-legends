@@ -29,18 +29,18 @@ resources:
   - ingest/deployment.yaml
   - ingest/service.yaml
 
-  # The read-only web tier: a ConfigMap holding its Caddyfile, two replicas, and
-  # the ClusterIP Service the shared Caddy in namespace `web` proxies to.
-  - web/caddyfile.yaml
-  - web/deployment.yaml
+  # The public route: the ClusterIP Service the shared Caddy in namespace `web`
+  # proxies to. Which tier answers on it is decided by this object's selector
+  # alone, which is what makes the cutover in the Go tier below a one-line edit.
   - web/service.yaml
 
-  # ---- additions: Go web tier (option B, rendered per request) ----
+  # ---- additions: Go web tier (server-rendered per request) ----
   # The same pages served by a Go process that reads the published snapshot
   # instead of a Caddy file server over a directory a Node build wrote. It has
-  # its own Service (nothing routes to it yet) and its own ingress policy; the
-  # live `lolstats-web` selector above is the one thing that switches traffic,
-  # and it is not switched here.
+  # its own Service and its own ingress policy; the `lolstats-web` selector above
+  # is the one thing that chooses between it and nothing else, and that choice is
+  # not made in this file. The static tier it replaced was deleted outright on
+  # 2026-09-17 (plan.md D-9) rather than kept as a fallback.
   - web/go-deployment.yaml
   - web/go-service.yaml
   - web/go-networkpolicy.yaml
@@ -48,13 +48,13 @@ resources:
 
   # Every scheduled unit of work, in the order they run during a night:
   # discover-seeds (00:10, before the build so the night's own discovery is in
-  # it), aggregate (01:00), static-sync (03:10, suspended until its subcommand
-  # exists), site-build (03:40), maintain (hourly), backfill (suspended, manual
-  # only).
+  # it), aggregate (01:00), maintain (hourly), backfill (suspended, manual
+  # only). `static-sync` and `site-build` used to sit at 03:10 and 03:40 and
+  # were deleted on 2026-09-17 with the static tier (plan.md D-9); the Go tier
+  # renders from the published snapshot per request, so nothing writes a site
+  # tree any more.
   - jobs/aggregate.yaml
   - jobs/discover-seeds.yaml
-  - jobs/static-sync.yaml
-  - jobs/site-build.yaml
   - jobs/maintain.yaml
   - jobs/backfill.yaml
 

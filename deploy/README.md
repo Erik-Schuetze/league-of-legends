@@ -22,7 +22,7 @@ base/                     what the service is
   postgres/               independent Postgres: StatefulSet, Service, PVC
   ingest/                 the long-running worker
   jobs/                   the scheduled jobs, and the PreSync migration hook
-  web/                    Caddy config, Deployment, Service
+  web/                    the Go serving tier: Deployments, Services, policy
   network/                default-deny and the exceptions to it
 overlays/homelab/         what is different about this cluster
   kustomization.yaml      storage classes, node exclusion, image tags
@@ -47,10 +47,21 @@ time is:
 
 The public entry point is `https://lol.erik-schuetze.dev`, served by the shared
 Caddy in namespace `web` (see `homecluster/web/caddy/configmap.yaml`), which
-reverse-proxies to `lolstats-web.lolstats.svc.cluster.local:80`. The Caddyfile in
-`base/web/caddyfile.yaml` is a different Caddy: the one in this namespace that
-serves the rendered files with caching. The edge Caddy terminates TLS; this one
-does not.
+reverse-proxies to `lolstats-web.lolstats.svc.cluster.local:80`. The edge Caddy
+terminates TLS; everything behind that Service is in this namespace.
+
+That Service's selector is the whole cutover, and it is a separate one-line edit
+to `base/web/service.yaml`. Until 2026-09-17 it selected `component: web`, an
+inner Caddy Deployment that served a pre-rendered tree off the data volume with a
+response cache in front of it; both that Deployment and its Caddyfile ConfigMap
+(`lolstats-site-config`) were deleted rather than kept as a fallback (plan.md
+D-9), together with the two CronJobs that produced the tree. The surviving tier is
+`component: web-go`, the Go server-rendered tier, which answers from the published
+aggregate snapshot per request - so read the selector in `base/web/service.yaml`
+itself to see which of the two acts has landed in your checkout, because this
+deletion and that flip are deliberately not the same commit. There is no Caddy in
+this namespace any more and no rendered-site tree is written; `site/` on the
+volume is what the deleted tier left behind and nothing reads it.
 
 ### Secrets
 
@@ -78,8 +89,9 @@ file never breaks `kubectl kustomize` or an ArgoCD sync.
 
 What "no Riot key" actually means, because the answer is not uniform:
 
-- **The stack comes up without it.** Postgres, `lolstats-web`, `site-build`,
-  `lolstats-aggregate`, `maintain` and `static-sync` never read the Riot key.
+- **The stack comes up without it.** Postgres, `lolstats-go-web` (the Go serving
+  tier), `lolstats-aggregate`, `maintain` and `backup-postgres` never read the
+  Riot key.
 - **The Riot consumers do not.** `lolstats-ingest worker`, `discover-seeds` and
   the `backfill` re-fetch path call `require(cfg.Riot, ...)` and exit non-zero
   with `RIOT_API_KEY is required` when it is unset. The key is an optional env
@@ -90,25 +102,28 @@ What "no Riot key" actually means, because the answer is not uniform:
   depends on either of them, and installing the Secret - with no manifest change
   and no restart of anything - is the fix.
 - **And the public site serves a labelled preview, not real statistics.** With
-  no key the archive stays empty, so `site-build` renders the checked-in demo
+  no key the archive stays empty, so the serving tier renders the checked-in demo
   fixtures and every page carries the preview banner; no crawled data is
   published. That is what
   `docs/decisions/ADR-010-public-preview-posture.md` and plan risk R2 require
-  while a production key application is pending, and it is one key in
-  `base/config.yaml`: `LOLSTATS_AGG_FIXTURES: "only"`. When the key is approved
-  and the archive has produced a published snapshot, change that value to
-  `"off"` - "render `LOLSTATS_AGG_ROOT` and never substitute fixtures" - and the
-  next `site-build` serves real aggregate data. While it stays `"only"`, a real
-  snapshot on the volume would be ignored by the build.
+  while a production key application is pending. The posture is one env var,
+  `LOLSTATS_AGG_FIXTURES`, and it is declared twice: `base/config.yaml` carries
+  `LOLSTATS_AGG_FIXTURES: "only"` for the workloads that read the shared
+  ConfigMap, and `base/web/go-deployment.yaml` sets the same value on its own
+  container so the preview does not depend on a shared key that another lane is
+  free to move (`TestDeployedPostureDoesNotPublishRealData` in `internal/webtier`
+  fails if any active env in `base/web/` sets `"off"` or `"auto"`). When the key
+  is approved and the archive has produced a published snapshot, change the value
+  to `"off"` - "render `LOLSTATS_AGG_ROOT` and never substitute fixtures" - in
+  both places, and the tier serves real aggregate data. While it stays `"only"`,
+  a real snapshot on the volume is ignored.
 - The `backfill` job is suspended and stays that way; it is a manual tool, so a
   missing key only matters on the day someone runs it.
-- `static-sync` is suspended too, for a different reason: the subcommand exists
-  and works (it mirrors public Data Dragon and was measured to exit 0 with 5
-  documents archived), but while the build runs with `LOLSTATS_AGG_FIXTURES=only`
-  it renders the committed fixtures and ignores the volume, so the static tree
-  this job writes would not be rendered. Remove the single `suspend: true` line
-  from `base/jobs/static-sync.yaml` when the build moves to real ingestion
-  (`AGG_FIXTURES=off`); nothing else changes.
+- `static-sync`, which mirrored the public Data Dragon CDN and needed no Riot key,
+  was deleted on 2026-09-17 with the rest of the static path (plan.md D-9). The
+  `static-sync` subcommand still exists in `cmd/lolstats-ingest`; there is simply
+  no CronJob for it, and its egress rule in `base/network/allow.yaml` went with
+  it. Re-adding the job is what re-adds both.
 
 If the requirement is that `lolstats-ingest` itself be green with no key, that is
 a change in `cmd/lolstats-ingest` (an idle mode that serves metrics), not a
@@ -218,7 +233,11 @@ One RWX volume, `lolstats-data` on the `nfs-client` StorageClass, mounted at
   system can reproduce it.
 - `agg/` - the published aggregates, published by renaming a directory into
   place, so a reader never sees a half-written tree.
-- `site/` - the rendered HTML that `lolstats-web` serves.
+- `site/` - the rendered HTML the deleted static tier used to serve. **Nothing
+  writes it any more** (plan.md D-9, 2026-09-17): `site-build` and the inner Caddy
+  that served the tree are gone, and the Go tier renders from `agg/` per request.
+  Whatever tree is still on the volume is inert - it is not read, and nothing here
+  prunes it, so removing it is a manual `rm` on the volume if you want the space.
 
 Postgres keeps its own `longhorn` PVC instead: it wants replicated local NVMe,
 not a network filesystem (see `homecluster/docs/architecture.md` section 3).
@@ -229,14 +248,16 @@ Two things to know about the data volume before you touch it:
   deleting the PVC destroys the archive on Atlas. Both PVCs carry
   `argocd.argoproj.io/sync-options: Delete=false` so that a stray sync cannot do
   it by accident.
-- The volume root has to be writable by uid 65532 (Go workloads) and 1000 (site
-  and web). The nfs-subdir provisioner creates the export directory as root, so
-  on a fresh volume check this before trusting a green sync:
-  `kubectl -n lolstats exec deploy/lolstats-web -- ls -ldn /var/lib/lolstats`.
-  If it is not writable, the fix is on Atlas (`chown`/`chmod` the directory under
-  `/nas-main/k3s-volumes`, or set the StorageClass's `uid`/`gid` parameters) -
-  a root init container is not an option here, because the namespace enforces the
-  restricted Pod Security profile.
+- The volume root has to be writable by uid 65532 (the Go workloads). It used to
+  be checked with a shell inside the web tier - the inner Caddy was the only
+  workload with one that mounts this volume - and that check has no direct
+  replacement now that the tier is distroless: run `ls -ldn` on a debug pod that
+  mounts the claim, or read the ownership on the NFS host itself.
+  The nfs-subdir provisioner creates the export directory as root, so on a fresh
+  volume check it before trusting a green sync. If it is not writable, the fix is
+  on Atlas (`chown`/`chmod` the directory under `/nas-main/k3s-volumes`, or set the
+  StorageClass's `uid`/`gid` parameters) - a root init container is not an option
+  here, because the namespace enforces the restricted Pod Security profile.
 
 ## Observability
 
@@ -261,11 +282,11 @@ frontier size, pipeline staleness, and build duration, cell and failure counts.
 kubectl kustomize deploy/overlays/homelab
 ```
 
-CI builds the three images and runs the Go and Astro checks, including the
-DuckDB-dependent build tests (the `verify` job installs the pinned DuckDB client
-and runs `make test-build`, which fails on a skip), but it does not render these
-manifests, so this command - plus a read of the rendered output - is the check
-that matters before a change to this directory is pushed.
+CI builds the one image and runs the Go, Astro-reference and compliance checks,
+including the DuckDB-dependent build tests (the `verify` job installs the pinned
+DuckDB client and runs `make test-build`, which fails on a skip), but it does not
+render these manifests, so this command - plus a read of the rendered output - is
+the check that matters before a change to this directory is pushed.
 
 ## Open TODOs
 
@@ -273,18 +294,6 @@ that matters before a change to this directory is pushed.
   first tags exist. When they do, replace each one with `tag@sha256:...` (plan
   section 12, R13) at the reference in `base/` and in `overlays/homelab`, which
   is where the tag lives. A tag can be re-pushed; a digest cannot.
-- **`static-sync` is implemented and deliberately not armed.** Plan section 5.2
-  lists the job, and `lolstats-ingest` carries the `static-sync` subcommand: it
-  mirrors the public Data Dragon CDN and was measured to exit 0 with 5 documents
-  archived, needing no Riot key. It keeps its schedule - the schedule itself is
-  not the thing left to do later - and it is **suspended**, because with
-  `LOLSTATS_AGG_FIXTURES=only` the site build renders the committed fixtures, so
-  the static tree this job writes is not rendered; arming it would only spend a
-  nightly run on data nothing reads. Delete the `suspend: true` line in
-  `base/jobs/static-sync.yaml` when the build moves to real ingestion.
-- **`site-build` writes into the volume layout above.** It renders into a staging
-  directory and renames it onto `/var/lib/lolstats/site`. If the frontend's build
-  output directory changes, this job changes with it.
 
 <!-- Everything from here to the end of the file was added by the operations
      workstream (backups, alerts, runbooks). It changes nothing above it. -->
@@ -407,10 +416,16 @@ rule, for when media appears.
 kubectl -n lolstats create job backup-postgres-now --from=cronjob/backup-postgres
 kubectl -n lolstats logs -f job/backup-postgres-now
 
-# Look at the tree. lolstats-web is the only workload with a shell that mounts
-# the data volume; the Go images are distroless.
-kubectl -n lolstats exec deploy/lolstats-web -- sh -c 'ls -l /var/lib/lolstats/backups/postgres | tail -5'
-kubectl -n lolstats exec deploy/lolstats-web -- cat /var/lib/lolstats/backups/postgres/LATEST
+# Look at the tree. This used to be an `exec` into lolstats-web, then into the
+# inner Caddy, because that Caddy was the only workload with a shell that mounted
+# the data volume. That Deployment was deleted with the static tier on
+# 2026-09-17 (plan.md D-9) and the Go images are distroless, so there is no pod
+# left to exec into: use a throwaway pod that mounts the claim read-only, e.g.
+#
+#   kubectl -n lolstats run pvc-ls --rm -it --restart=Never \
+#     --image=busybox --overrides='{"spec":{"containers":[{"name":"pvc-ls","image":"busybox","command":["ls","-l","/d/backups/postgres"],"volumeMounts":[{"name":"d","mountPath":"/d","readOnly":true}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"lolstats-data"}}]}}'
+#
+# or read the same tree on the NFS host under /nas-main/k3s-volumes.
 ```
 
 Runbooks: `docs/runbooks/restore-postgres.md`, `docs/runbooks/restore-raw.md`,

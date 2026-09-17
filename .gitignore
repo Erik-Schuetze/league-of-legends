@@ -45,11 +45,12 @@ deploy/secret.yaml
 .DS_Store
 *.iml
 
-# `make build` writes to `/bin/`. `build/` is different: it holds the Docker
-# image *contexts* (`build/caddy`, `build/site`), so a binary dropped there is
-# worse than untidy - it sits inside a context that gets sent to the builder and
-# can be baked into an image. A hand-rolled `go build -o build/lolstats-web`
-# did exactly that once.
+# `make build` writes to `/bin/`. `build/` is different, and it is now empty:
+# it held the Docker image *contexts* (`build/caddy`, `build/site`) until the
+# static tier was deleted on 2026-09-17 (plan.md D-9). This rule stays because a
+# binary dropped there would sit in a directory that any future image context
+# added back would send to the builder and bake into an image; a hand-rolled
+# `go build -o build/lolstats-web` did exactly that once.
 /build/lolstats-*
 
 # Go

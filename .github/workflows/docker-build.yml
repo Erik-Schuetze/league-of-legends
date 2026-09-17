@@ -1,12 +1,12 @@
 name: Build and push
 
-# Publishes the three images this project runs (docs/contracts.md section 5):
-# the Go binaries, the Node/Astro source the nightly site build renders from,
-# and Caddy with the cache-handler module (plan section 11, gate G0.5). One
-# workflow with a matrix rather than three files, because all three share a tag
-# scheme, a label set and a registry login - three copies of that would drift.
-# The `verify` job gates all of them: nothing is published unless the Go and
-# Astro checks pass.
+# Publishes the one image this project runs (docs/contracts.md section 5): the
+# Go binaries. Until 2026-09-17 this was a matrix of three - the Go image, the
+# Node/Astro source the nightly site build rendered from, and Caddy with the
+# cache-handler module (plan section 11, gate G0.5) - and the static tier was
+# deleted outright rather than kept as a fallback (plan.md D-9), so the other two
+# entries and their contexts went with it. The `verify` job gates the publish:
+# nothing is published unless the Go, Astro-reference and compliance checks pass.
 on:
   push:
     branches:
@@ -156,23 +156,15 @@ jobs:
       contents: read
       packages: write
     strategy:
-      # One image failing should not hide whether the other two built.
+      # One image, and the matrix stays rather than becoming a plain job: it is
+      # what spells the registry path out (GHCR needs lowercase) and what the
+      # publish steps below are written against as `matrix.*`.
       fail-fast: false
       matrix:
         include:
           - image: league-of-legends
             context: .
             dockerfile: Dockerfile
-          - image: league-of-legends-site
-            # The Astro source is this image's entire payload, and the root
-            # .dockerignore excludes web/ from every other context.
-            # build/site/Dockerfile.dockerignore keeps a local node_modules/ and
-            # dist/ from being uploaded and copied over the image's own.
-            context: web
-            dockerfile: build/site/Dockerfile
-          - image: league-of-legends-caddy
-            context: .
-            dockerfile: build/caddy/Dockerfile
 
     steps:
       - name: Checkout repository
