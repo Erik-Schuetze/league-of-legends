@@ -21,12 +21,12 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
-    # sha-6ede914: /about read out of the snapshot instead of carrying the
-    # demo build's figures as prose, and the published champion count taken from
-    # the cells the snapshot publishes rather than from the length of its
-    # champion index. The image is built from the same tree in both postures; a
+    # sha-fa17a6b: the home page heading, its meta description and the privacy
+    # description state what the site publishes rather than the mechanism that
+    # renders it, so the copy is true on the static tier and on this one (plan
+    # section 7.5). The image is built from the same tree in both postures; a
     # digest bump is not a data-posture change (see env below).
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:d4e136ddda522238ddc1976afb713173b4c7a1a576a80f28edf3a0e150555f5f
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:9aa150ff57a70ca77a9e59a6ff52db35a365fdf0c2e1f34581baaf07bd3e4197
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
