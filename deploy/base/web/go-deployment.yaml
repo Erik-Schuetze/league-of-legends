@@ -1,18 +1,17 @@
-# The server-rendered web tier: the same pages as the static site, assembled per
-# request from the published aggregate snapshot.
+# The server-rendered web tier: every page the site serves, assembled per request
+# from the published aggregate snapshot.
 #
-# It is a second Deployment rather than a replacement, on purpose. The live
-# `lolstats-web` Service still points at the static tier, and this one has its own
-# Service (go-service.yaml) that nothing routes to yet, so both can be probed
-# side by side and the switch is a selector edit made once, after parity is
-# proven. Running both also means the comparison can be made against the same
-# snapshot at the same time rather than against a screenshot.
+# This is the public tier. The static tier it was staged beside was retired on
+# 2026-09-17 (plan.md D-9): the owner ruled that the artifact was not worth
+# keeping, and `lolstats-web` selects this Deployment, so there is no second copy
+# to compare against and no parity gate left to clear. `go-service.yaml` stays as
+# this tier's own Service for in-cluster probes.
 #
-# Two replicas for the same reason the static tier has two: this is the only
-# component with a public URL, and a rolling restart of one leaves the other
-# answering. maxUnavailable 0 keeps that true during a rollout; /readyz is a
-# real data check, so a pod that cannot read the snapshot is held out of the
-# Service instead of taking half the traffic and answering 503.
+# Two replicas: this is the only component with a public URL, and a rolling
+# restart of one leaves the other answering. maxUnavailable 0 keeps that true
+# during a rollout; /readyz is a real data check, so a pod that cannot read the
+# snapshot is held out of the Service instead of taking half the traffic and
+# answering 503.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,15 +20,24 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
-    # sha-e7130af: the home page heading, its meta description, the privacy
-    # description and the no-data sentence all state what the site publishes
-    # rather than the mechanism that renders it, so the copy is true on the
-    # static tier and on this one (plan section 7.5). internal/webtier now
-    # sweeps its own pages for that claim in every data posture, so the pin is
-    # also the revision that makes the claim fail a test instead of shipping.
-    # The image is built from the same tree in both postures; a digest bump is
-    # not a data-posture change (see env below).
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:109a30839762f777fbe982813d9e94465bd708b593cdb6fdc1c635c911d3a660
+    # sha-9f23333: the revision CI published for the cutover, and the first build
+    # to reach `latest` afterwards. The `verify` job had been failing at
+    # `actions/setup-node` on the deleted web/package.json, so every commit from
+    # 1d670fe to 65f2983 published no image at all - which is why the pin that
+    # preceded this one (sha-6333038) was still in place. That digest predates
+    # 38996d4, so the live tier was serving copy that called the site "static
+    # pages" and said its pages were "rendered at build time"; this digest
+    # carries the corrected wording. The home page heading, its meta description,
+    # the privacy description and the no-data sentence all state what the site
+    # publishes rather than the mechanism that renders it (plan section 7.5), and
+    # internal/webtier sweeps its own pages for that claim in every data posture,
+    # so the pin is also the revision that makes the claim fail a test instead of
+    # shipping.
+    #
+    # A digest bump is not a data-posture change (see env below): the image is the
+    # same tree whatever this Deployment declares the posture to be, so the two
+    # lines move independently.
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:265923bd8da10fd0c033fc348654a5740d92d7d881c278efdd36a083812d148e
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
@@ -150,8 +158,8 @@ spec:
           resources:
             # Rendering is CPU-bound and bursty, and the process keeps only the
             # snapshot's newest partitions resident, so the reservation is small
-            # relative to the limit. This is the second-smallest allocation in
-            # the stack, after the Caddy file server.
+            # relative to the limit. This is the smallest allocation in the
+            # stack.
             requests:
               cpu: 50m
               memory: 96Mi
