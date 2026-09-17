@@ -66,6 +66,34 @@ func participantRoleSQL(teamPosition, individualPosition string) string {
 // archive is immutable and in production lives in object storage, so each later
 // statement reads the spill rather than the archive.
 //
+// One row per match, not one row per archive record. The archive is append-only
+// parquet with no key, so the same match can be written to it twice - a re-walk
+// of a match the crawler had already stored, or a retry that re-fetched a
+// payload whose archive write had succeeded (the crawler now asks the control
+// plane before it fetches, but the window between its archive write and its
+// `matches` insert cannot be closed that way). A second record is not inert: it
+// is a second game in every count taken over these rows, so it doubled the
+// participants behind the cell tallies, the wins behind each published win rate
+// and the pick rate's numerator, while matches_used - count(DISTINCT match_id) -
+// kept counting the match once. The tier list then published a rate and, beside
+// it, an `n` that did not support it, which is worse than being wrong: a reader
+// cannot tell which of the two numbers is the false one.
+//
+// De-duplicating here, at the single point where the archive is read, is what
+// makes every later statement agree by construction. The alternatives do not:
+// counting distinct per statement leaves the feature rows themselves doubled -
+// the cell tallies that the published rates and the reconciliation gate are
+// computed from - and the `matches` table being idempotent says nothing about
+// the archive, which is a different store with no key for ON CONFLICT to
+// collapse.
+//
+// The record kept is the first in part order, then in row order inside the part,
+// which is the copy the control plane kept: the crawler inserts with ON CONFLICT
+// DO NOTHING, so the earliest archived copy of a match is the one `matches`
+// holds and the one a re-fetch never replaced. A payload whose match id cannot
+// be read keeps a partition key of its own (its part and row number), so a row
+// the gate has to count as malformed is never collapsed into another row.
+//
 // A payload that is not valid JSON becomes NULL here instead of failing the
 // statement, so the build can count it and fail closed with a precise message
 // rather than with a DuckDB parse error. A truncated or corrupted payload is
@@ -88,22 +116,34 @@ func matchesSQL(parts []string) string {
 	number := func(path, kind string) string {
 		return "CAST(" + guarded("json_extract(payload, "+quoteLiteral(path)+")") + " AS " + kind + ")"
 	}
-	return fmt.Sprintf(`SELECT
-  %s AS match_id,
+	return fmt.Sprintf(`WITH archive AS (
+  SELECT filename AS part,
+         file_row_number AS part_row,
+         CAST(payload AS VARCHAR) AS payload
+  FROM read_parquet(%s, union_by_name = true, filename = true, file_row_number = true)
+), keyed AS (
+  SELECT part, part_row, payload,
+         %s AS match_id
+  FROM archive
+)
+SELECT
+  match_id,
   %s AS game_version,
   %s AS platform_id,
   %s AS queue_id,
   %s AS game_creation_ms,
   %s AS payload
-FROM (SELECT CAST(payload AS VARCHAR) AS payload
-      FROM read_parquet(%s, union_by_name = true))`,
+FROM keyed
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY COALESCE(match_id, part || '#' || CAST(part_row AS VARCHAR))
+  ORDER BY part, part_row) = 1`,
+		fileList(parts),
 		text("$.metadata.matchId"),
 		text("$.info.gameVersion"),
 		text("$.info.platformId"),
 		number("$.info.queueId", "INTEGER"),
 		number("$.info.gameCreation", "BIGINT"),
-		guarded("CAST(payload AS VARCHAR)"),
-		fileList(parts))
+		guarded("CAST(payload AS VARCHAR)"))
 }
 
 // runeStyleSQL renders the rune build key for one participant: the primary

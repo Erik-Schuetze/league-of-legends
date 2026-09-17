@@ -173,10 +173,16 @@ func TestProcessJobArchivesRecordsAndWidens(t *testing.T) {
 	}
 }
 
-// Re-crawling a player's history must be a no-op: the same match id is fetched
-// again, the archive keeps a second verbatim copy, and the control plane stays
-// at one row.
-func TestRecrawlingAMatchIsANoOpInTheControlPlane(t *testing.T) {
+// Re-crawling a player's history must be a no-op: the match id is fetched once,
+// the archive keeps one record of it, and the control plane stays at one row.
+//
+// The archive half of that is not free. `matches` is idempotent because match_id
+// is its primary key, but the archive is append-only parquet with no key at all,
+// so a second walk used to append a second verbatim copy of the payload - the
+// duplicate the build counts as extra participants for that match. The crawl now
+// asks the control plane before it spends a fetch, and closes the row when the
+// answer is that the match is already stored.
+func TestRecrawlingAMatchIsANoOp(t *testing.T) {
 	h := newHarness(t, nil)
 	h.serveFixture(t, "EUW1_0000000000")
 
@@ -187,8 +193,11 @@ func TestRecrawlingAMatchIsANoOpInTheControlPlane(t *testing.T) {
 		}
 	}
 
-	if got := h.fetcher.fetchCount("match:"); got != 2 {
-		t.Fatalf("fetches = %d, want 2", got)
+	if got := h.fetcher.fetchCount("match:"); got != 1 {
+		t.Fatalf("fetches = %d, want 1: a match the control plane already holds must not be re-fetched", got)
+	}
+	if got := h.writer.writeCount(); got != 1 {
+		t.Fatalf("archive records = %d, want 1: the archive has no key, so a second walk appends a second copy of a payload that is already stored", got)
 	}
 	if h.store.matchCount() != 1 {
 		t.Fatalf("matches = %d, want 1: match_id is the idempotency key", h.store.matchCount())

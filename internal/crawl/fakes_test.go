@@ -43,6 +43,9 @@ type fakeStore struct {
 	failUpsert   error
 	failClaim    error
 	failComplete error
+	// failExists makes the known-match lookup fail, which is the case where the
+	// worker must fall back to fetching rather than treating "unknown" as "no".
+	failExists error
 }
 
 // fakeJob keeps the queue row state the crawler's transitions depend on.
@@ -580,6 +583,10 @@ func (s *fakeStore) QueueOldest(_ context.Context) (time.Time, bool, error) {
 func (s *fakeStore) MatchExists(_ context.Context, matchID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.log("match-exists %s", matchID)
+	if s.failExists != nil {
+		return false, s.failExists
+	}
 	_, ok := s.matches[matchID]
 	return ok, nil
 }
