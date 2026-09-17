@@ -59,6 +59,10 @@ func TestLoadFromOverrides(t *testing.T) {
 		"LOLSTATS_RIOT_APP_RATE_PER_SECOND": "4.5",
 		"LOLSTATS_RIOT_API_KEY_EXPIRES_AT":  "2026-10-01T00:00:00Z",
 		"LOLSTATS_AGG_MIN_CELL_N":           "250",
+		"LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT":  "768MiB",
+		"LOLSTATS_AGG_DUCKDB_THREADS":       "3",
+		"LOLSTATS_AGG_DUCKDB_TEMP_DIR":      "/tmp",
+		"LOLSTATS_AGG_DUCKDB_MAX_TEMP_SIZE": "2GiB",
 		"LOLSTATS_POSTGRES_MAX_CONNS":       "3",
 	}))
 	if err != nil {
@@ -94,6 +98,21 @@ func TestLoadFromOverrides(t *testing.T) {
 	if cfg.Aggregate.MinCellN != 250 {
 		t.Errorf("Aggregate.MinCellN = %d, want 250", cfg.Aggregate.MinCellN)
 	}
+	// The DuckDB bounds are read as written: the engine is the only place that
+	// decides what a size literal means, and "empty means the engine default" is
+	// what an unset ConfigMap projects.
+	if cfg.Aggregate.DuckDBMemoryLimit != "768MiB" {
+		t.Errorf("Aggregate.DuckDBMemoryLimit = %q, want 768MiB", cfg.Aggregate.DuckDBMemoryLimit)
+	}
+	if cfg.Aggregate.DuckDBThreads != 3 {
+		t.Errorf("Aggregate.DuckDBThreads = %d, want 3", cfg.Aggregate.DuckDBThreads)
+	}
+	if cfg.Aggregate.DuckDBTempDir != "/tmp" {
+		t.Errorf("Aggregate.DuckDBTempDir = %q, want /tmp", cfg.Aggregate.DuckDBTempDir)
+	}
+	if cfg.Aggregate.DuckDBMaxTempSize != "2GiB" {
+		t.Errorf("Aggregate.DuckDBMaxTempSize = %q, want 2GiB", cfg.Aggregate.DuckDBMaxTempSize)
+	}
 	if cfg.Postgres.MaxConns != 3 {
 		t.Errorf("Postgres.MaxConns = %d, want 3", cfg.Postgres.MaxConns)
 	}
@@ -101,14 +120,15 @@ func TestLoadFromOverrides(t *testing.T) {
 
 func TestLoadFromReportsEveryProblemAtOnce(t *testing.T) {
 	_, err := LoadFrom(envFrom(map[string]string{
-		"LOLSTATS_LOG_LEVEL":      "chatty",
-		"LOLSTATS_RIOT_TIMEOUT":   "soon",
-		"LOLSTATS_AGG_MIN_CELL_N": "many",
+		"LOLSTATS_LOG_LEVEL":          "chatty",
+		"LOLSTATS_RIOT_TIMEOUT":       "soon",
+		"LOLSTATS_AGG_MIN_CELL_N":     "many",
+		"LOLSTATS_AGG_DUCKDB_THREADS": "many",
 	}))
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, key := range []string{"LOLSTATS_LOG_LEVEL", "LOLSTATS_RIOT_TIMEOUT", "LOLSTATS_AGG_MIN_CELL_N"} {
+	for _, key := range []string{"LOLSTATS_LOG_LEVEL", "LOLSTATS_RIOT_TIMEOUT", "LOLSTATS_AGG_MIN_CELL_N", "LOLSTATS_AGG_DUCKDB_THREADS"} {
 		if !strings.Contains(err.Error(), key) {
 			t.Errorf("error does not name %s: %v", key, err)
 		}

@@ -32,7 +32,7 @@ spec:
         # Restarting on a Caddyfile change means a ConfigMap edit rolls the tier
         # out on its own, which is the difference between a config change and a
         # config change that only took effect after someone noticed.
-        lolstats.dev/caddyfile-revision: "1"
+        lolstats.dev/caddyfile-revision: "2"
     spec:
       securityContext:
         runAsNonRoot: true

@@ -44,6 +44,7 @@ locally, never committed.
 | `ddragon/item.json` | Data Dragon item document | Two items, one of them a starting item and one a completed one |
 | `ddragon/runesReforged.json` | Data Dragon rune tree | One tree with one slot, because the shape is what the join needs, not the content |
 | `ddragon/summoner.json` | Data Dragon summoner spell document | Two spells. The document is still named `summoner.json` upstream, which is why the path is spelled out in `internal/crawl` |
+| `agg/` | raw archive in the frozen `riot/match-v5/dt=<date>/` layout, as JSONL | The aggregation fixture: fourteen hand-authored matches plus a `corrupt/` variant for the fail-closed test, and the hand-computed cell table they have to produce. See `agg/README.md` |
 
 The Data Dragon files carry `version: 16.20.1`, which is the newest entry of
 `versions.json`. `latestVersion` picks the newest by comparing patch numbers, so

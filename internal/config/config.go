@@ -143,6 +143,31 @@ type Aggregate struct {
 	QueueID int
 	// Empty means "use the newest patch found in the raw archive".
 	Patch string
+
+	// The DuckDB resource bounds. They are configuration rather than constants
+	// because the value that is right depends on the pod the build runs in, and
+	// this is the one part of the pipeline that can take the whole pod down with
+	// it: DuckDB sizes its default memory limit from the host's RAM, not from the
+	// cgroup, so an unset limit is not "no limit" but "the node's limit".
+	//
+	// Empty and zero mean "the conservative default in internal/aggregate"
+	// (DefaultDuckDBMemoryLimit, DefaultDuckDBThreads, DefaultDuckDBMaxTempSize,
+	// and the system temporary directory for the spill). The defaults live there
+	// rather than here so that one place decides what a build with no operator
+	// input is allowed to allocate, and so that a test can assert that default
+	// still fits inside the deployed pod limit.
+	DuckDBMemoryLimit string
+	// DuckDBThreads caps the engine's thread pool. Zero means the default rather
+	// than the host's core count.
+	DuckDBThreads int
+	// DuckDBTempDir is the parent of the spill directory DuckDB writes to when a
+	// statement does not fit in DuckDBMemoryLimit. Empty means the process's
+	// system temporary directory, which in the aggregate Job is the emptyDir
+	// mounted at /tmp - the only writable path that job has, because its root
+	// filesystem is read only.
+	DuckDBTempDir string
+	// DuckDBMaxTempSize bounds the spill directory, as a DuckDB size literal.
+	DuckDBMaxTempSize string
 }
 
 // HTTP carries the listener timeouts. They exist as configuration rather than
@@ -248,6 +273,11 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			Bracket:          r.str(env("AGG_BRACKET"), defaultBracket),
 			QueueID:          r.integer(env("AGG_QUEUE_ID"), defaultQueueID),
 			Patch:            r.str(env("AGG_PATCH"), ""),
+
+			DuckDBMemoryLimit: r.str(env("AGG_DUCKDB_MEMORY_LIMIT"), ""),
+			DuckDBThreads:     r.integer(env("AGG_DUCKDB_THREADS"), 0),
+			DuckDBTempDir:     r.str(env("AGG_DUCKDB_TEMP_DIR"), ""),
+			DuckDBMaxTempSize: r.str(env("AGG_DUCKDB_MAX_TEMP_SIZE"), ""),
 		},
 		HTTP: HTTP{
 			ReadHeaderTimeout: r.dur(env("HTTP_READ_HEADER_TIMEOUT"), defaultReadHeaderLimit),

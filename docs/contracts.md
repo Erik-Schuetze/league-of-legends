@@ -547,8 +547,8 @@ needs with `command`, so a new subcommand never needs a new image.
 | Tag on a `v*` git tag | `v<semver>` and `sha-<7-char-short-sha>` |
 | Tag on the tip of the default branch | `latest` |
 | Platforms | `linux/amd64` only; the cluster is amd64 |
-| Base stages | `golang:1.27-alpine` for build, `gcr.io/distroless/static-debian12:nonroot` for runtime |
-| Pinning | both stages pinned by digest with a readable tag in front |
+| Base stages | `golang:1.27-alpine` for build, `debian:12-slim` for the DuckDB CLI, `gcr.io/distroless/cc-debian12:nonroot` for runtime |
+| Pinning | all three stages pinned by digest with a readable tag in front |
 
 Labels written onto the published image:
 
@@ -562,7 +562,7 @@ org.opencontainers.image.licenses     MIT
 org.opencontainers.image.revision     <git sha>
 org.opencontainers.image.version      <semver or sha-<short>>
 org.opencontainers.image.created      <RFC 3339 build time>
-org.opencontainers.image.base.name    gcr.io/distroless/static-debian12:nonroot
+org.opencontainers.image.base.name    gcr.io/distroless/cc-debian12:nonroot
 ```
 
 `revision`, `version` and `created` are supplied at build time by
@@ -571,9 +571,27 @@ the metadata action and `CREATED` from the commit timestamp rather than the
 build clock - so two builds of one commit carry identical labels. The
 `base.name` label is set explicitly because the distroless runtime stage is
 digest-pinned and its provenance would otherwise be recorded only as a digest.
+The runtime base is the `cc` variant rather than `static` because the pinned
+DuckDB CLI is a glibc binary that needs `libc`, `libstdc++` and `libgcc_s`,
+which the `cc` variant carries and the `static` variant does not; that amendment
+is recorded in `docs/decisions/ADR-007-pinned-duckdb-cli-engine.md`.
 
 Binary names inside the image are `/lolstats-ingest` and `/lolstats-aggregate`,
 with `ENTRYPOINT ["/lolstats-ingest"]` and `CMD ["worker"]`.
+
+An image is only published by a run in which the DuckDB-dependent build tests
+actually executed. The end-to-end analytics tests in
+`internal/aggregate/fixture*_test.go` run the real build over the fixture
+archive, and they skip themselves when the pinned DuckDB CLI cannot be resolved -
+which is right locally and means the `Test` step is green either way. The
+`verify` job therefore also runs `make test-build`, which installs the pinned
+DuckDB release into `bin/` (sha256-verified against the per-architecture
+constants the `duckdb` stage of the `Dockerfile` verifies the copy it ships
+against), exports `LOLSTATS_DUCKDB_BIN` at its absolute path, and fails if
+`TestBuildAgainstHandComputedFixture` did not report `PASS` or if any test in the
+package reported `SKIP`. A skip is a failure in CI, not a pass. The same two
+commands - `make duckdb` and then `make test-build` - are how a contributor runs
+that gate locally.
 
 ## 6. Ownership map
 

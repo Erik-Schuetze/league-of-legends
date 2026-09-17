@@ -1,7 +1,13 @@
 import type { APIRoute } from 'astro';
+import { FALLBACK_SITE_URL } from '../lib/legal';
 import { routeList } from '../lib/routes';
 
 // sitemap.xml, generated from the same route list the build renders.
+//
+// The origin is the canonical host astro.config.mjs resolved (LOLSTATS_SITE_URL, or
+// the deliberate default when the variable is unset). The local fallback only ever
+// fires if `site` is somehow missing; it names the same host on purpose, so that a
+// misconfigured build can never publish a URL that is not the site's real address.
 //
 // Written by hand rather than by pulling in @astrojs/sitemap: the route set is
 // already known at build time, the XML is a dozen lines, and one fewer
@@ -12,7 +18,7 @@ function escapeXml(value: string): string {
 }
 
 export const GET: APIRoute = ({ site }) => {
-  const origin = site ?? new URL('https://lolstats.example.invalid');
+  const origin = site ?? new URL(FALLBACK_SITE_URL);
 
   const entries = routeList()
     .map((route) => {

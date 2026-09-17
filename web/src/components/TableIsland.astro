@@ -262,7 +262,7 @@ const sortValue = (row: RowModel, key: string) => {
     cells read &ldquo;{WITHHELD}&rdquo; and show their count only.
     {
       tierList.suppressed_cells > 0 && (
-        <> {integer(tierList.suppressed_cells)} further cells were withheld by the aggregator.</>
+        <> {integer(tierList.suppressed_cells)} further cells were withheld for being below the threshold.</>
       )
     }
   </p>
@@ -275,7 +275,11 @@ const sortValue = (row: RowModel, key: string) => {
   // the complete, correct table.
   import { startIslands } from './island-boot.client.ts';
 
-  startIslands('[data-island="table"]', () => import('./table-island.client.ts'));
+  startIslands(
+    '[data-island="table"]',
+    () => import('./table-island.client.ts'),
+    (module) => module.initTableIsland,
+  );
 </script>
 
 <style>

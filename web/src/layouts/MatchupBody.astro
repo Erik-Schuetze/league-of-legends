@@ -19,6 +19,7 @@ import { componentOr, optionalComponent } from '../lib/components';
 import { roleLabel, roleSlug } from '../lib/roles';
 import { NO_SAMPLE, WITHHELD, columnAvailabilityNote, matchupMatrix, type Column, type Row } from '../lib/rows';
 import { emptyReason, type Snapshot } from '../lib/page';
+import { previewNumbersSentence } from '../lib/legal';
 import { jsonLdDataset } from '../lib/seo';
 
 interface Props {
@@ -78,6 +79,8 @@ const rows: Row[] =
       });
 
 const hasSample = matchups !== null && publishedPairs.length > 0;
+// Empty on a live snapshot, so the live page reads exactly as it did before.
+const preview = previewNumbersSentence(snap.site);
 ---
 
 <article>
@@ -85,7 +88,9 @@ const hasSample = matchups !== null && publishedPairs.length > 0;
   <p>
     {
       partition
-        ? `Champion against champion in ${label.toLowerCase()}, as the win rate of the row champion in the pair. Each pair is measured over the source window below and only over matches in ranked solo queue.`
+        ? `Champion against champion in ${label.toLowerCase()}, as the win rate of the row champion in the pair. Each pair is measured over the source window below and only over matches in ranked solo queue.${
+            preview ? ` ${preview}` : ''
+          }`
         : `This table will show champion against champion matchups in ${label.toLowerCase()} as soon as a snapshot is published.`
     }
   </p>
@@ -163,11 +168,11 @@ const hasSample = matchups !== null && publishedPairs.length > 0;
   <p>
     A cell holds the win rate of the row champion against the column champion, with the number of games it was measured
     over. Cells whose pair has fewer than n = {integer(minCellN)} games read "{WITHHELD}" and show their count only; that
-    is a pair this site declines to publish a rate for, not a pair that does not exist.
+    is a pair this site declines to publish a rate for, not a pair that does not exist.{preview ? ` ${preview}` : ''}
   </p>
 
   {
-    matchups && partition ? (
+    matchups && partition && snap.site.state === 'live' ? (
       <JsonLd
         value={jsonLdDataset({
           url,
@@ -184,6 +189,7 @@ const hasSample = matchups !== null && publishedPairs.length > 0;
             { name: 'games played in the pair (n)', unit: 'games' },
             { name: 'pair win rate', unit: 'win rate' },
           ],
+          state: snap.site.state,
         })}
       />
     ) : null

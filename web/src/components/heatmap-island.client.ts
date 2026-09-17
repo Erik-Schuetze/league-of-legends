@@ -10,6 +10,10 @@
  *   2. the detail line, filled from the cell's own text and data attributes;
  *   3. hover and tap, which write the same line.
  *
+ * The diagonal cell is the one place the detail line does not describe a
+ * measurement: a champion is never matched against itself, so it is answered as
+ * not applicable instead of as a win rate over the cell's placeholder zero.
+ *
  * It reads only what is already in the DOM, so the no-JavaScript page and the
  * enhanced page can never disagree about a number.
  */
@@ -40,6 +44,10 @@ export function initHeatmapIsland(root: HTMLElement): void {
   }
   const rowNames = bodyRows.map((row) => (row.cells[0]?.textContent ?? '').trim());
 
+  /** What the page says about a pairing it does not publish. */
+  const withheld = (rowName: string, columnName: string): string =>
+    `${rowName} against ${columnName}: not published, under ${minN} games in this window.`;
+
   const at = (row: number, column: number): Cell | null => {
     const cellsInRow = bodyRows[row]?.cells;
     const cell = cellsInRow ? cellsInRow[column + 1] : undefined;
@@ -51,12 +59,25 @@ export function initHeatmapIsland(root: HTMLElement): void {
     const rowName = rowNames[row] ?? '';
     const columnName = columnNames[column] ?? '';
     if (!cell) return '';
-    if (cell.classList.contains('missing')) {
-      return `${rowName} against ${columnName}: not published, under ${minN} games in this window.`;
+    /*
+     * The diagonal is the same champion on both axes, so there is no pairing to
+     * measure: a champion never plays itself. It is recognised by position as
+     * well as by the `.self` class and answered before any number is read, so
+     * this cell can never be described as a measurement of zero. Both halves
+     * matter - by position so the answer survives a markup change, before the
+     * numeric branch because that branch is what turned an empty rate over the
+     * cell's `data-n="0"` placeholder into "win rate over 0 games".
+     */
+    if (row === column || cell.classList.contains('self')) {
+      return `${rowName} against ${columnName}: not applicable, a champion is never matched against itself.`;
     }
+    if (cell.classList.contains('missing')) return withheld(rowName, columnName);
     const rate = (cell.querySelector('.rate')?.textContent ?? '').trim();
     const deviation = (cell.querySelector('.dev')?.textContent ?? '').trim();
     const n = cell.getAttribute('data-n') ?? '';
+    // A cell with nothing printed in it is not a measurement either: report the
+    // withholding rather than reading an empty string as a zero.
+    if (rate === '' || deviation === '' || n === '') return withheld(rowName, columnName);
     return (
       `${rowName} against ${columnName}: ${rate} win rate over ${n} games, ` +
       `${deviation} percentage points versus even.`

@@ -36,8 +36,9 @@ const scope = role ? ` in ${roleLabel(role)}` : '';
     suppressedCells !== undefined && suppressedCells > 0 && (
       <>
         {' '}
-        The aggregator withheld {integer(suppressedCells)} further cell
-        {suppressedCells === 1 ? '' : 's'} below that threshold.
+        {integer(suppressedCells)} further cell
+        {suppressedCells === 1 ? '' : 's'} below that threshold {suppressedCells === 1 ? 'is' : 'are'} withheld from
+        the artifact.
       </>
     )
   }

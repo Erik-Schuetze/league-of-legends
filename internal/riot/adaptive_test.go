@@ -152,27 +152,103 @@ func (a *arrivals) tailMeanGap(skip, n int) time.Duration {
 	return total / time.Duration(len(window))
 }
 
+// TestClientNeverExceedsTheCeilingEvenIfRiotAdvertisesMore drives the client
+// with advertisements whose window periods are not the ones the ceiling
+// configures. The ceiling used here is the documented development-key one, and
+// the periods in the fixtures are the ones Riot production keys actually send,
+// so the mismatched case is the normal case, not an exotic one.
 func TestClientNeverExceedsTheCeilingEvenIfRiotAdvertisesMore(t *testing.T) {
+	tests := []struct {
+		name   string
+		advert string
+		count  string
+	}{
+		{
+			// The lucky case: the periods happen to be the ceiling's own.
+			name:   "periods that match the ceiling",
+			advert: "100000:1,100000:120",
+			count:  "1:1,1:120",
+		},
+		{
+			// A shared, stale or misread header claiming a huge allowance,
+			// in the shape a production application limit has. Before the
+			// fix this made the effective rate 300/s - neither period
+			// matched the ceiling, so no window was clamped: 3,300 tokens
+			// could be spent in the first second of a key whose
+			// documented ceiling is 18/s.
+			name:   "the periods a production key advertises",
+			advert: "3000:10,180000:600",
+			count:  "1:10,1:600",
+		},
+		{
+			// A window shape nobody has ever sent. An unfamiliar period
+			// may slow the limiter down; it may not speed it up.
+			name:   "a period nobody has ever seen",
+			advert: "5000:45",
+			count:  "1:45",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := NewFakeClock(testStart)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				setRateHeaders(w, tc.advert, tc.count, "", "")
+				writeBody(w, `["EUW1_0000000000"]`)
+			}))
+			defer srv.Close()
+
+			ceiling := ConfigWindows(18, 95)
+			client := newTestClient(t, srv, clock, testKeys(), func(o *Options) {
+				o.Limiter = NewLimiter(LimiterOptions{Clock: clock, Ceiling: ceiling, Bootstrap: ceiling})
+				o.MaxAttempts = 1
+			})
+			if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p", Count: 1}); err != nil {
+				t.Fatalf("MatchIDs: %v", err)
+			}
+			// The advertised two minutes is worth 180000 requests, the
+			// ceiling's two minutes is worth 95, and the 95/120 window is
+			// what binds - whatever periods the advertisement mentions.
+			want := 95.0 / 120.0
+			if got := client.Limiter().EffectiveRate(); got != want {
+				t.Fatalf("advertised %s: effective rate = %v, want %v clamped by the ceiling", tc.advert, got, want)
+			}
+		})
+	}
+}
+
+// TestClientBurstIsCappedByTheCeilingWhateverPeriodsRiotAdvertises is the same
+// promise measured in the request path rather than in the limiter's own view: a
+// ceiling of three requests per minute must not be outspent because the server
+// advertised a period the ceiling does not configure.
+func TestClientBurstIsCappedByTheCeilingWhateverPeriodsRiotAdvertises(t *testing.T) {
 	clock := NewFakeClock(testStart)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A shared, stale or misread header claiming a huge allowance.
-		setRateHeaders(w, "100000:1,100000:120", "1:1,1:120", "", "")
+		setRateHeaders(w, "3000:10,180000:600", "1:10,1:600", "", "")
 		writeBody(w, `["EUW1_0000000000"]`)
 	}))
 	defer srv.Close()
 
-	ceiling := ConfigWindows(18, 95)
+	ceiling := []Window{{Limit: 3, Period: time.Minute}}
 	client := newTestClient(t, srv, clock, testKeys(), func(o *Options) {
 		o.Limiter = NewLimiter(LimiterOptions{Clock: clock, Ceiling: ceiling, Bootstrap: ceiling})
 		o.MaxAttempts = 1
 	})
+
+	for i := 0; i < 3; i++ {
+		if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p", Count: 1}); err != nil {
+			t.Fatalf("MatchIDs %d: %v", i, err)
+		}
+	}
+	if got := clock.Total(); got != 0 {
+		t.Fatalf("the first three requests are inside the ceiling's window, but waited %s", got)
+	}
 	if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p", Count: 1}); err != nil {
 		t.Fatalf("MatchIDs: %v", err)
 	}
-	// The 2 minute window binds at 95/120, exactly as it does on the
-	// development key the ceiling was configured for.
-	want := 95.0 / 120.0
-	if got := client.Limiter().EffectiveRate(); got != want {
-		t.Fatalf("effective rate = %v, want %v clamped by the ceiling", got, want)
+	// The fourth has to wait for the one minute window of three to refill one
+	// token: 20 seconds. Only the advertisement's 300/s would let it through
+	// immediately.
+	if got := clock.Total(); got < 20*time.Second {
+		t.Fatalf("the fourth request waited %s, want at least 20s for the ceiling's window to refill", got)
 	}
 }

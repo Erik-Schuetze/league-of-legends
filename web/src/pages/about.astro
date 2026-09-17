@@ -28,6 +28,9 @@ import {
   TRADEMARK_TEXT,
   VERSION_LINE,
   dataSourceSentence,
+  ingestedMatchData,
+  pipelineLeadIn,
+  pipelineStatusSentence,
   riotVerificationNote,
 } from '../lib/legal';
 
@@ -37,10 +40,18 @@ const partition = snap.partition;
 const url = absoluteUrl('/about/', Astro.site, Astro.url);
 
 const title = `About the data - how these statistics are produced - ${SITE_NAME}`;
+
+// The meta description is a provenance claim in miniature: it is what a search
+// result shows, and it cannot be corrected by a banner the reader has not seen
+// yet. So it is written from the state, like everything else on the page.
 const description =
-  'Where the numbers on this site come from: Riot MATCH-V5 match records aggregated per patch, the crawl window, ' +
-  'the sample-size threshold below which a rate is withheld, the snapshot limitation on rank attribution, and what ' +
-  'this site is not.';
+  site.state === 'live'
+    ? 'Where the numbers on this site come from: Riot MATCH-V5 match records aggregated per patch, the crawl window, ' +
+      'the sample-size threshold below which a rate is withheld, the snapshot limitation on rank attribution, and what ' +
+      'this site is not.'
+    : 'Where the numbers on this site will come from, how they are produced, the sample-size threshold below which a ' +
+      'rate is withheld, the snapshot limitation on rank attribution, and what this site is not. This build publishes ' +
+      'no Riot match data.';
 
 const stateDescription =
   site.state === 'live'
@@ -51,8 +62,14 @@ const stateDescription =
         : UNVERIFIED_PREVIEW_TEXT
       : 'No aggregate snapshot has been published for this site yet.';
 
-const sourceSentence = dataSourceSentence(site.state);
-const hasMatchData = site.state === 'live';
+const sourceSentence = dataSourceSentence(site);
+const hasMatchData = ingestedMatchData(site);
+
+// The name of the API the pipeline fetches from. The demo and no-data states do
+// not name it, because naming it beside "how the numbers are produced" reads as
+// a statement about where the numbers on this page came from, and in those two
+// states they came from nowhere at all.
+const matchApi = hasMatchData ? "Riot's MATCH-V5 API" : "Riot's ranked match API";
 ---
 
 <BaseLayout
@@ -69,10 +86,14 @@ const hasMatchData = site.state === 'live';
     <h1>About this site and its data</h1>
 
     <p>
-      {SITE_NAME} publishes ranked League of Legends statistics as static pages. The pages are rendered at build time
-      from aggregate artifacts that a separate ingestion and aggregation pipeline produces from Riot's MATCH-V5 match
-      feed. Nothing on this site calls Riot's API while you are reading it, nothing here queries a database, and no page
-      needs JavaScript to show its content.
+      {SITE_NAME} publishes ranked League of Legends statistics as static pages.{' '}
+      {site.state === 'live'
+        ? "The pages are rendered at build time from aggregate artifacts that a separate ingestion and aggregation pipeline produces from Riot's MATCH-V5 match feed."
+        : site.state === 'demo'
+          ? 'The pages are rendered at build time from aggregate artifacts, in the same shape a real snapshot has, but these artifacts are illustrative demo data: no ingestion and aggregation pipeline has run for them, and nothing on this build is a measurement of a real game.'
+          : 'No aggregate snapshot exists yet, so this build read none and serves the layout of those pages in its empty state: the pages show no numbers from any game, and the aggregate artifacts they will one day be rendered from are the kind an ingestion and aggregation pipeline writes.'}{' '}
+      Nothing on this site calls Riot's API while you are reading it, nothing here queries a database, and no page needs
+      JavaScript to show its content.
     </p>
 
     <h2>What this site is</h2>
@@ -161,23 +182,26 @@ const hasMatchData = site.state === 'live';
 
     <p>
       Two compliance requirements are still open rather than met, and this page says so plainly instead of implying
-      otherwise. Riot's <em>verified site</em> requirement: {riotVerificationNote()} And the Riot API credential itself:
-      this build was produced without a Riot production API key, so no match data has been ingested or published, and
-      the site carries nothing that Riot has reviewed or approved. See
-      <a href="/disclaimer">the Disclaimer</a> for the notices that stay visible until that changes.
+      otherwise. Riot's <em>verified site</em> requirement: {riotVerificationNote()} And the Riot API credential itself:{' '}
+      {hasMatchData
+        ? "this build rendered a snapshot whose manifest declares it was crawled through Riot's MATCH-V5 API under a " +
+          'registered key, so the key is in the ingestion path; the key itself is never part of this build and nothing ' +
+          'here carries anything Riot has reviewed or approved.'
+        : 'this build was produced without a Riot production API key, so no match data has been ingested or published, ' +
+          'and the site carries nothing that Riot has reviewed or approved.'}{' '}
+      See <a href="/disclaimer">the Disclaimer</a> for the notices that stay visible until that changes.
     </p>
 
-    <h2>How the data is produced</h2>
+    <h2>{hasMatchData ? 'How the data is produced' : 'How the data will be produced'}</h2>
     <p>
-      Five steps, in order. The pipeline is deliberately boring, because every interesting shortcut here would be a way
-      to publish a wrong number.
+      {pipelineLeadIn(site)}
     </p>
     <ol>
       <li>
-        <strong>Fetch.</strong> A long-running worker (<code>lolstats-ingest</code>) copies match records from Riot's
-        MATCH-V5 API at an adaptive rate, and writes each response into an append-only raw archive as compressed
-        Parquet, partitioned by API and date (<code>raw/riot/&lt;api&gt;/v&lt;n&gt;/dt=YYYY-MM-DD/</code>). Raw payloads
-        are never rewritten in place: if the archive is wrong, the fix is a new partition, not an edit.
+        <strong>Fetch.</strong> A long-running worker (<code>lolstats-ingest</code>) copies match records from {matchApi}{' '}
+        at an adaptive rate, and writes each response into an append-only raw archive as compressed Parquet, partitioned
+        by API and date (<code>raw/riot/&lt;api&gt;/v&lt;n&gt;/dt=YYYY-MM-DD/</code>). Raw payloads are never rewritten
+        in place: if the archive is wrong, the fix is a new partition, not an edit.
       </li>
       <li>
         <strong>Record.</strong> A PostgreSQL control plane tracks the crawl frontier, the fetch queue, deduplication
@@ -202,8 +226,7 @@ const hasMatchData = site.state === 'live';
       </li>
     </ol>
     <p>
-      Where a step above has not produced anything yet, this page says so rather than describing intent as
-      accomplishment: that is what the state section above is for.
+      {pipelineStatusSentence(site)}
     </p>
 
     <h2>The sample size story</h2>
@@ -219,11 +242,19 @@ const hasMatchData = site.state === 'live';
       before publication are counted in the notices on each page rather than silently dropped.
     </p>
 
-    <h2>How the numbers are computed</h2>
+    <h2>{hasMatchData ? 'How the numbers are computed' : 'How the numbers will be computed'}</h2>
     <ul>
       <li>
-        <strong>Source.</strong> Riot's MATCH-V5 match records for ranked solo queue (queue {partition?.queue ?? 420}),
-        archived append-only before aggregation. Raw archives are never rewritten.
+        <strong>Source.</strong>{' '}
+        {site.state === 'live'
+          ? `Riot's MATCH-V5 match records for ranked solo queue (queue ${partition?.queue ?? 420}), fetched under a registered key and archived append-only before aggregation. Raw archives are never rewritten.`
+          : `Nothing yet: ${
+              site.state === 'demo'
+                ? 'this build holds no match records, so nothing on it is computed from a real game.'
+                : 'no snapshot exists, so there are no source records at all.'
+            } A real snapshot's source is Riot's ranked match records for ranked solo queue (queue ${
+              partition?.queue ?? 420
+            }), which the fetch step copies into a raw archive that is never rewritten in place.`}
       </li>
       <li>
         <strong>Grouping.</strong> Matches are grouped by patch, region, queue and rank bracket, then by champion and
@@ -258,18 +289,25 @@ const hasMatchData = site.state === 'live';
     </ul>
 
     <h2>What the aggregation cannot know</h2>
+    {!hasMatchData && (
+      <p>
+        No aggregation has run for this build, so read this section as a limit of the method rather than as a caveat on
+        numbers you can see: there are none.
+      </p>
+    )}
     <p>
-      Rank attribution is a snapshot, not a per-match fact. Riot's match feed does not tell an aggregator the rank a
-      player held in each match, so a bracket is built from players discovered at that rank in a recent window. A match
-      is attributed to the bracket its players were found through, which means the bracket on this page is where those
-      accounts were seen, not where every participant was at the time of every game. Treat bracket figures as
+      {hasMatchData
+        ? "Rank attribution is a snapshot, not a per-match fact. Riot's match feed does not tell an aggregator the rank a player held in each match, so a bracket is built from players discovered at that rank in a recent window."
+        : 'Rank attribution can only ever be a snapshot, not a per-match fact. A match record does not carry the rank a player held in that match, so a bracket has to be built from players discovered at that rank in a recent window.'}{' '}
+      A match is attributed to the bracket its players were found through, which means the bracket on this page is where
+      those accounts were seen, not where every participant was at the time of every game. Treat bracket figures as
       approximate stratification rather than a precise rank filter.
     </p>
     <p>
       Two more limits are worth stating plainly. Aggregates describe the matches in the crawl window, and the ranked
       landscape moves during a patch, so an early-patch reading and a late-patch reading of the same patch are different
-      datasets. And because the aggregation only sees matches the pipeline ingested, a champion that is rare in the
-      crawled population can stay below the publication threshold for a whole patch.
+      datasets. And because the aggregation only ever sees matches the pipeline was able to fetch, a champion that is
+      rare in the crawled population can stay below the publication threshold for a whole patch.
     </p>
 
     <h2>Source, freshness and provenance of this build</h2>
@@ -287,8 +325,11 @@ const hasMatchData = site.state === 'live';
         across regions.
       </li>
       <li>
-        <strong>Queue</strong> - which queue the matches came from. This site currently aggregates ranked solo/duo
-        (queue 420); queue 420 and 440 are different populations.
+        <strong>Queue</strong> - which queue the matches came from.{' '}
+        {hasMatchData
+          ? 'This site currently aggregates ranked solo/duo (queue 420)'
+          : 'The pipeline covers ranked solo/duo (queue 420) and nothing else'}; queue 420 and 440 are different
+        populations.
       </li>
       <li>
         <strong>Bracket</strong> - the rank band the cell is drawn from, with the attribution limitation described

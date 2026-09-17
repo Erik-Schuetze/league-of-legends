@@ -1,13 +1,21 @@
-# Data Dragon versions, champions, items, runes and summoner spells, written
-# into agg/v1/static/<ddragon_version>/. Daily, and before the site build, so
-# that a new patch's static data is on disk before anything renders it.
+# Data Dragon versions, champions, items, runes and summoner spells. Daily, and
+# before the site build, so that a new patch's static data is on disk before
+# anything renders it. This job writes them into the RAW archive, under
+# riot/ddragon/dt=<date>/kind=<kind>/; the aggregate run turns that into the
+# agg/v1/static/<ddragon_version>/ tree the site build reads.
 #
-# TODO(plan section 5.2, `static-sync`): the scaffold's ingest binary implements
-# worker, discover-seeds, backfill and maintain only, so this subcommand exits 2
-# with a usage message. The manifest is written as intended rather than omitted
-# because the schedule, the resources and the egress rule are the parts that are
-# hard to add later; when the subcommand lands, this CronJob starts working with
-# no manifest change.
+# STATUS (plan section 5.2, `static-sync`): the subcommand EXISTS and works. It is
+# dispatched by cmd/lolstats-ingest (`runStaticSync`, internal/crawl/static.go) and
+# was measured to exit 0, archiving 5 documents - versions, champions, items,
+# runes and summoner-spells - in a single run. It reads the public Data Dragon CDN
+# and needs no Riot API key.
+#
+# It is nonetheless suspended below, and NOT because it is broken. The shipped
+# posture builds the site with LOLSTATS_AGG_FIXTURES=only, which renders the
+# committed fixtures and ignores the volume, so this job's static tree would not
+# be rendered. Arming it now would spend a nightly run on data nothing consumes.
+# Removing the one `suspend: true` line is the whole change that turns it on, and
+# it belongs with the move to real ingestion (AGG_FIXTURES=off).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -16,8 +24,11 @@ metadata:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: static-sync
 spec:
+  # A schedule is required by the API even when suspend is true. This is the
+  # schedule it will keep once the `static-sync` subcommand lands.
   schedule: "10 3 * * *"
   timeZone: Europe/Berlin
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 3

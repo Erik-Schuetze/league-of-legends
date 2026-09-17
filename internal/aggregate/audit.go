@@ -130,14 +130,25 @@ func (a FileAuditor) write(id int64, record buildRunRecord) error {
 	if a.Root == "" {
 		return errors.New("file auditor has no root directory")
 	}
-	if err := os.MkdirAll(a.Root, 0o755); err != nil {
+	// The parent of the breadcrumb directory is created served, not private:
+	// the breadcrumb directory is a sibling of the aggregate root, so a private
+	// parent would deny every reader below it - including the aggregate tree
+	// itself. os.MkdirAll gives every directory it creates the mode of the
+	// call, so the parent has to be made explicitly first. See perms.go.
+	if err := os.MkdirAll(filepath.Dir(a.Root), publishedDirPerm); err != nil { //nolint:gosec // G301: the parent of the breadcrumb directory also holds the served aggregate tree; see perms.go.
+		return fmt.Errorf("create parent of the build run directory: %w", err)
+	}
+	if err := os.MkdirAll(a.Root, privateDirPerm); err != nil {
 		return fmt.Errorf("create build run directory: %w", err)
 	}
 	buf, err := marshalDoc(record)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.path(id), buf, 0o644); err != nil { //nolint:gosec // audit records are world readable.
+	// The breadcrumb directory sits beside the aggregate root, not inside the
+	// path Caddy serves, so it is read by this process alone and needs no
+	// group or other access. See perms.go.
+	if err := os.WriteFile(a.path(id), buf, privateFilePerm); err != nil {
 		return fmt.Errorf("write build run %d: %w", id, err)
 	}
 	return nil

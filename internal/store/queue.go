@@ -17,13 +17,63 @@ import (
 // optimise anything.
 const enqueueBatch = 500
 
-// EnqueueMatches adds work to the queue and returns how many rows were newly
-// created.
+// revivalBudget is how many times the crawl will hand a dead letter a fresh
+// attempt budget before leaving it dead.
+//
+// The revival below exists because a dead letter is otherwise unreachable: a
+// global condition - a revoked key, a ban - retires every match it touches, and
+// a later discovery of that match has to be able to put it back. Unbounded,
+// though, it is a loop with no end: revive, claim, fail, dead, rediscover, and
+// the cost of each turn is a Riot call the limiter has to pay for. The
+// verification run showed exactly that: a poison row came back to 'dead' with
+// its attempt budget reset to the same two on every walk, ten fetches per walk,
+// forever.
+//
+// Three is enough for the condition the revival is for - an outage that has
+// passed - and small enough that a row which is failing for its own reasons
+// stops costing calls. Past the budget the row stays visible as a dead letter
+// with its cause intact, and `maintain -replay-dead-letters` is deliberately not
+// bounded by this, because an operator replaying dead letters is asserting that
+// the global condition has passed, which is a claim the crawl cannot make.
+const revivalBudget = 3
+
+// reviveDeadRowSet is the SET half of the conflict clause that revives a dead
+// letter: the budget is restored (the attempt budget that retired the row was
+// spent on a global condition rather than on anything wrong with the match) and
+// the revival itself is counted, which is what bounds the loop.
+const reviveDeadRowSet = `status = EXCLUDED.status, attempts = 0, revivals = fetch_queue.revivals + 1,
+    not_before = EXCLUDED.not_before, claimed_at = NULL, last_cause = NULL`
+
+// reviveDeadRowWhere is the predicate half: only a dead row, and only one that
+// still has revival budget left.
+func reviveDeadRowWhere(statusArg, budgetArg int) string {
+	return fmt.Sprintf("fetch_queue.status = $%d AND fetch_queue.revivals < $%d", statusArg, budgetArg)
+}
+
+// EnqueueMatches adds work to the queue and returns how many rows are now
+// waiting to be claimed - the rows it created plus the dead letters it
+// revived.
 //
 // The dedupe is in the ON CONFLICT, not in the caller: a PUUID's history
 // overlaps every other participant's history, so the same match id arrives
 // repeatedly by design. Duplicate ids inside one batch are collapsed here
 // instead, because a single statement cannot insert the same key twice.
+//
+// The conflict clause is a DO UPDATE ... WHERE status = 'dead', not a DO
+// NOTHING. A dead letter is normally terminal, so DO NOTHING made a retired
+// match id unreachable forever: a key outage that outlived one row's attempt
+// budget retired every match it touched, and no later discovery of that match
+// - by any player, in any crawl - could put it back. Re-queueing a dead row
+// that the crawl has just rediscovered is the cheap half of the replay path
+// (maintain's ReplayDeadLettered is the explicit half) and it restarts the
+// attempt budget, because the budget that retired the row was spent on a
+// global condition rather than on anything wrong with the match.
+//
+// The revival is bounded by revivalBudget revivals per row. Without that bound
+// the clause is an infinite loop rather than a recovery path: the row is
+// rediscovered by every crawl of every player who played the match, so a row
+// that fails for its own reasons would be re-fetched forever, each revival
+// restarting the attempt budget that exists to retire it.
 func (s *Store) EnqueueMatches(ctx context.Context, items []contract.QueueItem) (int, error) {
 	batch := dedupeQueueItems(items)
 	if len(batch) == 0 {
@@ -37,7 +87,7 @@ func (s *Store) EnqueueMatches(ctx context.Context, items []contract.QueueItem) 
 
 		var sb strings.Builder
 		sb.WriteString("INSERT INTO fetch_queue (match_id, priority, attempts, not_before, status) VALUES ")
-		args := make([]any, 0, len(chunk)*5)
+		args := make([]any, 0, len(chunk)*5+1)
 		for i, item := range chunk {
 			if i > 0 {
 				sb.WriteString(", ")
@@ -50,7 +100,11 @@ func (s *Store) EnqueueMatches(ctx context.Context, items []contract.QueueItem) 
 			}
 			args = append(args, item.MatchID, item.Priority, item.Attempts, notBefore.UTC(), string(contract.JobPending))
 		}
-		sb.WriteString(" ON CONFLICT (match_id) DO NOTHING")
+		statusArg := len(chunk)*5 + 1
+		budgetArg := statusArg + 1
+		fmt.Fprintf(&sb, " ON CONFLICT (match_id) DO UPDATE\nSET %s\nWHERE %s",
+			reviveDeadRowSet, reviveDeadRowWhere(statusArg, budgetArg))
+		args = append(args, string(contract.JobDead), revivalBudget)
 
 		res, err := s.db.ExecContext(ctx, sb.String(), args...)
 		if err != nil {
@@ -202,6 +256,32 @@ func (s *Store) DeadLetterJob(ctx context.Context, id int64, cause string) error
 	_, err := s.db.ExecContext(ctx, deadLetterJobSQL, id, string(contract.JobDead), s.now().UTC(), nullText(cause), string(contract.JobClaimed))
 	if err != nil {
 		return fmt.Errorf("store: DeadLetterJob %d: %w", id, err)
+	}
+	return nil
+}
+
+// releaseJobSQL hands a claim back without charging the row for it.
+//
+// ClaimJobs increments attempts because a worker that dies mid-fetch must still
+// consume one. The opposite case needs the opposite treatment: a failure that
+// says nothing about this match - the key was refused, the API is closed to us -
+// must not be paid for out of the row's budget, or an outage that outlives a
+// row's budget retires the whole backlog. GREATEST keeps the counter at zero for
+// a row that was never charged, which is the case for a claim made by another
+// code path.
+const releaseJobSQL = `
+UPDATE fetch_queue
+SET status = $2, not_before = $3, claimed_at = NULL, last_cause = $4,
+    attempts = GREATEST(attempts - 1, 0)
+WHERE id = $1 AND status = $5`
+
+// ReleaseJob returns a claimed job to the queue without spending an attempt.
+// It is not part of contract.Store: the crawler only needs it for failures it
+// can prove are not about the row, so it is discovered by type assertion.
+func (s *Store) ReleaseJob(ctx context.Context, id int64, notBefore time.Time, cause string) error {
+	_, err := s.db.ExecContext(ctx, releaseJobSQL, id, string(contract.JobRetry), notBefore.UTC(), nullText(cause), string(contract.JobClaimed))
+	if err != nil {
+		return fmt.Errorf("store: ReleaseJob %d: %w", id, err)
 	}
 	return nil
 }

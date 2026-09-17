@@ -7,6 +7,34 @@ import (
 	"time"
 )
 
+// maxWindowPeriod is the longest window a header may describe. The seconds
+// field of every `a:b` pair arrives from strconv.Atoi, so it can be as large as
+// MaxInt64, and `time.Duration(seconds) * time.Second` overflows int64 above
+// roughly 9.2e9 seconds. The wrap-around is not reliably negative -
+// 18446744074 seconds lands back inside int64 as 290ms, turning a window
+// advertised as one request per ten billion seconds into 3.4 requests per
+// second - so the value has to be range-checked before the multiply, not
+// sign-checked after it.
+//
+// A day is the bound because Riot's longest advertised window is 600s (the
+// `180000:600` pair a production key sends) and 86400 is 144 times that: no
+// real advertisement is rejected, while the multiply stays trivially inside
+// int64 at 8.6e13 nanoseconds. The bound is generous on purpose: dropping an
+// advertised window makes the crawl go faster, not slower, so a period this
+// code does not recognise is better kept and bounded by maxWait than thrown
+// away.
+const maxWindowPeriod = 24 * time.Hour
+
+// headerPeriod converts a header's seconds field into a Duration, reporting
+// whether the result is positive and sane. Callers drop a pair that is not,
+// which is the same treatment as an unreadable one.
+func headerPeriod(seconds int) (time.Duration, bool) {
+	if seconds <= 0 || time.Duration(seconds) > maxWindowPeriod/time.Second {
+		return 0, false
+	}
+	return time.Duration(seconds) * time.Second, true
+}
+
 // Window is one advertised rate limit: at most Limit requests in Period.
 //
 // Riot sends these as `limit:seconds` pairs in X-App-Rate-Limit and
@@ -77,10 +105,14 @@ func ParseWindows(header string) []Window {
 			continue
 		}
 		seconds, err := strconv.Atoi(strings.TrimSpace(periodStr))
-		if err != nil || seconds <= 0 {
+		if err != nil {
 			continue
 		}
-		out = append(out, Window{Limit: limit, Period: time.Duration(seconds) * time.Second})
+		period, ok := headerPeriod(seconds)
+		if !ok {
+			continue
+		}
+		out = append(out, Window{Limit: limit, Period: period})
 	}
 	return out
 }
@@ -103,10 +135,14 @@ func parseCounts(header string) map[time.Duration]int {
 			continue
 		}
 		seconds, err := strconv.Atoi(strings.TrimSpace(periodStr))
-		if err != nil || seconds <= 0 {
+		if err != nil {
 			continue
 		}
-		out[time.Duration(seconds)*time.Second] = count
+		period, ok := headerPeriod(seconds)
+		if !ok {
+			continue
+		}
+		out[period] = count
 	}
 	if len(out) == 0 {
 		return nil
@@ -152,17 +188,20 @@ func readRateLimitHeaders(h http.Header) rateLimitHeaders {
 // ParseRetryAfter reads the Retry-After header in either of its two legal
 // forms: a delay in seconds, or an HTTP date. A value we cannot read is
 // reported as zero so the caller can fall back to its own backoff rather than
-// treating "unreadable" as "no wait".
+// treating "unreadable" as "no wait". A delay that no Duration can hold - the
+// seconds form is parsed with strconv.Atoi, so it too can overflow the
+// multiply - is unreadable in exactly that sense and is reported as zero; the
+// limiter's own capped backoff covers the retry.
 func ParseRetryAfter(header string, now time.Time) time.Duration {
 	header = strings.TrimSpace(header)
 	if header == "" {
 		return 0
 	}
 	if seconds, err := strconv.Atoi(header); err == nil {
-		if seconds <= 0 {
-			return 0
+		if d, ok := headerPeriod(seconds); ok {
+			return d
 		}
-		return time.Duration(seconds) * time.Second
+		return 0
 	}
 	if at, err := http.ParseTime(header); err == nil {
 		if d := at.Sub(now); d > 0 {

@@ -40,8 +40,9 @@ type fakeStore struct {
 
 	// failUpsert and failClaim inject control-plane failures; the worker's
 	// recovery behaviour is the point of those tests.
-	failUpsert error
-	failClaim  error
+	failUpsert   error
+	failClaim    error
+	failComplete error
 }
 
 // fakeJob keeps the queue row state the crawler's transitions depend on.
@@ -185,10 +186,19 @@ func (s *fakeStore) ClaimJobs(_ context.Context, limit int, now time.Time) ([]co
 	return out, nil
 }
 
-func (s *fakeStore) CompleteJob(_ context.Context, id int64) error {
+func (s *fakeStore) CompleteJob(ctx context.Context, id int64) error {
+	if err := ctx.Err(); err != nil {
+		// The real store refuses a statement on a cancelled context; the fake
+		// has to as well, or a shutdown path that forgets to detach looks
+		// healthy here and strands rows in production.
+		return fmt.Errorf("store: CompleteJob %d: %w", id, err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.log("complete %d", id)
+	if s.failComplete != nil {
+		return s.failComplete
+	}
 	job, ok := s.jobs[id]
 	if !ok || job.status != "claimed" {
 		return nil
@@ -197,7 +207,13 @@ func (s *fakeStore) CompleteJob(_ context.Context, id int64) error {
 	return nil
 }
 
-func (s *fakeStore) RetryJob(_ context.Context, id int64, notBefore time.Time, cause string) error {
+func (s *fakeStore) RetryJob(ctx context.Context, id int64, notBefore time.Time, cause string) error {
+	if err := ctx.Err(); err != nil {
+		// The real store refuses a statement on a cancelled context; the fake
+		// has to as well, or a shutdown path that forgets to detach looks
+		// healthy here and strands rows in production.
+		return fmt.Errorf("store: RetryJob %d: %w", id, err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.log("retry %d", id)
@@ -206,6 +222,24 @@ func (s *fakeStore) RetryJob(_ context.Context, id int64, notBefore time.Time, c
 		return nil
 	}
 	job.status, job.notBefore, job.cause = "retry", notBefore, cause
+	return nil
+}
+
+func (s *fakeStore) ReleaseJob(ctx context.Context, id int64, notBefore time.Time, cause string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("store: ReleaseJob %d: %w", id, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log("release %d", id)
+	job, ok := s.jobs[id]
+	if !ok || job.status != "claimed" {
+		return nil
+	}
+	job.status, job.notBefore, job.cause, job.claimedAt = "retry", notBefore, cause, time.Time{}
+	if job.item.Attempts > 0 {
+		job.item.Attempts--
+	}
 	return nil
 }
 
@@ -493,6 +527,29 @@ func (s *fakeStore) RecomputeFrontierPriority(_ context.Context) (int, error) {
 	return changed, nil
 }
 
+func (s *fakeStore) ReplayDeadLettered(_ context.Context, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log("replay-dead %d", limit)
+	if limit <= 0 {
+		return 0, nil
+	}
+	replayed := 0
+	for _, id := range s.jobIDsLocked() {
+		if replayed == limit {
+			break
+		}
+		job := s.jobs[id]
+		if job.status != "dead" {
+			continue
+		}
+		job.status, job.item.Attempts, job.cause, job.claimedAt = "pending", 0, "", time.Time{}
+		job.notBefore = job.item.NotBefore
+		replayed++
+	}
+	return replayed, nil
+}
+
 func (s *fakeStore) QueueDepths(_ context.Context) (map[contract.JobStatus]int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -579,6 +636,28 @@ func (s *fakeStore) jobStatus(matchID string) string {
 		}
 	}
 	return ""
+}
+
+// jobCount is how many rows the queue holds, for a test that wants to claim
+// everything it has seeded.
+func (s *fakeStore) jobCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.jobs)
+}
+
+// deadJobs counts retired rows, which is what "the crawl gave up on this match"
+// looks like from the outside.
+func (s *fakeStore) deadJobs() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dead := 0
+	for _, job := range s.jobs {
+		if job.status == "dead" {
+			dead++
+		}
+	}
+	return dead
 }
 
 func (s *fakeStore) jobCause(matchID string) string {
@@ -669,6 +748,12 @@ type fakeFetcher struct {
 	age      time.Duration
 	haveAge  bool
 	apexCall int
+
+	// onFetch runs after the call is recorded and before the fixture is
+	// answered, so a test can make the world change mid-batch - the D4 case,
+	// where a TERM arrives between two rows of the same claim. The hook runs
+	// while the fetcher is locked: it must not call back into the fetcher.
+	onFetch func(matchID string)
 }
 
 var (
@@ -749,6 +834,9 @@ func (f *fakeFetcher) MatchWithPayload(_ context.Context, matchID string) (riot.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("match:" + matchID)
+	if f.onFetch != nil {
+		f.onFetch(matchID)
+	}
 	if err, ok := f.errors["match:"+matchID]; ok {
 		return riot.MatchDTO{}, nil, err
 	}
@@ -866,6 +954,10 @@ type fakeWriter struct {
 	failMatch  error
 	failLeague error
 	failFlush  error
+
+	// onWrite runs after a payload has been archived, which is the moment a
+	// test can land a shutdown between the archive write and the row close.
+	onWrite func(matchID string)
 }
 
 type staticWrite struct {
@@ -887,15 +979,21 @@ func newFakeWriter() *fakeWriter {
 
 func (w *fakeWriter) WriteMatch(_ context.Context, match riot.MatchDTO, meta contract.MatchMeta) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.failMatch != nil {
-		return w.failMatch
+	fail := w.failMatch
+	if fail == nil {
+		if meta.MatchID == "" {
+			meta.MatchID = match.Metadata.MatchID
+		}
+		w.metas = append(w.metas, meta)
+		w.matchBodies[meta.MatchID] = match.RawPayload()
 	}
-	if meta.MatchID == "" {
-		meta.MatchID = match.Metadata.MatchID
+	w.mu.Unlock()
+	if fail != nil {
+		return fail
 	}
-	w.metas = append(w.metas, meta)
-	w.matchBodies[meta.MatchID] = match.RawPayload()
+	if w.onWrite != nil {
+		w.onWrite(meta.MatchID)
+	}
 	return nil
 }
 
@@ -918,7 +1016,14 @@ func (w *fakeWriter) WriteStatic(_ context.Context, kind, version, locale string
 	return nil
 }
 
-func (w *fakeWriter) Flush(context.Context) error {
+func (w *fakeWriter) Flush(ctx context.Context) error {
+	// The real writer refuses to touch its parts on a cancelled context, and
+	// that refusal is what a graceful stop runs into: the payloads are already
+	// buffered, so a flush that fails because of the stop is a flush that has
+	// to be retried on a context that outlives it.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.failFlush != nil {

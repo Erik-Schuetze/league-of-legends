@@ -378,18 +378,6 @@ func containsIndex(indexes []fixtureParticipantIndex, want fixtureParticipantInd
 	return false
 }
 
-// fixtureJSONL renders a match set as the newline-delimited JSON the archive
-// fixture stores, one document per line, sorted by partition and match id so
-// the file is stable under regeneration.
-func fixtureJSONL(matches []fixtureMatch) string {
-	var b strings.Builder
-	for _, m := range matches {
-		b.WriteString(renderMatch(m))
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
 // fixtureFiles groups the rendered lines by partition.
 func fixtureFiles(matches []fixtureMatch) map[string]string {
 	files := map[string]string{}

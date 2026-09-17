@@ -1,6 +1,8 @@
 ---
 import type { Window } from '../types/agg';
 import { utcStamp, windowLabel } from '../lib/format';
+import { NON_ENDORSEMENT_TEXT, TRADEMARK_TEXT } from '../lib/legal';
+import { siteData } from '../lib/site';
 
 interface Props {
   patch: string;
@@ -10,8 +12,20 @@ interface Props {
 
 const { patch, generatedAt, sourceWindow } = Astro.props;
 
+// The data state is read from the manifest rather than taken as a prop: the
+// Props interface above is the frozen component API, and the footer's provenance
+// line must not be able to disagree with the banner at the top of the same page.
+const state = siteData().state;
+
 // The four compliance links. They are part of the Riot compliance surface, so
 // they are rendered unconditionally and no page can drop them.
+//
+// The non-endorsement block below renders the frozen sentences from
+// web/src/lib/legal.ts verbatim rather than carrying its own wording. A
+// paraphrase here would be a second, weaker statement of the same notice served
+// on more pages than the real one, which is exactly the drift the invariant in
+// legal.ts forbids; scripts/compliance-check.sh check 6 now fails if this file
+// stops reading the constant.
 const links = [
   { href: '/about', label: 'About' },
   { href: '/legal/terms', label: 'Terms' },
@@ -27,7 +41,7 @@ const links = [
       {
         sourceWindow && (
           <span class="kv">
-            <span class="k">Matches played</span>{' '}
+            <span class="k">{state === 'live' ? 'Matches played' : 'Window covered'}</span>{' '}
             <span class="v">{windowLabel(sourceWindow.from, sourceWindow.to)}</span>
           </span>
         )
@@ -48,10 +62,7 @@ const links = [
     </nav>
 
     <p class="riot">
-      A statistics mirror of ranked solo queue. Not endorsed by Riot Games, and it
-      does not reflect the views of Riot Games or anyone involved in producing or
-      managing Riot Games properties. League of Legends and Riot Games are
-      trademarks or registered trademarks of Riot Games, Inc.
+      {TRADEMARK_TEXT} {NON_ENDORSEMENT_TEXT}
     </p>
   </div>
 </footer>

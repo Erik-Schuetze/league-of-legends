@@ -39,6 +39,13 @@ type RateLimitedError struct {
 	Method     string
 	Attempts   int
 	RetryAfter time.Duration
+	// Suspended marks a call that was abandoned because the Retry-After Riot
+	// named outlasted the call's own deadline. The call was made and answered,
+	// and the limiter is holding the suspension it named, so the row must be
+	// scheduled past it - a row released as if the process were going away
+	// comes straight back into the closed limiter, which is what keeps a
+	// suspended key suspended.
+	Suspended bool
 }
 
 func (e *RateLimitedError) Error() string {

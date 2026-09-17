@@ -17,6 +17,18 @@ type LimiterOptions struct {
 	// stale, shared or misread header that claims a larger allowance must
 	// not be able to spend the key's real budget. Zero means the
 	// development-key defaults.
+	//
+	// The ceiling is authoritative across window periods. A request takes a
+	// token from every window, so the effective rate is the tightest of the
+	// windows present; the ceiling's windows are always among them. An
+	// advertised window for a period the ceiling also configures is
+	// clamped to the tighter of the two, and a period the ceiling does not
+	// configure is kept as advertised but can only ever lower the rate. An
+	// advertisement for a period this config has never seen - Riot's
+	// production keys send `3000:10,180000:600` where the development key
+	// says `20:1,100:120` - therefore cannot raise the rate above the
+	// ceiling, and a header that omits a period altogether cannot drop the
+	// ceiling window that covers it. See clampTo and Limiter.resolve.
 	Ceiling []Window
 
 	// Bootstrap is the window set used before the first response of a run
@@ -33,6 +45,23 @@ type LimiterOptions struct {
 
 const defaultMaxRetryAfter = 5 * time.Minute
 
+// maxWait is the longest wait the limiter will ever ask a caller to sleep.
+//
+// Every other number in this file is derived from a response header, and a
+// wait is the one output whose cost is unbounded wall-clock time: a balance
+// written from a -Count header, or a window whose period a header chose, can
+// otherwise produce a sleep measured in years. The crawl then stops without
+// crashing and without an error to alert on, which is worse than a crash
+// because nothing fires.
+//
+// The number is deliberate. A floored balance can only ask for one window's
+// worth of tokens plus the one being reserved, and Riot's longest advertised
+// window is 600s - the `180000:600` pair a production key sends - so no honest
+// header asks for much more than ten minutes. 30 minutes clears that three
+// times over, while a polluted header is still only made to pause: the wait
+// ends, the reservation is taken again, and the crawl resumes.
+const maxWait = 30 * time.Minute
+
 // Limiter is a token-bucket limiter whose bucket sizes come from Riot's own
 // response headers.
 //
@@ -41,6 +70,9 @@ const defaultMaxRetryAfter = 5 * time.Minute
 // every response, and the -Count headers are used to remove tokens the server
 // says are already spent. A key that is upgraded mid-run therefore goes faster
 // without a restart, and a key that is throttled slower without one either.
+//
+// The one constant is the ceiling, which is never dropped from the bucket set:
+// Riot's headers decide the rate below it, never above it.
 type Limiter struct {
 	clock         Clock
 	ceiling       []Window
@@ -159,6 +191,13 @@ func (l *Limiter) reserve() time.Duration {
 		}
 	}
 
+	// Defence in depth. The balances waitFor reads are floored where they are
+	// written, so a sane window set cannot reach this, but the caller's sleep
+	// is the one place a header could still cost unbounded real time.
+	if wait > maxWait {
+		wait = maxWait
+	}
+
 	at := now.Add(wait)
 	for _, b := range l.allBuckets() {
 		b.refill(at)
@@ -191,41 +230,99 @@ func (l *Limiter) Observe(headers rateLimitHeaders) {
 	// response", so the previous knowledge for that scope stands. Replacing
 	// it with nothing would silently remove the only limit we know about.
 	if headers.HasApplication {
-		l.app = l.resolve(headers.AppLimit, headers.AppCount, now)
+		l.app = l.resolve(l.app, headers.AppLimit, headers.AppCount, now)
 	}
 	if headers.HasMethod {
-		l.method = l.resolve(headers.MethodLimit, headers.MethodCount, now)
+		l.method = l.resolve(l.method, headers.MethodLimit, headers.MethodCount, now)
 	}
 	if headers.HasApplication || headers.HasMethod {
 		l.advertised = true
 	}
 }
 
-// resolve clamps the advertised windows to the ceiling and seeds each bucket's
-// balance from the count the server reported.
-func (l *Limiter) resolve(advertised []Window, counts map[time.Duration]int, now time.Time) []*bucket {
-	out := make([]*bucket, 0, len(advertised))
-	for _, w := range advertised {
-		if limit, ok := clampTo(w, l.ceiling); ok {
-			w.Limit = limit
+// resolve builds one scope's bucket set from what Riot advertised plus the
+// configured ceiling, seeded from the counts the server reported.
+//
+// The set is the union of the two, which is what makes the ceiling
+// authoritative. Every request takes a token from every bucket, so a window
+// added to the set can only ever lower the effective rate - it can never raise
+// it, however large the allowance it advertises. Two consequences are the point:
+//
+//   - a window Riot advertises for a period the ceiling does not configure
+//     (a production key's `3000:10`) is kept, so it may tighten, but the
+//     ceiling's own windows stay in the set, so the rate stays at or below the
+//     ceiling instead of jumping to 300/s;
+//   - a window Riot omits is not a window to forget. A response that mentions
+//     only a one-second period leaves the ceiling's longer window in place.
+//
+// current is the scope's previous set; balances are carried over per period so
+// that a window Riot reports no count for does not refill on every response.
+func (l *Limiter) resolve(current []*bucket, advertised []Window, counts map[time.Duration]int, now time.Time) []*bucket {
+	out := make([]*bucket, 0, len(advertised)+len(l.ceiling))
+	added := make(map[time.Duration]bool, len(advertised)+len(l.ceiling))
+	add := func(w Window) {
+		if w.Limit <= 0 || w.Period <= 0 || added[w.Period] {
+			return
 		}
-		b := newBucket(w, now)
+		added[w.Period] = true
+		b := resize(current, w, now)
 		if used, ok := counts[w.Period]; ok {
 			// The server counts what was used in the window that is
 			// already running; treating that as spent from now on is
 			// pessimistic by up to one period and never optimistic,
 			// which is the right direction to be wrong in.
-			b.tokens = math.Min(b.tokens, float64(w.Limit-used))
+			//
+			// The count is floored at the debt reserve() itself allows,
+			// because these headers report the key's *global* usage: any
+			// other consumer of the key makes used exceed limit without
+			// anyone behaving badly, and an unfloored balance would be
+			// spent as years of wait rather than as one window of debt.
+			// Bounding it here means the very first reservation after the
+			// header is already bounded, not just later ones.
+			observed := math.Max(float64(w.Limit-used), -b.limit)
+			b.tokens = math.Min(b.tokens, observed)
 		}
 		out = append(out, b)
+	}
+	// Advertised windows first: for a period both sides configure, clampTo has
+	// already reduced the advertisement to the tighter of the two, so the
+	// ceiling's duplicate of that period must not be added again.
+	for _, w := range advertised {
+		if limit, ok := clampTo(w, l.ceiling); ok {
+			w.Limit = limit
+		}
+		add(w)
+	}
+	for _, c := range l.ceiling {
+		add(c)
 	}
 	return out
 }
 
-// clampTo applies the ceiling to one advertised window. Only a window with the
-// same period as a ceiling window is clamped; an unknown period is trusted as
-// advertised, because the alternative - inventing a limit Riot did not send -
-// would throttle a key that is entitled to more.
+// resize returns the bucket for w, reusing the balance of the current set's
+// bucket for the same period when there is one. Resizing must not refill: a
+// window the server reports no count for would otherwise be handed back its
+// whole allowance on every single response, which is how a ceiling window ends
+// up inert even though it is in the set.
+func resize(current []*bucket, w Window, now time.Time) *bucket {
+	for _, b := range current {
+		if b.period != w.Period {
+			continue
+		}
+		b.refill(now)
+		b.limit = float64(w.Limit)
+		b.tokens = math.Min(b.tokens, b.limit)
+		return b
+	}
+	return newBucket(w, now)
+}
+
+// clampTo applies the ceiling to one advertised window. A window whose period
+// matches a ceiling window is reduced to the ceiling's limit. A window with a
+// period no ceiling window shares is returned unchanged: it is still added to
+// the bucket set, where it can only lower the rate, so trusting the number Riot
+// sent for a period this config does not know about cannot spend more than the
+// ceiling allows.
 func clampTo(w Window, ceiling []Window) (int, bool) {
 	for _, c := range ceiling {
 		if c.Period == w.Period && w.Limit > c.Limit {

@@ -97,7 +97,7 @@ func (s *buildState) path(name string) string { return filepath.Join(s.scratch, 
 func (s *buildState) run(ctx context.Context, result *BuildResult) error {
 	engine := s.opts.Engine
 	if engine == nil {
-		cli, err := OpenCLIEngine(ctx, s.opts.DuckDBBin, s.opts.AllowVersionMismatch, s.opts.Log)
+		cli, err := OpenCLIEngine(ctx, s.opts.DuckDBBin, s.opts.AllowVersionMismatch, s.opts.DuckDB, s.opts.Log)
 		if err != nil {
 			return err
 		}

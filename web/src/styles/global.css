@@ -34,6 +34,11 @@
   --focus-ring: 0 0 0 2px var(--accent-color);
   --focus-ring-offset: 2px;
 
+  /* Clearance under the fixed navbar. The bar is 51px tall and `body` reserves
+     4rem for it; 5rem leaves anything scrolled or focused below the bar with
+     room to spare. */
+  --nav-clearance: 5rem;
+
   /* Spacing. The content area is tight (plan 7.2.1); headings and page framing
      keep the portfolio's generous scale. */
   --space-1: 4px;
@@ -256,9 +261,71 @@ time,
   outline-offset: var(--focus-ring-offset);
 }
 
-/* Skip target for a page's own skip link. */
-[id]:target {
-  scroll-margin-top: 5rem;
+/* Skip target for a page's own skip link, and the document scroller's padding
+   for the same reason: the navbar is fixed over the top of the page, so anything
+   the browser scrolls to on its own - a fragment, a `scrollIntoView`, the focus
+   that follows a Tab - must stop below the bar instead of parking under it. */
+html {
+  scroll-padding-top: var(--nav-clearance);
+}
+
+[id]:target,
+:where(a, button, summary, [tabindex], input, select, textarea) {
+  scroll-margin-top: var(--nav-clearance);
+}
+
+/*
+ * The bar paints over the page, and at some scroll offsets it paints over
+ * content that is still interactive - the sort control of a table island at
+ * scrollY 550-590, for instance, where a click aimed at the control lands on the
+ * bar and does nothing at all. Its gradient is opaque at the top and dissolves
+ * to nothing at its foot, so that content stays visible as it passes under, and
+ * a bar that is see-through must not be a hit-test target: `pointer-events` is
+ * inherited, so the frame below stops swallowing clicks while every surface
+ * inside it that paints something or takes input re-enables itself. The bar
+ * keeps its layout, its paint and its links; a click aimed at content beneath it
+ * reaches that content wherever the bar paints nothing and no interactive
+ * surface of the bar is over it - instead of dying on the gradient.
+ *
+ * The bound is deliberate: this rule does NOT make content clickable where one
+ * of the bar's own interactive children is on top of it. On a table route
+ * scrolled so that the sort control passes under the bar, the `summary` of the
+ * Matchups disclosure still sits over part of the control (measured at scrollY
+ * 555-581: x 412-478, 52-61 of the control's 110 px in the default sort state
+ * and of its 102 px in the other) and a click there opens the menu - correctly,
+ * since that control is not sticky and the reader has scrolled it under a fixed
+ * header. `pointer-events: none` here narrows the bar's hit area to exactly what
+ * the bar paints and interacts with. It does not remove that overlap and is not
+ * meant to.
+ */
+.ds-navbar {
+  pointer-events: none;
+}
+
+.ds-navbar :is(a, button, summary, details, input, select, textarea, p, ul) {
+  pointer-events: auto;
+}
+
+/* The menu's caret is the one surface inside the bar whose box reaches past what
+ * it paints: `content: ' +'` puts a monospace space in front of the glyph, and
+ * the disclosure box therefore extended a whole character past the label. At
+ * scrollY 560-580 on a table route that blank space sat over the sort control,
+ * so a click aimed at the control opened the menu instead of sorting. Taking the
+ * caret out of flow makes the box stop at the label while the glyph keeps its
+ * place: `0.6em` is exactly the advance the space used to occupy in this
+ * monospace face, and the leading space is trimmed in the new line box. The
+ * paint is unchanged - the caret is still one character from the label and still
+ * part of the disclosure control.
+ *
+ * What this buys is narrower than "the control is no longer covered": the
+ * summary's hit area is now exactly what it paints, its box plus the caret glyph,
+ * so the blank part of the caret no longer eats clicks aimed at the control. The
+ * box and the glyph still do, and a click there still opens the menu - see the
+ * bound in the `.ds-navbar` block above. Only the un-painted part is reclaimed. */
+.ds-navbar .menu > .summary::after {
+  position: absolute;
+  left: calc(100% + 0.6em);
+  white-space: nowrap;
 }
 
 .ds-visually-hidden {

@@ -58,6 +58,10 @@ because they are the project's actual risk.
 
 - `CGO_ENABLED=0` produces a fully static binary, so the runtime image is
   distroless and nonroot with no libc, no shell and no package manager.
+  **Superseded by ADR-007:** the runtime base later became distroless `cc`
+  (which does carry a libc) because the pinned DuckDB CLI is a glibc binary and
+  cannot execute on `static`. The Go binaries remain static and CGO-free; "no
+  libc" no longer describes the runtime image.
 - Concurrency primitives fit the crawler exactly: `errgroup`, a semaphore and
   `context` cancellation for shutdown and for `Retry-After` delays.
 - The Go structs in `internal/aggmodel` are the single source of truth for the

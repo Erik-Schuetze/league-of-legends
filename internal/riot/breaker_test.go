@@ -128,10 +128,68 @@ func TestClientBreakerIgnoresServerErrors(t *testing.T) {
 	}
 }
 
+// A transient bump - a burst of 429s - is paid for with a growing wait, and the
+// growth is what keeps a throttled crawler from turning into a busy loop. The
+// wait is capped: once the backoff has saturated the breaker stops admitting
+// probes on a schedule of its own.
 func TestClientBreakerBackoffGrowsAcrossTrips(t *testing.T) {
-	// Each further trip doubles what the next probe costs, capped at MaxWait.
-	// The cap matters: an unbounded doubling turns a long outage into a
-	// crawler that never comes back on its own.
+	clock := NewFakeClock(testStart)
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setRateHeaders(w, "20:1,100:120", "1:1,1:120", "", "")
+		requests.Add(1)
+		w.Header().Set(headerRetryAfter, "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		writeBody(w, `{"status":{"message":"Rate limit exceeded","status_code":429}}`)
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv, clock, testKeys(), func(o *Options) {
+		o.MaxAttempts = 1
+		o.BreakerThreshold = 1
+		o.BreakerCooldown = time.Minute
+		o.BreakerMaxWait = 8 * time.Minute
+	})
+
+	for i := 0; i < 4; i++ {
+		if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p"}); err == nil {
+			t.Fatalf("call %d: expected the probe to reach Riot and be rate limited", i+1)
+		}
+	}
+	if trips := client.BreakerTrips(); trips != 4 {
+		t.Fatalf("trips = %d, want 4", trips)
+	}
+	if got := requests.Load(); got != 4 {
+		t.Fatalf("requests = %d, want 4", got)
+	}
+	sleeps := clock.Sleeps()
+	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute}
+	if len(sleeps) != len(want) {
+		t.Fatalf("sleeps = %v, want %v", sleeps, want)
+	}
+	for i := range want {
+		if sleeps[i] != want[i] {
+			t.Fatalf("sleeps = %v, want %v", sleeps, want)
+		}
+	}
+
+	// The fifth call finds the backoff saturated at MaxWait, and the breaker
+	// refuses instead of sleeping: the crawl is told to come back, rather than
+	// being drip-fed one probe every MaxWait for as long as the outage lasts.
+	before := requests.Load()
+	if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p"}); !errors.Is(err, ErrCircuitOpen) {
+		t.Fatalf("err = %v, want ErrCircuitOpen once the backoff has saturated", err)
+	}
+	if after := requests.Load(); after != before {
+		t.Fatalf("a stopped breaker still made %d requests", after-before)
+	}
+}
+
+// The regression test for the runaway: a refused key must stop the crawler
+// rather than buy a fixed drip of requests with each cooldown. Before the fix
+// every cycle admitted exactly `threshold` more 403s, so a permanently refused
+// key produced calls forever and burned the queue's attempt budget row by row.
+func TestClientBreakerStopsInsteadOfDrippingRequestsWhileTheKeyIsRefused(t *testing.T) {
 	clock := NewFakeClock(testStart)
 	var requests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -141,35 +199,50 @@ func TestClientBreakerBackoffGrowsAcrossTrips(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	const threshold = 3
 	client := newTestClient(t, srv, clock, testKeys(), func(o *Options) {
 		o.MaxAttempts = 1
-		o.BreakerThreshold = 1
-		o.BreakerCooldown = time.Minute
+		o.BreakerThreshold = threshold
+		o.BreakerCooldown = 30 * time.Second
 		o.BreakerMaxWait = 2 * time.Minute
 	})
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < threshold; i++ {
 		if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p"}); !IsStatus(err) {
-			t.Fatalf("call %d: err = %v, want a probe that reaches Riot and fails", i+1, err)
+			t.Fatalf("call %d: err = %v, want the 403 that trips the breaker", i+1, err)
 		}
 	}
-	if trips := client.BreakerTrips(); trips != 3 {
-		t.Fatalf("trips = %d, want 3", trips)
+	if trips := client.BreakerTrips(); trips != 1 {
+		t.Fatalf("trips = %d, want 1", trips)
 	}
-	if got := requests.Load(); got != 3 {
-		t.Fatalf("requests = %d, want 3", got)
-	}
-	sleeps := clock.Sleeps()
-	want := []time.Duration{time.Minute, 2 * time.Minute}
-	if len(sleeps) != len(want) {
-		t.Fatalf("sleeps = %v, want %v", sleeps, want)
-	}
-	for i := range want {
-		if sleeps[i] != want[i] {
-			t.Fatalf("sleeps = %v, want %v", sleeps, want)
+
+	// An auth failure goes straight to the longest wait: the key does not fix
+	// itself in a cooldown, and every request with a refused key is another
+	// chance to lose access permanently. Between probes the client makes no
+	// requests at all - it reports the outage and lets the caller pause.
+	for round := 1; round <= 3; round++ {
+		before := requests.Load()
+		for i := 0; i < threshold*2; i++ {
+			if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p"}); !errors.Is(err, ErrCircuitOpen) {
+				t.Fatalf("round %d call %d: err = %v, want ErrCircuitOpen from a stopped breaker", round, i+1, err)
+			}
 		}
+		if after := requests.Load(); after != before {
+			t.Fatalf("round %d: a stopped breaker made %d requests", round, after-before)
+		}
+		clock.Advance(defaultBreakerProbeWait + time.Second)
+		if _, err := client.MatchIDs(context.Background(), MatchListQuery{PUUID: "p"}); !IsStatus(err) {
+			t.Fatalf("round %d: err = %v, want the one probe per cooldown to reach Riot and be refused", round, err)
+		}
+	}
+	if got := requests.Load(); got != threshold+3 {
+		t.Fatalf("requests = %d, want %d: one probe per cooldown after the trip", got, threshold+3)
 	}
 }
+
+// defaultBreakerProbeWait is the wait the client is configured with in the test
+// above, named so the test's arithmetic reads as "after one cooldown".
+const defaultBreakerProbeWait = 2 * time.Minute
 
 func TestClientBreakerTripsMidRetryOnRepeated429(t *testing.T) {
 	clock := NewFakeClock(testStart)

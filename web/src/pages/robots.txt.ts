@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { FALLBACK_SITE_URL } from '../lib/legal';
 import { siteData } from '../lib/site';
 
 // A robots.txt that allows everything and points at the generated sitemap. It
@@ -7,7 +8,7 @@ import { siteData } from '../lib/site';
 // disagree with the sitemap's own URLs.
 
 export const GET: APIRoute = ({ site }) => {
-  const origin = (site ?? new URL('https://lolstats.example.invalid')).origin;
+  const origin = (site ?? new URL(FALLBACK_SITE_URL)).origin;
   const data = siteData();
 
   const body = [

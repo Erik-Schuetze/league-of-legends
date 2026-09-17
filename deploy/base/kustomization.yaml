@@ -30,8 +30,9 @@ resources:
   - web/service.yaml
 
   # Every scheduled unit of work, in the order they run during a night:
-  # aggregate (01:00), discover-seeds (02:10), static-sync (03:10), site-build
-  # (03:40), maintain (hourly), backfill (suspended, manual only).
+  # aggregate (01:00), discover-seeds (02:10), static-sync (03:10, suspended
+  # until its subcommand exists), site-build (03:40), maintain (hourly),
+  # backfill (suspended, manual only).
   - jobs/aggregate.yaml
   - jobs/discover-seeds.yaml
   - jobs/static-sync.yaml

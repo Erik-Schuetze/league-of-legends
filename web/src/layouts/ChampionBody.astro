@@ -34,6 +34,7 @@ import {
   type Row,
 } from '../lib/rows';
 import { emptyReason, type Snapshot } from '../lib/page';
+import { computedFromSentence, computedHeading } from '../lib/legal';
 import { iconUrl } from '../lib/site';
 import { absoluteUrl, jsonLdDataset } from '../lib/seo';
 
@@ -263,7 +264,7 @@ const url = absoluteUrl(role ? `/champions/${champion.slug}/${roleSlug(role)}/` 
         <BuildList title={`Runes on ${champion.name}`} builds={roleDetail.runes} kind="runes" lookup={lookup} />
         <BuildList title={`Summoner spells on ${champion.name}`} builds={roleDetail.spells} kind="spells" lookup={lookup} />
         <p>
-          Builds are the combinations the aggregator observed most often, already ordered by number of games. They are
+          Builds are the combinations the artifact recorded most often, already ordered by number of games. They are
           counts of what was played, not a recommendation: this site publishes what happened, and nothing here is a
           suggestion about what to buy.
         </p>
@@ -322,16 +323,13 @@ const url = absoluteUrl(role ? `/champions/${champion.slug}/${roleSlug(role)}/` 
     ) : null
   }
 
-  <h2>How this page is computed</h2>
+  <h2>{computedHeading(snap.site)}</h2>
   <p>
-    The numbers come from Riot's MATCH-V5 match feed, aggregated per patch and per queue, and this page was rendered from
-    the published aggregate artifact at build time. Win rate is wins divided by games in this cell; the 95% interval is
-    reported so that a small sample cannot look like a precise one. Cells below n = {integer(minCellN)} games are
-    withheld rather than published.
+    {computedFromSentence(snap.site, partition?.min_cell_n ?? null)}
   </p>
 
   {
-    stats && partition ? (
+    stats && partition && snap.site.state === 'live' ? (
       <JsonLd
         value={jsonLdDataset({
           url,
@@ -352,6 +350,7 @@ const url = absoluteUrl(role ? `/champions/${champion.slug}/${roleSlug(role)}/` 
             { name: 'pick rate', unit: 'pick rate' },
             { name: 'ban rate', unit: 'ban rate' },
           ],
+          state: snap.site.state,
         })}
       />
     ) : null

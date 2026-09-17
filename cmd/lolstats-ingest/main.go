@@ -9,7 +9,8 @@
 //	discover-seeds  enumerate seed summoner PUUIDs for the configured ladder
 //	static-sync     mirror Data Dragon versions and static data into the archive
 //	backfill        re-run a bounded key range through the crawl path
-//	maintain        reclaim abandoned claims, prune the frontier, re-rank it
+//	maintain        reclaim abandoned claims, prune the frontier, re-rank it,
+//	                replay dead letters with -replay-dead-letters
 //	migrate up      apply the forward migrations
 //
 // The Riot API key is optional. With no key the process starts, serves health
@@ -53,7 +54,8 @@ subcommands:
   discover-seeds  enumerate seed summoner PUUIDs for the configured ladder
   static-sync     mirror Data Dragon versions and static data into the archive
   backfill        re-run a bounded key range through the crawl path
-  maintain        reclaim abandoned claims, prune the frontier, re-rank it
+  maintain        reclaim abandoned claims, prune the frontier, re-rank it,
+                  replay dead letters with -replay-dead-letters
   migrate up      apply the forward migrations
 
 run "lolstats-ingest <subcommand> -h" for the flags of a subcommand.
@@ -283,6 +285,8 @@ func runWorker(args []string, stderr io.Writer) int {
 	retryBase := fs.Duration("retry-base", crawl.DefaultRetryBase, "base delay for a retried row")
 	retryMax := fs.Duration("retry-max", crawl.DefaultRetryMax, "ceiling for a retried row")
 	jobTimeout := fs.Duration("job-timeout", crawl.DefaultJobTimeout, "timeout for one Riot fetch")
+	claimGrace := fs.Duration("claim-grace", crawl.DefaultClaimGrace,
+		"age at which a claim held by a dead process is reclaimed at startup")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -345,6 +349,7 @@ func runWorker(args []string, stderr io.Writer) int {
 		RetryBase:     *retryBase,
 		RetryMax:      *retryMax,
 		JobTimeout:    *jobTimeout,
+		ClaimGrace:    *claimGrace,
 	})
 	if err != nil {
 		return fail(stderr, "worker", err)
@@ -648,6 +653,8 @@ func runMaintain(args []string, stderr io.Writer) int {
 	retention := fs.Duration("frontier-retention", crawl.DefaultFrontierRetention, "age at which a dead frontier entry is pruned")
 	maxEmpty := fs.Int("max-consecutive-empty", crawl.DefaultMaxConsecutiveMiss, "fruitless crawls before a frontier entry is pruned")
 	limit := fs.Int("limit", crawl.DefaultMaintainLimit, "rows changed per statement")
+	replayDeadLetters := fs.Bool("replay-dead-letters", false,
+		"return dead-lettered rows to the queue (use after the key that retired them has been fixed)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -677,6 +684,7 @@ func runMaintain(args []string, stderr io.Writer) int {
 		FrontierRetention:   *retention,
 		MaxConsecutiveEmpty: *maxEmpty,
 		Limit:               *limit,
+		ReplayDeadLetters:   *replayDeadLetters,
 		DryRun:              *dryRun,
 	})
 	if err != nil {
@@ -687,6 +695,7 @@ func runMaintain(args []string, stderr io.Writer) int {
 		"pruned", result.Pruned,
 		"reclaimed_claims", result.ReclaimedClaims,
 		"reprioritised", result.Reprioritised,
+		"replayed_dead_letters", result.ReplayedDeadLetters,
 		"frontier_size", result.FrontierSize,
 		"dead_frontier", result.DeadFrontierSize)
 	return 0

@@ -28,6 +28,10 @@ import {
 } from '../../lib/legal';
 
 const snap = snapshot();
+// The privacy page makes one claim that is about the pipeline rather than about the
+// site, and it is only true where a pipeline has run: whether a raw match archive
+// exists behind the aggregates. Section 7 states it in the tense the build allows.
+const live = snap.site.state === 'live';
 const url = absoluteUrl('/legal/privacy/', Astro.site, Astro.url);
 const title = `Privacy Policy - ${SITE_NAME}`;
 const description =
@@ -175,10 +179,13 @@ const description =
     <p>{NO_BROKER_TEXT}</p>
     <p>
       This is a deliberate design choice as well as a legal one. Riot's policies for third-party products prohibit
-      exposing personal data that way, and a statistics site does not need it: match records are reduced to counts before
-      anything is published, and the identifiers that could point at a person never reach the artifacts the site serves.
-      The raw archive that the aggregation reads is kept for the operator's own quality control and is not served, not
-      resold and not exposed to anyone.
+      exposing personal data that way, and a statistics site does not need it:{' '}
+      {live
+        ? 'match records are reduced to counts before anything is published'
+        : 'match records are reduced to counts before anything is published, and this build has no match records to reduce'}, and the identifiers that could point at a person never reach the artifacts the site serves.
+      {live
+        ? "The raw archive that the aggregation reads is kept for the operator's own quality control and is not served, not resold and not exposed to anyone."
+        : "No raw match archive exists for this build, and nothing in this policy depends on one existing: the raw archive behind a live snapshot is kept for the operator's own quality control and is not served, not resold and not exposed to anyone."}
     </p>
 
     <h2>8. If something goes wrong</h2>

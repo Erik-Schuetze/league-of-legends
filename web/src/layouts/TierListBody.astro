@@ -21,6 +21,7 @@ import { componentOr, optionalComponent } from '../lib/components';
 import { roleLabel, roleSlug } from '../lib/roles';
 import { championLinks, columnAvailabilityNote, tierListColumns, tierListRows } from '../lib/rows';
 import { emptyReason, type Snapshot } from '../lib/page';
+import { previewNumbersSentence } from '../lib/legal';
 import { jsonLdDataset } from '../lib/seo';
 
 interface Props {
@@ -36,6 +37,8 @@ const label = roleLabel(role);
 const partition = snap.partition;
 const minCellN = tierList?.min_cell_n ?? partition?.min_cell_n ?? 0;
 const suppressedCells = tierList?.suppressed_cells ?? partition?.suppressed_cells ?? null;
+// Empty on a live snapshot, so the live page reads exactly as it did before.
+const preview = previewNumbersSentence(snap.site);
 
 // docs/contracts.md section 3 gives TableIsland to the tier-list routes. It is
 // an .astro component, so it renders on the server and needs no client
@@ -80,7 +83,9 @@ const hasSample = table !== null && measured.length > 0;
   <p>
     {
       partition
-        ? `Every champion that was played in ${label.toLowerCase()} during the source window below, with the number of games each rate was measured over.`
+        ? `Every champion that was played in ${label.toLowerCase()} during the source window below, with the number of games each rate was measured over.${
+            preview ? ` ${preview}` : ''
+          }`
         : `This page will show every champion played in ${label.toLowerCase()} as soon as a snapshot is published.`
     }
   </p>
@@ -105,8 +110,7 @@ const hasSample = table !== null && measured.length > 0;
         <SampleSizeNotice n={cellGames} minCellN={minCellN} suppressedCells={suppressedCells} role={role} />
         <p>
           n above is the sum of the game counts of the published cells in this table, so it counts matches rather than
-          players: champions whose cells fall below the threshold are withheld by the aggregator and are not counted in
-          it.
+          players: champions whose cells fall below the threshold are withheld and are not counted in it.
         </p>
         {TableIsland ? (
           <TableIsland
@@ -171,11 +175,11 @@ const hasSample = table !== null && measured.length > 0;
     ranked solo queue in the {partition?.region ?? 'published'} region. Win rate is wins divided by games played in that
     role; pick rate is how often the champion was chosen for the role; ban rate is how often it was unavailable. The 95%
     interval is printed next to each rate because a rate over a few hundred games and the same rate over tens of
-    thousands are different claims.
+    thousands are different claims.{preview ? ` ${preview}` : ''}
   </p>
 
   {
-    tierList && partition ? (
+    tierList && partition && snap.site.state === 'live' ? (
       <JsonLd
         value={jsonLdDataset({
           url,
@@ -195,6 +199,7 @@ const hasSample = table !== null && measured.length > 0;
             { name: 'ban rate', unit: 'ban rate' },
             { name: '95% confidence half-width', unit: 'percentage points' },
           ],
+          state: snap.site.state,
         })}
       />
     ) : null

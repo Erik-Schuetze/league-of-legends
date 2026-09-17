@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -511,5 +512,169 @@ func TestArchiveKeepsTheGzipDecodedBytes(t *testing.T) {
 	}
 	if rows[0].Payload != syntheticPayload {
 		t.Fatalf("payload = %q, want the decompressed body", rows[0].Payload)
+	}
+}
+
+// writeStaleTmp plants the file a crashed writer leaves behind: a part that
+// was created and written to, but never flushed, so it was never renamed into
+// place.
+func writeStaleTmp(t *testing.T, dir, name string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, partDirPerm); err != nil {
+		t.Fatalf("create partition: %v", err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("a part that was never published"), partDirPerm); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return path
+}
+
+func matchMetaForTest() contract.MatchMeta {
+	return contract.MatchMeta{MatchID: "EUW1_0000000001", Region: "EUW", FetchedAt: fetchedAt}
+}
+
+// TestStaleTmpFromACrashedWriterDoesNotWedgeThePartition is the regression test
+// for the review's finding A. A process that dies between the first WriteMatch
+// of a batch and that batch's Flush leaves part-NNNNN.parquet.zst.tmp behind.
+// Before the fix every later write to that partition - in that process and in
+// every future one - failed with "raw: create part ...: file exists", while
+// Step still reported the batch as processed and the queue rows walked retry ->
+// dead_letter. After the fix the abandoned index is stepped over, so the next
+// payload lands in the partition and a reader sees it.
+func TestStaleTmpFromACrashedWriterDoesNotWedgeThePartition(t *testing.T) {
+	root := t.TempDir()
+	dir := MatchDir(root, fetchedAt.UTC().Format(time.DateOnly))
+	// The index a fresh writer would pick, already taken by a dead writer's
+	// temporary file, and young enough that it is not reaped: this is the
+	// fresh-crash case, the one where an operator restarts the crawler while
+	// the partition is still wedged.
+	writeStaleTmp(t, dir, "part-00001.parquet.zst.tmp")
+
+	w, err := New(Options{Root: root})
+	if err != nil {
+		t.Fatalf("raw.New: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	ctx := context.Background()
+	match := fetchedMatch(t, syntheticPayload, false)
+	if err := w.WriteMatch(ctx, match, matchMetaForTest()); err != nil {
+		t.Fatalf("WriteMatch on a partition with an abandoned part: %v", err)
+	}
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	paths, err := PartPaths(dir)
+	if err != nil {
+		t.Fatalf("PartPaths: %v", err)
+	}
+	if len(paths) != 1 || filepath.Base(paths[0]) != "part-00002.parquet.zst" {
+		t.Fatalf("published parts = %v, want exactly part-00002.parquet.zst", paths)
+	}
+	rows, err := ReadMatchPartition(dir)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if len(rows) != 1 || rows[0].MatchID != "EUW1_0000000001" {
+		t.Fatalf("rows = %v, want the match that was written after the crash", rows)
+	}
+}
+
+// TestAbandonedTmpIsReapedSoItCannotLitterForever is the other half of finding
+// A: stepping over an abandoned part keeps the partition writable, and reaping
+// it keeps the directory from growing a leaked file per crash. A part that is
+// still young is left alone, because under the archive's one-writer-per-
+// partition model a young temporary file can only belong to a writer that is
+// still filling it.
+func TestAbandonedTmpIsReapedSoItCannotLitterForever(t *testing.T) {
+	tests := []struct {
+		name       string
+		now        time.Time
+		wantReaped bool
+		wantPart   string
+	}{
+		{
+			name:       "younger than the staleness threshold",
+			now:        time.Now(),
+			wantReaped: false,
+			wantPart:   "part-00002.parquet.zst",
+		},
+		{
+			name:       "older than the staleness threshold",
+			now:        time.Now().Add(partTmpStaleAfter + time.Minute),
+			wantReaped: true,
+			wantPart:   "part-00001.parquet.zst",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := MatchDir(root, fetchedAt.UTC().Format(time.DateOnly))
+			stale := writeStaleTmp(t, dir, "part-00001.parquet.zst.tmp")
+
+			w, err := New(Options{Root: root, Now: func() time.Time { return tc.now }})
+			if err != nil {
+				t.Fatalf("raw.New: %v", err)
+			}
+			t.Cleanup(func() { _ = w.Close() })
+			ctx := context.Background()
+			if err := w.WriteMatch(ctx, fetchedMatch(t, syntheticPayload, false), matchMetaForTest()); err != nil {
+				t.Fatalf("WriteMatch: %v", err)
+			}
+			if err := w.Flush(ctx); err != nil {
+				t.Fatalf("Flush: %v", err)
+			}
+
+			_, statErr := os.Stat(stale)
+			if tc.wantReaped && !errors.Is(statErr, fs.ErrNotExist) {
+				t.Fatalf("stat %s = %v, want the abandoned part to be gone", stale, statErr)
+			}
+			if !tc.wantReaped && statErr != nil {
+				t.Fatalf("stat %s = %v, want a live writer's part to survive", stale, statErr)
+			}
+			paths, err := PartPaths(dir)
+			if err != nil {
+				t.Fatalf("PartPaths: %v", err)
+			}
+			if len(paths) != 1 || filepath.Base(paths[0]) != tc.wantPart {
+				t.Fatalf("published parts = %v, want exactly %s", paths, tc.wantPart)
+			}
+		})
+	}
+}
+
+// TestPartIndicesKeepAdvancingPastRepeatedAbandonedParts covers the restart
+// after restart case: several crashes leave several temporary parts, and the
+// writer must still find a free index rather than stopping at the first one.
+func TestPartIndicesKeepAdvancingPastRepeatedAbandonedParts(t *testing.T) {
+	root := t.TempDir()
+	dir := MatchDir(root, fetchedAt.UTC().Format(time.DateOnly))
+	for _, name := range []string{
+		"part-00001.parquet.zst.tmp",
+		"part-00002.parquet.zst.tmp",
+		"part-00003.parquet.zst.tmp",
+	} {
+		writeStaleTmp(t, dir, name)
+	}
+
+	w, err := New(Options{Root: root})
+	if err != nil {
+		t.Fatalf("raw.New: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	ctx := context.Background()
+	if err := w.WriteMatch(ctx, fetchedMatch(t, syntheticPayload, false), matchMetaForTest()); err != nil {
+		t.Fatalf("WriteMatch: %v", err)
+	}
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	paths, err := PartPaths(dir)
+	if err != nil {
+		t.Fatalf("PartPaths: %v", err)
+	}
+	if len(paths) != 1 || filepath.Base(paths[0]) != "part-00004.parquet.zst" {
+		t.Fatalf("published parts = %v, want exactly part-00004.parquet.zst", paths)
 	}
 }

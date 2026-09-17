@@ -165,3 +165,56 @@ func (s *Store) NewestFetchedAt(ctx context.Context) (time.Time, bool, error) {
 	}
 	return *newest, true, nil
 }
+
+// replayedDeadLetterCause is written on a replayed row. It is a constant, not a
+// per-call message, for the same reason claimTimeoutCause is: an operator greps
+// for it. A row that a replay put back into the queue should not still carry the
+// last_cause that retired it - that text described a condition which has since
+// been declared over - but a row with no cause at all would hide the fact that
+// it was ever retired.
+const replayedDeadLetterCause = "replayed from dead letter: the condition that retired it has cleared"
+
+// replayDeadLetteredSQL returns retired rows to the queue.
+//
+// A dead letter is otherwise terminal and nothing in the schema ever selects
+// status = 'dead', so a global failure - a revoked or banned key, Riot
+// returning 403 for everything for longer than one row's attempt budget - used
+// to retire every match it touched, permanently and silently. Replay is the
+// recovery path an operator runs once the key has been fixed. It is explicit
+// rather than automatic because the condition that retired the rows is global:
+// only a human knows that the key has been rotated or the ban lifted, and
+// replaying on a timer would only re-retire the same rows more slowly.
+//
+// attempts is reset because the budget that retired the row was spent on that
+// global condition rather than on anything wrong with the match, and the row
+// returns as 'pending' because it is now indistinguishable from work that has
+// never been attempted.
+const replayDeadLetteredSQL = `
+UPDATE fetch_queue
+SET status = $1, attempts = 0, claimed_at = NULL, not_before = $2, last_cause = $3
+WHERE id IN (
+    SELECT id FROM fetch_queue
+    WHERE status = $4
+    ORDER BY claimed_at, id
+    LIMIT $5
+)`
+
+// ReplayDeadLettered returns at most limit dead-lettered rows to the queue and
+// reports how many moved. Claimed_at (which DeadLetterJob stamps with the time
+// the letter was written) orders the batch, so the oldest letters go first.
+func (s *Store) ReplayDeadLettered(ctx context.Context, limit int) (int, error) {
+	limit = clampLimit(limit)
+	if limit == 0 {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx, replayDeadLetteredSQL,
+		string(contract.JobPending), s.now().UTC(), replayedDeadLetterCause, string(contract.JobDead), limit)
+	if err != nil {
+		return 0, fmt.Errorf("store: ReplayDeadLettered: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: ReplayDeadLettered: %w", err)
+	}
+	return int(n), nil
+}

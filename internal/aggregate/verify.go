@@ -8,7 +8,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/Erik-Schuetze/league-of-legends/internal/aggmodel"
@@ -85,7 +84,9 @@ func Verify(opts VerifyOptions) (VerifyResult, error) {
 	check := &verifier{aggRoot: opts.AggRoot, validator: validator, log: opts.Log}
 
 	manifestPath := filepath.Join(opts.AggRoot, aggmodel.ManifestPath)
-	raw, err := os.ReadFile(manifestPath)
+	// The path is the aggregate root from configuration plus the frozen
+	// manifest name; there is no user-controlled component in it.
+	raw, err := os.ReadFile(manifestPath) //nolint:gosec // G304: operator-configured aggregate root.
 	if err != nil {
 		return result, fmt.Errorf("read manifest: %w", err)
 	}
@@ -179,7 +180,9 @@ func (v *verifier) readSchemaValidated(definition, relPath string, target any) b
 // loadValidator returns the schema validator to check against.
 func loadValidator(schemaPath string) (*schemaValidator, error) {
 	if schemaPath != "" {
-		raw, err := os.ReadFile(schemaPath)
+		// --schema is an operator-supplied path: a schema document is a build
+		// input, not user content, and reading it is the whole point of the flag.
+		raw, err := os.ReadFile(schemaPath) //nolint:gosec // G304: operator-supplied schema path.
 		if err != nil {
 			return nil, fmt.Errorf("read schema: %w", err)
 		}
@@ -376,11 +379,23 @@ func (v *verifier) checkEnvelope(label, relPath string, envelope aggmodel.Envelo
 			envelope.GeneratedAt.Format(rfc3339), partition.GeneratedAt.Format(rfc3339))
 	}
 	if envelope.Patch != "" {
-		if _, err := parseDate(envelope.SourceWindow.From); err != nil {
-			v.problem("%s: source_window.from: %v", relPath, err)
+		from, fromErr := parseDate(envelope.SourceWindow.From)
+		to, toErr := parseDate(envelope.SourceWindow.To)
+		if fromErr != nil {
+			v.problem("%s: source_window.from: %v", relPath, fromErr)
 		}
-		if _, err := parseDate(envelope.SourceWindow.To); err != nil {
-			v.problem("%s: source_window.to: %v", relPath, err)
+		if toErr != nil {
+			v.problem("%s: source_window.to: %v", relPath, toErr)
+		}
+		// The window is a claim about which days the numbers cover, and a
+		// window that ends before it starts is impossible. The check lives
+		// here rather than in the writer because the writer cannot produce one:
+		// windowForEnd derives the start from a day count, so the only way an
+		// inverted window reaches a reader is an artifact damaged on disk -
+		// which is what this verifier exists for.
+		if fromErr == nil && toErr == nil && to.Before(from) {
+			v.problem("%s: source_window %s..%s ends before it starts",
+				relPath, envelope.SourceWindow.From, envelope.SourceWindow.To)
 		}
 	}
 }
@@ -414,8 +429,11 @@ func (v *verifier) checkCell(where string, cell aggmodel.Cell, minCellN int) boo
 		v.problem("%s: wins %d is outside [0,%d]", where, cell.Wins, cell.N)
 		ok = false
 	}
-	if cell.WinRate <= 0 || cell.WinRate > 1 {
-		v.problem("%s: win_rate %v is outside (0,1]", where, cell.WinRate)
+	// The range is closed at zero on purpose: a champion can genuinely lose
+	// every classified game of a window, so a published win rate of 0 is real
+	// data rather than a defect. Only the exclusive lower bound would be wrong.
+	if cell.WinRate < 0 || cell.WinRate > 1 {
+		v.problem("%s: win_rate %v is outside [0,1]", where, cell.WinRate)
 		ok = false
 	}
 	if expected := round4(float64(cell.Wins) / float64(cell.N)); !closeEnough(cell.WinRate, expected) {
@@ -682,13 +700,4 @@ func roleRankOf(role aggmodel.Role) int {
 		}
 	}
 	return len(aggmodel.Roles)
-}
-
-// sortProblems is used by tests that want a stable rendering of the problem
-// list. It is kept next to the verifier because the list's order is a property
-// of the walk, not of the caller.
-func sortProblems(problems []string) []string {
-	out := append([]string{}, problems...)
-	sort.Strings(out)
-	return out
 }

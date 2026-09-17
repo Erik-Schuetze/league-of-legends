@@ -144,11 +144,15 @@ const caption =
               </th>
               {row.cells.map((cell, columnIndex) =>
                 cell.kind === 'self' ? (
+                  // The diagonal is not a withheld measurement, it is a pairing
+                  // that does not exist: a champion never plays itself. The dot
+                  // deliberately carries no number, and the name says why, so
+                  // the cell can never be read as "0 games, 0 points".
                   <td
                     class="cell self"
                     data-n="0"
                     tabindex={firstColumnTabstop(columnIndex)}
-                    aria-label="the same champion in both axes"
+                    aria-label="not applicable: the same champion in both axes, a champion is never matched against itself"
                   >
                     &middot;
                   </td>
@@ -183,8 +187,8 @@ const caption =
   </div>
 
   <p class="note ds-print-hidden">
-    {integer(published)} of {integer(totalCells)} pairings are published for this role. Cells the
-    aggregator withheld are absent from the artifact and read as a dash here, never as zero
+    {integer(published)} of {integer(totalCells)} pairings are published for this role. Cells withheld for being below
+    the threshold are absent from the artifact and read as a dash here, never as zero
     {matchups.suppressed_cells > 0 && <> ({integer(matchups.suppressed_cells)} withheld in total)</>}.
   </p>
 </div>
@@ -194,7 +198,11 @@ const caption =
   // with the page, and the runtime arrives when the matrix comes into view.
   import { startIslands } from './island-boot.client.ts';
 
-  startIslands('[data-island="heatmap"]', () => import('./heatmap-island.client.ts'));
+  startIslands(
+    '[data-island="heatmap"]',
+    () => import('./heatmap-island.client.ts'),
+    (module) => module.initHeatmapIsland,
+  );
 </script>
 
 <style>

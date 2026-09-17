@@ -16,10 +16,24 @@ import { jsonLdWebsite } from '../lib/seo';
 const snap = snapshot();
 const { site, partition } = snap;
 
-const title = 'LoL Stats - League of Legends ranked statistics from Riot match data';
-const description =
-  'Patch-specific League of Legends ranked tier lists and champion matchups, published as static pages. ' +
-  'Every win rate carries its sample size, and thin samples are withheld rather than shown.';
+// The homepage is the page a search engine and a first-time reader meet first, so its
+// title and description are written from the data state as well: "statistics from Riot
+// match data" is a provenance claim, and this build may only make it when the manifest
+// declares that is what the snapshot is.
+const live = site.state === 'live';
+
+const title = live
+  ? 'LoL Stats - League of Legends ranked statistics from Riot match data'
+  : 'LoL Stats - League of Legends ranked statistics, published as static pages';
+
+const description = live
+  ? 'Patch-specific League of Legends ranked tier lists and champion matchups, published as static pages. ' +
+    'Every win rate carries its sample size, and thin samples are withheld rather than shown.'
+  : site.state === 'demo'
+    ? 'What this site publishes, how the numbers are produced, and an honest statement of where the numbers on ' +
+      'this build come from: it is a labelled preview, not measured Riot match data.'
+    : 'What this site publishes and how the numbers will be produced once a snapshot exists. No aggregate ' +
+      'snapshot has been published yet, so this build carries no match statistics at all.';
 
 const url = new URL('/', Astro.site ?? Astro.url).href;
 const roles = [...ROLES];
@@ -39,9 +53,16 @@ const minCellN = partition?.min_cell_n ?? null;
   <h1>Ranked statistics, published as static pages</h1>
 
   <p>
-    This site aggregates League of Legends ranked matches into per-patch tier lists and champion matchup tables, then
-    pre-renders them. There is no client-side data fetching and no JavaScript is required to read any page: what the
-    HTML says is the whole product.
+    {live
+      ? 'This site aggregates League of Legends ranked matches into per-patch tier lists and champion matchup tables, then pre-renders them.'
+      : 'This site publishes per-patch tier lists and champion matchup tables, pre-rendered as static pages.'}{' '}
+    There is no client-side data fetching and no JavaScript is required to read any page: what the HTML says is the whole
+    product.{' '}
+    {site.state === 'demo'
+      ? 'This build is a labelled preview: the numbers on it are illustrative, and no Riot match data has been ingested.'
+      : site.state === 'no-data'
+        ? 'No aggregate snapshot has been published yet, so this build carries no match statistics at all.'
+        : ''}
   </p>
 
   <h2>Current snapshot</h2>
@@ -80,7 +101,16 @@ const minCellN = partition?.min_cell_n ?? null;
     }
   </ul>
 
-  <h2>How to read these numbers</h2>
+  <h2>{live ? 'How to read these numbers' : 'How these numbers will be read'}</h2>
+  {
+    !live && (
+      <p>
+        {site.state === 'demo'
+          ? 'The conventions below are the ones this build already renders, but the sample sizes and rates behind them are illustrative demo values rather than measured games.'
+          : 'This build publishes no sample sizes and no rates yet; the conventions below are the ones every page is laid out for.'}
+      </p>
+    )
+  }
   <ul>
     <li>Every win, pick and ban rate is shown with the number of games it was measured over.</li>
     <li>
@@ -91,8 +121,9 @@ const minCellN = partition?.min_cell_n ?? null;
       Each rate carries a 95% interval, because 52% over 900 games and 52% over 90,000 games are not the same claim.
     </li>
     <li>
-      Rank data comes from Riot's match feed, which does not attribute a match to the player's exact rank, so bracket
-      figures are a snapshot attribution rather than a per-match one.
+      {live
+        ? "Rank data comes from Riot's match feed, which does not attribute a match to the player's exact rank, so bracket figures are a snapshot attribution rather than a per-match one."
+        : "Riot does not attribute a match to the player's exact rank, so on a published snapshot the bracket figures are a snapshot attribution rather than a per-match one."}
     </li>
   </ul>
   <p><a href="/about">How these numbers are produced</a></p>

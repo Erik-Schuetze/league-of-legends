@@ -67,8 +67,8 @@ updates:
         patterns:
           - "*"
 
-  # Base images in the Dockerfile. Both stages are pinned by digest, and this
-  # is what proposes the next one - which is the point of pinning: the bump
+  # Base images in the Dockerfile. All three stages are pinned by digest, and
+  # this is what proposes the next one - which is the point of pinning: the bump
   # arrives as a reviewable diff instead of happening silently under a tag.
   - package-ecosystem: docker
     directory: /
@@ -80,5 +80,5 @@ updates:
     ignore:
       # The final stage is distroless; a major Debian bump changes the base
       # entirely and is worth doing deliberately rather than weekly.
-      - dependency-name: "gcr.io/distroless/static-debian12"
+      - dependency-name: "gcr.io/distroless/cc-debian12"
         update-types: ["version-update:semver-major"]

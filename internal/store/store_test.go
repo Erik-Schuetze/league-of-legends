@@ -326,6 +326,13 @@ func TestJobStateChangesAreGuardedByTheStateTheyExpect(t *testing.T) {
 // text is the point: an accidental change to the conflict clause or the column
 // list is a change to the dedupe guarantee, and it should fail here rather than
 // in production as a duplicated fetch.
+//
+// That clause is a DO UPDATE ... WHERE status = 'dead' rather than a DO NOTHING,
+// because DO NOTHING is what made a dead-lettered match id unreachable forever:
+// re-discovering the match could not put it back in the queue. It is also
+// bounded by the row's revival budget, because unbounded it is not a recovery
+// path but a loop - see revivalBudget. The status and the budget are passed as
+// the last two parameters, after the five per row.
 func enqueueSQL(rows int) string {
 	var sb strings.Builder
 	sb.WriteString("INSERT INTO fetch_queue (match_id, priority, attempts, not_before, status) VALUES ")
@@ -346,7 +353,10 @@ func enqueueSQL(rows int) string {
 		sb.WriteString(strconvI(base + 5))
 		sb.WriteString(")")
 	}
-	sb.WriteString(" ON CONFLICT (match_id) DO NOTHING")
+	sb.WriteString(" ON CONFLICT (match_id) DO UPDATE SET ")
+	sb.WriteString(reviveDeadRowSet)
+	sb.WriteString(" WHERE ")
+	sb.WriteString(reviveDeadRowWhere(rows*5+1, rows*5+2))
 	return sb.String()
 }
 
@@ -370,7 +380,8 @@ func TestEnqueueMatchesDedupesInsideOneBatch(t *testing.T) {
 	}
 	mock.ExpectExec(sqlPattern(enqueueSQL(2))).
 		WithArgs("EUW1_1", 0, 0, testNow.UTC(), string(contract.JobPending),
-			"EUW1_2", 100, 0, testNow.UTC(), string(contract.JobPending)).
+			"EUW1_2", 100, 0, testNow.UTC(), string(contract.JobPending),
+			string(contract.JobDead), revivalBudget).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	added, err := s.EnqueueMatches(context.Background(), items)
@@ -623,6 +634,72 @@ func TestMaintenanceStatements(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(nil))
 		if _, ok, err = s.NewestFetchedAt(context.Background()); err != nil || ok {
 			t.Fatalf("NewestFetchedAt on an empty pipeline = %v, %v; want false, nil", ok, err)
+		}
+	})
+}
+
+// A dead letter used to be terminal: nothing selected status = 'dead' and the
+// enqueue conflict clause was DO NOTHING, so a match id retired by a global
+// outage could never be re-queued - not by replay, not by re-discovery, not by
+// hand. Both halves of the recovery path are asserted here.
+func TestDeadLetteredWorkIsRecoverable(t *testing.T) {
+	t.Run("re-discovering a retired match revives its row", func(t *testing.T) {
+		s, mock, _ := newTestStore(t, nil)
+		mock.ExpectExec(sqlPattern(enqueueSQL(1))).
+			WithArgs("EUW1_1", 100, 0, testNow.UTC(), string(contract.JobPending),
+				string(contract.JobDead), revivalBudget).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		if _, err := s.EnqueueMatches(context.Background(), []contract.QueueItem{{MatchID: "EUW1_1", Priority: 100}}); err != nil {
+			t.Fatalf("EnqueueMatches: %v", err)
+		}
+		// The parameter is the whole guarantee: the conflict clause only
+		// touches rows in this state, so a pending or claimed row keeps its
+		// attempts and its deadline.
+		if !strings.Contains(enqueueSQL(1), "WHERE fetch_queue.status = $6") {
+			t.Fatal("the enqueue conflict clause no longer guards on the retired status")
+		}
+		// The second half of the guard is the revival budget, and it is what
+		// makes the revival terminate: a row that is rediscovered by every walk
+		// of every player who played it would otherwise be re-queued forever,
+		// each revival restarting the attempt budget that exists to retire it.
+		if !strings.Contains(enqueueSQL(1), "fetch_queue.revivals < $7") {
+			t.Fatal("the enqueue conflict clause revives a dead row regardless of how often it has already been revived")
+		}
+		if revivalBudget < 1 {
+			t.Fatalf("revivalBudget = %d, want at least one revival so a transient outage is still recoverable", revivalBudget)
+		}
+	})
+	t.Run("replay returns retired rows to pending with a fresh budget", func(t *testing.T) {
+		s, mock, _ := newTestStore(t, nil)
+		mock.ExpectExec(sqlPattern(replayDeadLetteredSQL)).
+			WithArgs(string(contract.JobPending), testNow.UTC(), replayedDeadLetterCause, string(contract.JobDead), 25).
+			WillReturnResult(sqlmock.NewResult(0, 4))
+		replayed, err := s.ReplayDeadLettered(context.Background(), 25)
+		if err != nil {
+			t.Fatalf("ReplayDeadLettered: %v", err)
+		}
+		if replayed != 4 {
+			t.Fatalf("replayed = %d, want the 4 rows Postgres reported", replayed)
+		}
+	})
+	t.Run("a zero limit replays nothing and does not query", func(t *testing.T) {
+		s, _, _ := newTestStore(t, nil)
+		replayed, err := s.ReplayDeadLettered(context.Background(), 0)
+		if err != nil || replayed != 0 {
+			t.Fatalf("ReplayDeadLettered(0) = %d, %v; want 0, nil", replayed, err)
+		}
+	})
+	t.Run("releasing a claim refunds the attempt", func(t *testing.T) {
+		s, mock, _ := newTestStore(t, nil)
+		notBefore := testNow.Add(30 * time.Second)
+		mock.ExpectExec(sqlPattern(releaseJobSQL)).
+			WithArgs(int64(7), string(contract.JobRetry), notBefore.UTC(), "riot: circuit breaker open", string(contract.JobClaimed)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		if err := s.ReleaseJob(context.Background(), 7, notBefore, "riot: circuit breaker open"); err != nil {
+			t.Fatalf("ReleaseJob: %v", err)
+		}
+		if !strings.Contains(releaseJobSQL, "GREATEST(attempts - 1, 0)") {
+			t.Fatal("release no longer refunds the attempt, so an outage can still retire the backlog")
 		}
 	})
 }
@@ -939,6 +1016,7 @@ func TestStoreAgainstRealPostgres(t *testing.T) {
 	matchA := "EUW1_TEST_" + suffix + "_a"
 	matchB := "EUW1_TEST_" + suffix + "_b"
 	matchC := "EUW1_TEST_" + suffix + "_c"
+	matchD := "EUW1_TEST_" + suffix + "_d"
 	puuidA := "test-puuid-" + suffix + "-a"
 	puuidB := "test-puuid-" + suffix + "-b"
 	t.Cleanup(func() {
@@ -947,7 +1025,7 @@ func TestStoreAgainstRealPostgres(t *testing.T) {
 			`DELETE FROM matches WHERE match_id = ANY($1)`,
 			`DELETE FROM crawl_frontier WHERE puuid = ANY($1)`,
 		} {
-			if _, err := s.db.ExecContext(context.Background(), stmt, pqArray([]string{matchA, matchB, matchC, puuidA, puuidB})); err != nil {
+			if _, err := s.db.ExecContext(context.Background(), stmt, pqArray([]string{matchA, matchB, matchC, matchD, puuidA, puuidB})); err != nil {
 				t.Logf("cleanup %q: %v", stmt, err)
 			}
 		}
@@ -1178,6 +1256,91 @@ func TestStoreAgainstRealPostgres(t *testing.T) {
 		}
 		if err := s.FinishBuildRun(ctx, buildID, contract.BuildResult{Status: "ok", FinishedAt: now, CellsTotal: 1, CellsPublished: 1}); err != nil {
 			t.Fatalf("FinishBuildRun: %v", err)
+		}
+	})
+
+	t.Run("a dead letter is revived a bounded number of times", func(t *testing.T) {
+		// D5. The revive-on-enqueue rule reset attempts to zero and matched on
+		// status = 'dead' alone, so a permanently failing row walked
+		// dead -> pending -> claimed -> retry -> claimed -> dead for ever: every
+		// later discovery of the same match brought it back, and the crawl
+		// never finished. The row now carries a revival budget, which the
+		// operator's replay deliberately does not consume.
+		if added, err := s.EnqueueMatches(ctx, []contract.QueueItem{{MatchID: matchD, Priority: 100}}); err != nil || added != 1 {
+			t.Fatalf("EnqueueMatches(%s) = %d, %v; want 1, nil", matchD, added, err)
+		}
+
+		revivals := 0
+		stalledAt := -1
+		for walk := 0; walk < revivalBudget+5; walk++ {
+			// One walk of the pipeline: claim it, fail it, retire it, and let
+			// the next discovery of the same id queue it again.
+			claimed, err := s.ClaimJobs(ctx, 10, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("ClaimJobs (walk %d): %v", walk, err)
+			}
+			if len(claimed) == 0 {
+				// Out of budget. Under the old rule this walk read "dead" and
+				// revived the row again, for ever.
+				stalledAt = walk
+				break
+			}
+			if len(claimed) != 1 || claimed[0].MatchID != matchD {
+				t.Fatalf("walk %d claimed %+v, want exactly %s", walk, claimed, matchD)
+			}
+			if err := s.DeadLetterJob(ctx, claimed[0].ID, "test: Riot will never serve this match"); err != nil {
+				t.Fatalf("DeadLetterJob: %v", err)
+			}
+			added, err := s.EnqueueMatches(ctx, []contract.QueueItem{{MatchID: matchD, Priority: 100}})
+			if err != nil {
+				t.Fatalf("EnqueueMatches (walk %d): %v", walk, err)
+			}
+			if added == 1 {
+				revivals++
+			}
+		}
+
+		if stalledAt < 0 {
+			t.Fatalf("the row was still being claimed after %d revivals: it never stops coming back", revivalBudget+5)
+		}
+		if revivals != revivalBudget {
+			t.Fatalf("the row was revived %d times, want exactly %d: a dead letter that revives for ever is a crawl that cannot finish",
+				revivals, revivalBudget)
+		}
+		var status string
+		var budget, attempts int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT status, revivals, attempts FROM fetch_queue WHERE match_id = $1`, matchD).
+			Scan(&status, &budget, &attempts); err != nil {
+			t.Fatalf("read back %s: %v", matchD, err)
+		}
+		if status != string(contract.JobDead) {
+			t.Fatalf("status = %q, want %q: the row is out of revival budget", status, contract.JobDead)
+		}
+		if budget != revivalBudget {
+			t.Fatalf("revivals = %d, want %d", budget, revivalBudget)
+		}
+
+		// The negative control for "bounded" not degenerating into "dropped":
+		// the row is not gone, it is waiting for an operator to say the
+		// condition that retired it has been fixed.
+		replayed, err := s.ReplayDeadLettered(ctx, 10)
+		if err != nil {
+			t.Fatalf("ReplayDeadLettered: %v", err)
+		}
+		if replayed < 1 {
+			t.Fatal("ReplayDeadLettered replayed nothing, so a row out of budget can never be revisited")
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT status FROM fetch_queue WHERE match_id = $1`, matchD).Scan(&status); err != nil {
+			t.Fatalf("read back after replay: %v", err)
+		}
+		if status != string(contract.JobPending) {
+			t.Fatalf("status after replay = %q, want %q", status, contract.JobPending)
+		}
+		// And the explicit replay is not undone by the next discovery: the
+		// automatic path stays out of budget.
+		if added, err := s.EnqueueMatches(ctx, []contract.QueueItem{{MatchID: matchD, Priority: 100}}); err != nil || added != 0 {
+			t.Fatalf("EnqueueMatches after a replay = %d, %v; want 0, nil", added, err)
 		}
 	})
 
