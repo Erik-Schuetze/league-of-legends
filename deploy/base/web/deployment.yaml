@@ -47,12 +47,16 @@ spec:
           # .github/workflows/build-caddy-image.yml once the first tag exists.
           # Pin it as v<semver>@sha256:<digest> at the same time as the Go image.
           image: ghcr.io/erik-schuetze/league-of-legends-caddy:latest
-          args:
-            - run
-            - --config
-            - /etc/caddy/Caddyfile
-            - --adapter
-            - caddyfile
+          # No `command` and no `args`, deliberately. The image (build/caddy/
+          # Dockerfile, FROM caddy:2.10-alpine) defines a Cmd but no ENTRYPOINT,
+          # so the Cmd is the whole process: ["caddy","run","--config",
+          # "/etc/caddy/Caddyfile","--adapter","caddyfile"]. Kubernetes does not
+          # concatenate Entrypoint and Args the way Docker does - `args` REPLACES
+          # the image's Cmd and the executable still has to come from an
+          # ENTRYPOINT that does not exist here, which makes argv[0] the string
+          # "run" and the container dies with `exec: "run": executable file not
+          # found in $PATH`. Restating the Cmd here was also pure duplication, and
+          # the Caddyfile is already mounted at the path the Cmd names.
           ports:
             - name: http
               containerPort: 8080
