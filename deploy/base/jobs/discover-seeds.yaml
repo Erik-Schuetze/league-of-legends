@@ -3,9 +3,20 @@
 # every extra run is a burst of Riot API calls spent on a frontier that is
 # already wide enough.
 #
-# 02:10 is after the 01:00 aggregate build, so the summary a run produces covers
-# a patch boundary cleanly, and it is well outside the nightly backup window of
-# the rest of the homelab.
+# 00:10 is *before* the 01:00 aggregate build, which is the point. This job only
+# enqueues keys; the long-running worker drains them into the raw archive that
+# the 01:00 build reads. Until 2026-09-17 this ran at 02:10 - after the build -
+# so a night's discovery could never appear in that night's snapshot: the newest
+# payload behind a 01:00 build was always the previous night's discovery, a day
+# old, and the frontier this job had just widened sat unused until the next
+# night. Running first means whatever the worker fetches between 00:10 and 01:00
+# is published an hour later instead of a day later, and the freshness bound the
+# build enforces (LOLSTATS_AGG_CRAWL_MAX_AGE, 26h) now measures a crawl that is
+# at most an hour idle rather than most of a day.
+#
+# The :10 offset keeps this run clear of `maintain` at :20 and of the jobs in the
+# rest of the homelab that fire at :00, and 00:10 is outside the 03:10-05:00
+# block of site, static-sync and backup jobs.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -14,7 +25,7 @@ metadata:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: discover-seeds
 spec:
-  schedule: "10 2 * * *"
+  schedule: "10 0 * * *"
   # The plan's schedules are wall-clock times for a person reading the logs, not
   # UTC offsets; without this the job would drift by an hour twice a year.
   timeZone: Europe/Berlin

@@ -3,10 +3,12 @@
 # concurrency: one DuckDB pass over two years of payloads is a burst, and the
 # node it lands on is an N100 shared with the rest of the homelab.
 #
-# 01:00, ahead of discover-seeds (02:10), static-sync (03:10) and site-build
-# (03:40): the dependency between "aggregate finished" and "the site was built
-# from it" is expressed as ordering in the night, not as a workflow engine,
-# which is why activeDeadlineSeconds is bounded well below the next job.
+# 01:00, after discover-seeds (00:10) and before static-sync (03:10, suspended)
+# and site-build (03:40): the dependency between "aggregate finished" and "the
+# site was built from it" is expressed as ordering in the night, not as a
+# workflow engine, which is why activeDeadlineSeconds is bounded well below the
+# next job. discover-seeds deliberately runs first so that the archive this build
+# reads contains the same night's discovery rather than the previous night's.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -114,6 +116,13 @@ spec:
               # without the check ignores it and behaves exactly as it did
               # before, so the bound can only ever switch on together with the
               # code that implements it.
+              #
+              # That is the state on 2026-09-17: the image serving this cluster
+              # was built from e7130af, before commit 98e37be added the check, so
+              # the nightly job's log carries no `crawl freshness` line and this
+              # bound is inert. The remedy is an image built at or after 98e37be,
+              # not a manifest change - the variable is already set, correctly,
+              # in `deploy/base/config.yaml` (26h).
               args: ["build"]
               envFrom:
                 - configMapRef:

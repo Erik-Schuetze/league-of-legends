@@ -3,6 +3,15 @@
 # schedule would mean re-fetching data that is already archived at a cost in Riot
 # API budget for no new information.
 #
+# Suspending it costs no coverage, because it is not how match data is refreshed.
+# That path is: the long-running `lolstats-ingest` worker drains the frontier
+# that `discover-seeds` (00:10) enqueues, writing the raw archive, and the 01:00
+# `lolstats-aggregate` build publishes that archive as agg/v1. Both halves are
+# Deployments and CronJobs that run unattended; this CronJob is only ever the
+# answer to "the worker missed or mis-fetched this slice". Un-suspending it would
+# not change that: the schedule supplies no selector, so a scheduled run could
+# only fail (exit 2, usage message) once a week.
+#
 # To use it, an operator creates a one-off job naming the keys to reprocess. The
 # selection cannot be supplied by `--from=cronjob` alone - a job created that way
 # carries only the `backfill` argument and exits 2 with a usage message, because
