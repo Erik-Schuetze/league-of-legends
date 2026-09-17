@@ -118,3 +118,24 @@ patches:
                       operator: NotIn
                       values:
                         - vega
+  # Same rule for the PreSync migration hook. It needs its own entry because it
+  # is a plain Job, and nothing in the tree above patches that kind. This also
+  # means the `vega` exclusion in the base stays absent, where it belongs: the
+  # node name is a fact about this cluster, not about the service.
+  - target:
+      group: batch
+      version: v1
+      kind: Job
+      labelSelector: app.kubernetes.io/name=lolstats
+    patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values:
+                        - vega

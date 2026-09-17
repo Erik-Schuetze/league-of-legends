@@ -132,7 +132,8 @@ archive-verify:
 render-overlay:
 	@rendered=$$(kubectl kustomize deploy/overlays/homelab) || exit 1; \
 	printf '%s\n' "$$rendered" | grep -c '^---' | xargs -I{} echo "{} documents"; \
-	printf '%s\n' "$$rendered" | grep -c 'kind: CronJob' | xargs -I{} echo "{} CronJobs"
+	printf '%s\n' "$$rendered" | grep -c 'kind: CronJob' | xargs -I{} echo "{} CronJobs"; \
+	printf '%s\n' "$$rendered" | grep -c 'kind: Job' | xargs -I{} echo "{} Jobs"
 
 # ---- end additions: operations workstream (backups) ----
 
@@ -278,3 +279,37 @@ compliance:
 	sh scripts/compliance-check.sh
 
 # ---- end additions: compliance workstream ----
+
+# ---- additions: deploy-time migration (the PreSync hook) ----
+# Declared on its own .PHONY line so this addition stays append-only, like the
+# blocks above it.
+
+.PHONY: migrate
+
+# Applies the schema to the live cluster *now*, for the case where the operator
+# does not want to wait for the next ArgoCD sync. It is the imperative twin of
+# the `PreSync` hook in deploy/base/jobs/migrate.yaml, and it is the answer to
+# "the database is empty and the worker is logging `relation \"fetch_queue\" does
+# not exist`" - see deploy/README.md, section Migrations.
+#
+# It applies the file from base/ rather than the rendered overlay on purpose: the
+# only thing the overlay adds to that Job is the node affinity that keeps it off
+# vega, and a one-shot migration is happy on any node. Applying the single file
+# needs `-n lolstats` explicitly, because the namespace comes from the base
+# kustomization, which this path does not go through.
+#
+# The delete is not belt-and-braces, it is the whole reason the target is three
+# lines: a `batch/v1` Job's pod template is immutable, so a plain re-apply of a
+# changed spec is rejected by the API server. This is the same reason the hook
+# carries `hook-delete-policy: BeforeHookCreation`; doing it by hand just makes
+# it explicit. `--ignore-not-found` keeps the first run quiet.
+#
+# Safe to run twice and safe to run alongside a sync: `migrate up` takes an
+# advisory lock, keeps a checksummed ledger and re-applies nothing, so a second
+# run against a current schema exits 0 having logged "schema is already current".
+migrate:
+	kubectl -n lolstats delete job lolstats-migrate --ignore-not-found
+	kubectl apply -n lolstats -f deploy/base/jobs/migrate.yaml
+	kubectl -n lolstats wait --for=condition=Complete job/lolstats-migrate --timeout=300s
+
+# ---- end additions: deploy-time migration ----
