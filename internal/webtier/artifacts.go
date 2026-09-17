@@ -139,6 +139,11 @@ type RootCandidate struct {
 	// Explicit is true when the operator configured it rather than the tier
 	// defaulting to it. An explicit root never falls back to the fixtures.
 	Explicit bool
+	// Fixtures is true for the checked-in demo tree. The tier labels whatever it
+	// serves from this root as the sample it is, whatever the tree declares
+	// about itself, because "the demo tree" is a fact about where the bytes came
+	// from and not something a manifest in that directory gets to assert.
+	Fixtures bool
 }
 
 // candidateRoots mirrors artifacts.ts: the order the roots are tried in.
@@ -151,7 +156,7 @@ func candidateRoots(opts Options) []RootCandidate {
 	if !primary.Explicit {
 		primary.Label = "default agg root (../agg)"
 	}
-	fixtures := RootCandidate{Dir: opts.FixturesDir, Label: "checked-in demo fixtures"}
+	fixtures := RootCandidate{Dir: opts.FixturesDir, Label: "checked-in demo fixtures", Fixtures: true}
 
 	switch opts.FixturesMode {
 	case FixturesOnly:
@@ -374,6 +379,22 @@ func (l *Loader) buildSite(root *RootCandidate) (*Site, error) {
 
 	site.state = dataStateFor(site.manifest, site.source)
 	site.sourceRecognised = site.source == string(aggmodel.SourceRiotMatchV5) || site.source == string(aggmodel.SourceDemo)
+
+	// The demo tree is never served as crawled data. `only` and the `auto`
+	// fallback both read it, and both mean "the checked-in sample", so a tree in
+	// that directory which declares a real source is refused rather than
+	// labelled. Publishing a crawled snapshot because it happened to be dropped
+	// in the fixtures directory is the substitution this file exists to prevent,
+	// and calling it a preview would be the same lie pointing the other way: the
+	// one thing the tier must never do is let the provenance label and the bytes
+	// disagree.
+	if root != nil && root.Fixtures && site.state == StateLive {
+		return nil, artifactFault(
+			filepath.Join(root.Dir, filepath.FromSlash(aggmodel.ManifestPath)),
+			"the checked-in demo tree declares source %q, which is crawled match data: this tier serves that tree as the labelled sample only, so it refuses to render it",
+			site.source,
+		)
+	}
 
 	if site.manifest != nil {
 		site.partitions = site.manifest.Partitions
