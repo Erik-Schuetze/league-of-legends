@@ -222,9 +222,11 @@ const sortValue = (row: RowModel, key: string) => {
                 data-v-ci95={sortValue(row, 'ci95')}
               >
                 <td class="champion">
-                  {row.icon.startsWith('http') && (
-                    <img src={row.icon} alt="" width="24" height="24" loading="lazy" decoding="async" />
-                  )}
+                  {/* No champion portrait. Rehosting or transforming Riot art is
+                      not permitted (docs/compliance.md §5, gate check 2), and the
+                      hotlinked 128px ddragon image per row is what overran §7.4's
+                      300 KiB first-load budget, so the row renders its name link
+                      alone. */}
                   <a class="name" href={row.href}>
                     {row.name}
                   </a>
