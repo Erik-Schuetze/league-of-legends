@@ -15,4 +15,4 @@ number is the failure it exists to prevent.
 | 007 | `ADR-007-pinned-duckdb-cli-engine.md` | The aggregation engine is the pinned DuckDB CLI, run as a subprocess |
 | 008 | `ADR-008-no-third-party-ingestion.md` | No third-party ingestion; the scraper stays disabled behind a review date |
 | 009 | `ADR-009-operator-identity-and-governing-law.md` | Operator identity, the contact route, and a deliberately unnamed governing law |
-| 010 | `ADR-010-public-preview-posture.md` | A labelled public preview while the production key application is pending |
+| 010 | `ADR-010-public-preview-posture.md` | A labelled public preview while the production key application is pending - **superseded 2026-09-17 by owner decisions D-1 and D-4; the title is kept as the record of what it decided** |
