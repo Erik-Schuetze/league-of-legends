@@ -218,30 +218,6 @@ func Build(ctx context.Context, opts BuildOptions) (result BuildResult, err erro
 		return result, err
 	}
 
-	// The audit row is opened before the first row is read, so that a build
-	// killed mid-extraction is visible as a run that never finished. The patch
-	// column carries what the operator asked for: the resolved patch is not
-	// known yet, and it is recorded in artifact_uri instead.
-	if opts.Auditor != nil {
-		id, auditErr := opts.Auditor.StartBuildRun(ctx, contract.BuildRun{
-			Patch:     opts.Patch,
-			Region:    opts.Region,
-			Queue:     opts.Queue,
-			Bracket:   string(opts.Bracket),
-			StartedAt: generatedAt,
-			GitSHA:    opts.GitSHA,
-		})
-		if auditErr != nil {
-			// Never fatal: see the note in audit.go. The artifacts are correct
-			// without the row, and a database outage must not stop publishing.
-			opts.Log.Error("could not open build run", "error", auditErr)
-		} else {
-			result.BuildRunID = id
-			state.buildRunID = id
-			defer func() { state.finishAudit(id, err) }()
-		}
-	}
-
 	if err := state.run(ctx, &result); err != nil {
 		// A failed build still reports what it managed to count before it
 		// stopped. The counters are what tells an operator whether the input or
@@ -284,12 +260,51 @@ func refuseDemoTree(aggRoot string) error {
 	return nil
 }
 
+// openAudit starts the build_runs row for this run, on the patch the build is
+// about to publish.
+//
+// It is called once the patch is resolved and before the first payload is
+// unfolded, so that a build killed mid-extraction is visible as a run that never
+// finished. The patch has to be resolved by then: the store refuses a run whose
+// patch is empty, and a window that names no patch has no partition to attribute
+// a run to. That refusal is deliberate and is not worked around here - the build
+// still stops with the reason the extraction gives, and the row it would have
+// opened has no name to be filed under.
+func (s *buildState) openAudit(result *BuildResult) {
+	if s.opts.Auditor == nil {
+		return
+	}
+	id, err := s.opts.Auditor.StartBuildRun(context.WithoutCancel(context.Background()), contract.BuildRun{
+		Patch:     s.seg.Patch,
+		Region:    s.opts.Region,
+		Queue:     s.opts.Queue,
+		Bracket:   string(s.opts.Bracket),
+		StartedAt: s.generatedAt,
+		GitSHA:    s.opts.GitSHA,
+	})
+	if err != nil {
+		// Never fatal: see the note in audit.go. The artifacts are correct
+		// without the row, and a database outage must not stop publishing.
+		s.opts.Log.Error("could not open build run", "error", err)
+		return
+	}
+	s.buildRunID = id
+	result.BuildRunID = id
+}
+
 // finishAudit closes the build_runs row with the outcome of the run.
 //
 // It is deferred rather than called at the end because every early return after
 // this point must still close the row, and it never returns an error to the
 // caller: the publish has already happened and the audit is bookkeeping.
-func (s *buildState) finishAudit(id int64, buildErr error) {
+func (s *buildState) finishAudit(buildErr error) {
+	if s.buildRunID == 0 {
+		// No row was opened. That happens when the build was refused before the
+		// patch was resolved (progress, rather than a regression: an unrunnable
+		// command with an empty patch used to leave no row either), or when the
+		// database refused to open one, which openAudit has already logged.
+		return
+	}
 	result := contract.BuildResult{
 		Status:          auditStatusFor(buildErr),
 		FinishedAt:      s.opts.Now().UTC(),
@@ -301,12 +316,12 @@ func (s *buildState) finishAudit(id int64, buildErr error) {
 	if buildErr != nil {
 		result.Err = buildErr.Error()
 	}
-	if err := s.opts.Auditor.FinishBuildRun(context.WithoutCancel(context.Background()), id, result); err != nil {
-		s.opts.Log.Error("could not close build run", "id", id, "error", err)
+	if err := s.opts.Auditor.FinishBuildRun(context.WithoutCancel(context.Background()), s.buildRunID, result); err != nil {
+		s.opts.Log.Error("could not close build run", "id", s.buildRunID, "error", err)
 		return
 	}
 	s.opts.Log.Info("build run recorded",
-		"id", id, "status", result.Status, "cells_total", result.CellsTotal,
+		"id", s.buildRunID, "status", result.Status, "cells_total", result.CellsTotal,
 		"cells_published", result.CellsPublished, "cells_suppressed", result.CellsSuppressed)
 }
 
@@ -335,6 +350,13 @@ type buildState struct {
 	windowStats  windowStatsRow
 	counts       GateCounts
 	cells        CellOutput
+
+	// envelopePatches and envelopeResolved carry the patch list the envelope
+	// produced, when it produced one: the audit row was opened on that list, so
+	// extract re-derives it from the features and refuses the build if the two
+	// disagree (see checkPatchEvidence).
+	envelopePatches  []patchRow
+	envelopeResolved bool
 
 	cellCounts    []CellCount
 	banCounts     []BanCount
