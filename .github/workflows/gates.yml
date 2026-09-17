@@ -44,22 +44,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: web/package.json
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+      # No Node setup and no frontend build: the site is server-rendered by the
+      # Go tier, and the Astro tree that used to be built here was deleted on
+      # 2026-09-18. The compliance gate scans pages a running tier served, which
+      # `make compliance` captures itself over the checked-in fixtures.
 
-      # The compliance gate scans the build the site publishes, so the reference
-      # tree is an input to it: scripts/compliance-check.sh reads web/dist by
-      # default and fails closed when it is absent, and its negative control
-      # copies the tree to plant violations in. `make web-dist` installs
-      # web/node_modules with npm ci when it is missing.
-      - name: Build the Astro reference tree (web/dist)
-        run: make web-dist
-
-      # The serving contract and the served-corpus compliance scan both start
+      # The serving contract and the compliance gate's capture both start
       # bin/lolstats-web, so the tier has to be built before either runs.
       - name: Build
         run: make build
@@ -83,11 +73,6 @@ jobs:
       # filter bar, which must pass.
       - name: Compliance negative controls
         run: make compliance-negative-control
-
-      # The same two amended checks over the HTML the tier itself served, which
-      # is the corpus they were written for.
-      - name: Compliance gate over the served pages
-        run: make compliance-served
 
       # The gate's scans hand a NUL-delimited list of paths to grep, and GNU grep
       # answers an empty list from its own standard input. This runner has a GNU
