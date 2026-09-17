@@ -4,11 +4,11 @@ name: Launch gates
 #
 # Why a second workflow and not only the steps in `docker-build.yml`'s `verify`
 # job: these gates answer a different question from the Go test suite, and in the
-# `verify` job they run *after* it, so an unrelated unit-test failure - a parity
-# mismatch in a design layer, say - means they never run at all and the run shows
-# nothing about them. A launch gate whose result cannot be read while any other
-# check is red is not evidence. Here they are the whole job, so a red result
-# points at the gate that failed instead of at whatever stopped the job earlier.
+# `verify` job they run *after* it, so an unrelated unit-test failure means they
+# never run at all and the run shows nothing about them. A launch gate whose
+# result cannot be read while any other check is red is not evidence. Here they
+# are the whole job, so a red result points at the gate that failed instead of at
+# whatever stopped the job earlier.
 #
 # Both places run the same `make` targets, so there is one definition of each
 # gate and two independent signals about it. `docker-build.yml` still carries them
@@ -52,8 +52,10 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       # The compliance gate scans the build the site publishes, so the reference
-      # tree is an input to it, not just to the parity tests. `make web-dist`
-      # installs web/node_modules with npm ci when it is missing.
+      # tree is an input to it: scripts/compliance-check.sh reads web/dist by
+      # default and fails closed when it is absent, and its negative control
+      # copies the tree to plant violations in. `make web-dist` installs
+      # web/node_modules with npm ci when it is missing.
       - name: Build the Astro reference tree (web/dist)
         run: make web-dist
 
@@ -93,11 +95,3 @@ jobs:
       # that control runs here, with a deliberately non-empty stdin.
       - name: Compliance gate under GNU userland
         run: make compliance-gnu
-
-      # Last, and on its own: it rewrites web/dist/index.html in place to prove
-      # the parity comparison is live, so nothing else may read the reference
-      # tree while it runs. It does not assert that the unmutated tree passes -
-      # that is what `Test` in docker-build.yml is for - so an unrelated parity
-      # break stays reported by its own job and not by this control.
-      - name: Parity gate mutation control
-        run: make parity-mutation-control
