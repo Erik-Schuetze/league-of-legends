@@ -228,18 +228,24 @@ rather than silently attributed to a role.
 The rule is deliberately literal, and the live archive contains rows it cannot
 classify: Riot reports one participant per remake with `teamPosition: ""` and
 `individualPosition: "Invalid"` (its own sentinel, not a spelling this code
-invented). Measured over the 2026-09-04..2026-09-17 EUW/420 window, that is 3
-of 27 790 participant rows for patch 16.18 and 7 for the whole two-patch window,
-six of the seven in sub-four-minute remakes that never assigned a lane. Such a
+invented). Measured over the 2026-09-04..2026-09-17 EUW/420 window, that is 30
+of 141 150 participant rows (0.021%); earlier sightings of the same window
+ranged from 20 of 105 980 (0.018%) to 23 of 124 530 (0.011%), which is the
+archive growing under the crawl rather than the extraction degrading. Such a
 row is dropped from every cell - it is never guessed into a role - and the
-build continues only up to the allowance `LOLSTATS_AGG_MAX_REJECTED_ROWS`
-(`GateConfig.MaxRejectedRows`): it is a ceiling on rows Riot itself leaves
-position-less, not a licence to publish a build whose extraction stopped
-classifying. The default is 0, and `deploy/base/config.yaml` deploys 25 - several
-times the measurement and under a tenth of a percent of the window - so a
-regression, which rejects a large fraction rather than a handful, still stops the
-build. Every run logs `rejected_rows`, `participant_rows` and the allowance in
-force, so a tolerated rejection is never silent.
+build continues only up to the allowance
+`max(LOLSTATS_AGG_MAX_REJECTED_ROWS, ceil(LOLSTATS_AGG_MAX_REJECTED_RATE *
+participant_rows))` (`GateConfig.AllowedRejectedRows`): it is a ceiling on rows
+Riot itself leaves position-less, not a licence to publish a build whose
+extraction stopped classifying. Both defaults are 0, and `deploy/base/config.yaml`
+deploys a floor of 25 and a rate of 0.0008 - 3.8x the worst rate measured and
+under a tenth of a percent of any window. The rate is what keeps the floor from
+going stale: participant rows per window grew from 105 980 to 141 150 in two
+weeks, and an absolute 25 quarantined build run 17 at 30 rejected rows, while
+the floor alone still covers a quiet window. A regression, which rejects a large
+fraction rather than a handful, trips either input and still stops the build.
+Every run logs `rejected_rows`, `participant_rows` and the allowance in force,
+so a tolerated rejection is never silent.
 
 Every JSON extraction is wrapped in `CASE WHEN json_valid(payload) ... END`.
 Without that guard one unparseable payload aborts the whole DuckDB statement
@@ -375,7 +381,7 @@ audit row and the log line name the cause.
 | window non-empty | the window selected no match, or no row carries a patch | `ErrEmptyWindow` |
 | patch well formed | a `gameVersion` in the window is not `major.minor` | `ErrMalformedArchive` |
 | input sufficient | `matches_used == 0` or `classified_rows == 0` | `ErrEmptyWindow` |
-| rejection rate | `rejected_rows` exceeds `GateConfig.MaxRejectedRows` | `ErrRejectedRows` |
+| rejection rate | `rejected_rows` exceeds `GateConfig.AllowedRejectedRows(participant_rows)` | `ErrRejectedRows` |
 | reconciliation | `abs(sum(cell n) - classified_rows) > GateConfig.ReconcileTolerance` | `ErrReconciliation` |
 | something to say | `cells_published == 0` | `ErrNoPublishedCells` |
 | confidence majority | `cells_published / cells_total < GateConfig.MinConfidentShare` | `ErrSuppressionMajority` |
@@ -383,13 +389,20 @@ audit row and the log line name the cause.
 Two of these deserve their reasoning spelled out.
 
 **The rejection rate** is the one gate with an allowance rather than a fixed
-threshold, and `GateConfig.MaxRejectedRows` is `LOLSTATS_AGG_MAX_REJECTED_ROWS`,
-surfaced as `--max-rejected-rows`. It exists because a handful of the rows Riot
-reports as position-less are in the archive as shipped (section 2), and a gate
-that refuses those refuses to publish at all; the allowance is set to a measured
-multiple of them, not to a number large enough to hide a defect. A rejected row
-still never reaches a cell, and it is excluded from `classified_rows` (on both
-sides of the reconciliation check), so tolerating it cannot flatter a rate.
+threshold, and it is `AllowedRejectedRows(participant_rows) =
+max(GateConfig.MaxRejectedRows, ceil(GateConfig.MaxRejectedRate *
+participant_rows))`. The two inputs are `LOLSTATS_AGG_MAX_REJECTED_ROWS`
+(`--max-rejected-rows`, default 0) and `LOLSTATS_AGG_MAX_REJECTED_RATE`
+(`--max-rejected-rate`, default 0, deployed 0.0008), and either alone leaves the
+gate exactly as fail-closed as it was. It exists because a handful of the rows
+Riot reports as position-less are in the archive as shipped (section 2), and a
+gate that refuses those refuses to publish at all; the allowance is set to a
+measured multiple of them, not to a number large enough to hide a defect. The
+floor answers "how many position-less rows does a normal quiet window carry",
+which does not change; the rate answers "how many does this window carry", which
+tracks the archive as the crawl grows. A rejected row still never reaches a
+cell, and it is excluded from `classified_rows` (on both sides of the
+reconciliation check), so tolerating it cannot flatter a rate.
 
 **Reconciliation** is the check that the cells add up to the rows they came
 from. `sum(n)` over the published cells plus the suppressed cells must equal the

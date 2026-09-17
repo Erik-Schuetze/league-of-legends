@@ -409,6 +409,43 @@ func TestFixtureToleratedRejection(t *testing.T) {
 	}
 }
 
+// TestFixtureToleratedRejectionFromTheRateCeiling runs the same fixture through
+// the deployed rate instead of the absolute floor, which is the wiring the
+// nightly build uses: the allowance has two operator inputs and the gate has to
+// read both.
+func TestFixtureToleratedRejectionFromTheRateCeiling(t *testing.T) {
+	t.Parallel()
+
+	rawRoot := archiveOf(t, fixtureMatches()[0], func(doc map[string]any) {
+		participant := payloadParticipant(t, doc, 100, 0)
+		participant["teamPosition"] = ""
+		participant["individualPosition"] = "Invalid"
+	})
+
+	aggRoot := t.TempDir()
+	opts := fixtureBuildOptions(t, aggRoot, rawRoot)
+	opts.MinCellN = 1
+	opts.Gates = DefaultGateConfig(1)
+	// No floor at all: the fixture's window is small, so the allowance has to
+	// come from the rate, which rounds up to one row.
+	opts.Gates.MaxRejectedRows = 0
+	opts.Gates.MaxRejectedRate = 0.0008
+
+	result, err := Build(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("the rate ceiling did not tolerate the remake row: %v", err)
+	}
+	if result.Counts.RejectedRows != 1 {
+		t.Fatalf("rejected_rows = %d, want 1", result.Counts.RejectedRows)
+	}
+	if want := opts.Gates.AllowedRejectedRows(result.Counts.ParticipantRows); want != 1 {
+		t.Fatalf("the fixture window should round the rate ceiling up to one row, got %d", want)
+	}
+	if result.Counts.CellsPublished == 0 {
+		t.Error("no cell survived min_cell_n=1: a tolerated rejection must still publish the rest of the window")
+	}
+}
+
 // TestGateConfidentShareIsExactAndExplainsRows pins the two halves of the
 // confidence-majority failure: the share of cells is what the gate judges, and
 // the message also has to say how much of the window the surviving cells carry,
@@ -493,6 +530,123 @@ func TestGateRejectedRowAllowanceIsExact(t *testing.T) {
 		if gotErr := errors.Is(err, ErrRejectedRows); gotErr != tc.wantErr {
 			t.Errorf("allowed = %d: ErrRejectedRows = %v (%v), want %v", tc.allowed, gotErr, err, tc.wantErr)
 		}
+	}
+}
+
+// TestGateRejectedRowAllowanceScalesWithTheWindow is the regression test for the
+// second calibration event of this gate: the allowance used to be an absolute
+// count, the archive grew 5x under it, and a window whose rejection *rate* had
+// barely moved stopped publishing. It pins the three properties the shape has to
+// keep - the floor decides a small window, the rate ceiling follows the archive,
+// and a window that rejects a large fraction fails however deep the archive is.
+func TestGateRejectedRowAllowanceScalesWithTheWindow(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name            string
+		floor           int
+		rate            float64
+		participantRows int
+		rejectedRows    int
+		wantAllowance   int
+		wantErr         bool
+	}{
+		{
+			name:  "the floor decides the window the measurement was taken on",
+			floor: 25, rate: 0.0008, participantRows: 27790, rejectedRows: 3, wantAllowance: 25,
+		},
+		{
+			name:  "the floor still decides a window the rate would allow less of",
+			floor: 25, rate: 0.0008, participantRows: 10000, rejectedRows: 25, wantAllowance: 25,
+		},
+		{
+			name:  "the floor is a ceiling too",
+			floor: 25, rate: 0.0008, participantRows: 10000, rejectedRows: 26, wantAllowance: 25, wantErr: true,
+		},
+		{
+			// build 17: 30 of 141,150 rejected (0.021%) against a deployed 25.
+			name:  "the deployed pair publishes the window that broke",
+			floor: 25, rate: 0.0008, participantRows: 141150, rejectedRows: 30, wantAllowance: 113,
+		},
+		{
+			name:  "the rate ceiling is a ceiling, not a threshold",
+			floor: 25, rate: 0.0008, participantRows: 141150, rejectedRows: 113, wantAllowance: 113,
+		},
+		{
+			name:  "one row over the rate ceiling still stops the build",
+			floor: 25, rate: 0.0008, participantRows: 141150, rejectedRows: 114, wantAllowance: 113, wantErr: true,
+		},
+		{
+			// The same rate, an archive 5x deeper: the allowance follows it
+			// instead of being outgrown by it.
+			name:  "the allowance follows the archive",
+			floor: 25, rate: 0.0008, participantRows: 705750, rejectedRows: 150, wantAllowance: 565,
+		},
+		{
+			// A classification regression does not reject 0.08% of a window;
+			// it rejects the role, the champion or the payload shape it broke,
+			// which is a large fraction however large the window is.
+			name:  "a regression still stops a deep archive",
+			floor: 25, rate: 0.0008, participantRows: 705750, rejectedRows: 7058, wantAllowance: 565, wantErr: true,
+		},
+		{
+			name:  "no floor and no rate stays fail-closed",
+			floor: 0, rate: 0, participantRows: 141150, rejectedRows: 1, wantAllowance: 0, wantErr: true,
+		},
+		{
+			name:  "a rate of zero leaves the floor to decide",
+			floor: 25, rate: 0, participantRows: 141150, rejectedRows: 25, wantAllowance: 25,
+		},
+	}
+
+	for _, tc := range cases {
+		cfg := DefaultGateConfig(1)
+		cfg.MaxRejectedRows = tc.floor
+		cfg.MaxRejectedRate = tc.rate
+
+		if got := cfg.AllowedRejectedRows(tc.participantRows); got != tc.wantAllowance {
+			t.Errorf("%s: AllowedRejectedRows(%d) = %d, want %d", tc.name, tc.participantRows, got, tc.wantAllowance)
+		}
+
+		counts := GateCounts{
+			ArchiveRows: tc.participantRows, MatchesUsed: 1,
+			ParticipantRows: tc.participantRows, RejectedRows: tc.rejectedRows,
+			ClassifiedRows: tc.participantRows - tc.rejectedRows,
+		}
+		err := counts.CheckInput(cfg)
+		if gotErr := errors.Is(err, ErrRejectedRows); gotErr != tc.wantErr {
+			t.Errorf("%s: ErrRejectedRows = %v (%v), want %v", tc.name, gotErr, err, tc.wantErr)
+		}
+	}
+}
+
+// TestGateRejectedRowAllowanceIsReportable keeps the failure message usable as
+// calibration evidence: an operator reading it has to be able to see which half
+// of the allowance was in force without going back to the ConfigMap.
+func TestGateRejectedRowAllowanceIsReportable(t *testing.T) {
+	t.Parallel()
+
+	counts := GateCounts{ArchiveRows: 141150, MatchesUsed: 14115, ParticipantRows: 141150,
+		RejectedRows: 30, ClassifiedRows: 141120}
+	cfg := DefaultGateConfig(1)
+	cfg.MaxRejectedRows = 25
+
+	err := counts.CheckInput(cfg)
+	if err == nil {
+		t.Fatal("expected 30 rejected rows against a floor of 25 to fail")
+	}
+	for _, want := range []string{"30 of 141150 participant rows", "allowed 25", "floor 25", "rate 0.0000% of the window"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not report %q: %v", want, err)
+		}
+	}
+
+	// The same counts against the deployed pair pass, which is what makes the
+	// failure above a statement about the allowance rather than about the
+	// window.
+	cfg.MaxRejectedRate = 0.0008
+	if err := counts.CheckInput(cfg); err != nil {
+		t.Errorf("the deployed allowance should publish this window: %v", err)
 	}
 }
 

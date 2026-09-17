@@ -38,11 +38,22 @@ func (s *buildState) checkInputGates() error {
 	// A tolerated rejection is exactly the kind of thing that must not be
 	// silent: the published rates are computed without those rows, so the count
 	// and the allowance belong in the run's log next to the rates they affect.
+	//
+	// The allowance is logged on every run, not only on the runs that reject
+	// something: it is the number an operator has to compare against a new
+	// measurement, and a ceiling that only appears in a log line when it is
+	// about to be crossed cannot be calibrated from the outside.
+	allowance := s.opts.Gates.AllowedRejectedRows(s.windowStats.ParticipantRows)
+	s.opts.Log.Info("rejection allowance in force",
+		"allowed", allowance,
+		"floor", s.opts.Gates.MaxRejectedRows,
+		"rate", s.opts.Gates.MaxRejectedRate,
+		"participant_rows", s.windowStats.ParticipantRows)
 	if s.windowStats.RejectedRows > 0 {
 		s.opts.Log.Warn("participant rows lack a champion or a role",
 			"rejected_rows", s.windowStats.RejectedRows,
 			"participant_rows", s.windowStats.ParticipantRows,
-			"allowed", s.opts.Gates.MaxRejectedRows,
+			"allowed", allowance,
 			"reason", "Riot reported no usable position; the rows are excluded from every cell")
 	}
 	return s.counts.CheckInput(s.opts.Gates)

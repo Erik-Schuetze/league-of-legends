@@ -44,6 +44,10 @@ func TestLoadFromUsesDefaults(t *testing.T) {
 		t.Errorf("Aggregate.MaxRejectedRows = %d, want %d: an unset allowance must stay fail-closed",
 			cfg.Aggregate.MaxRejectedRows, defaultMaxRejectedRows)
 	}
+	if cfg.Aggregate.MaxRejectedRate != defaultMaxRejectedRate {
+		t.Errorf("Aggregate.MaxRejectedRate = %v, want %v: an unset rate ceiling must not widen the allowance",
+			cfg.Aggregate.MaxRejectedRate, defaultMaxRejectedRate)
+	}
 	if cfg.Aggregate.MinConfidentShare != defaultMinConfidentShare {
 		t.Errorf("Aggregate.MinConfidentShare = %v, want %v: an unset share must stay at the strict default",
 			cfg.Aggregate.MinConfidentShare, defaultMinConfidentShare)
@@ -68,6 +72,7 @@ func TestLoadFromOverrides(t *testing.T) {
 		"LOLSTATS_RIOT_API_KEY_EXPIRES_AT":  "2026-10-01T00:00:00Z",
 		"LOLSTATS_AGG_MIN_CELL_N":           "250",
 		"LOLSTATS_AGG_MAX_REJECTED_ROWS":    "25",
+		"LOLSTATS_AGG_MAX_REJECTED_RATE":    "0.0008",
 		"LOLSTATS_AGG_MIN_CONFIDENT_SHARE":  "0.15",
 		"LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT":  "768MiB",
 		"LOLSTATS_AGG_DUCKDB_THREADS":       "3",
@@ -111,6 +116,9 @@ func TestLoadFromOverrides(t *testing.T) {
 	if cfg.Aggregate.MaxRejectedRows != 25 {
 		t.Errorf("Aggregate.MaxRejectedRows = %d, want 25", cfg.Aggregate.MaxRejectedRows)
 	}
+	if cfg.Aggregate.MaxRejectedRate != 0.0008 {
+		t.Errorf("Aggregate.MaxRejectedRate = %v, want 0.0008", cfg.Aggregate.MaxRejectedRate)
+	}
 	if cfg.Aggregate.MinConfidentShare != 0.15 {
 		t.Errorf("Aggregate.MinConfidentShare = %v, want 0.15", cfg.Aggregate.MinConfidentShare)
 	}
@@ -144,11 +152,14 @@ func TestLoadFromReportsEveryProblemAtOnce(t *testing.T) {
 		// A share of 0 would mean "publish nothing" and a share above 1 can
 		// never be met; both must be refused rather than clamped.
 		"LOLSTATS_AGG_MIN_CONFIDENT_SHARE": "1.5",
+		// The rate ceiling reads 0 as "off", so the value refused is the one
+		// above a whole window rather than zero itself.
+		"LOLSTATS_AGG_MAX_REJECTED_RATE": "1.5",
 	}))
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, key := range []string{"LOLSTATS_LOG_LEVEL", "LOLSTATS_RIOT_TIMEOUT", "LOLSTATS_AGG_MIN_CELL_N", "LOLSTATS_AGG_DUCKDB_THREADS", "LOLSTATS_AGG_MAX_REJECTED_ROWS", "LOLSTATS_AGG_MIN_CONFIDENT_SHARE"} {
+	for _, key := range []string{"LOLSTATS_LOG_LEVEL", "LOLSTATS_RIOT_TIMEOUT", "LOLSTATS_AGG_MIN_CELL_N", "LOLSTATS_AGG_DUCKDB_THREADS", "LOLSTATS_AGG_MAX_REJECTED_ROWS", "LOLSTATS_AGG_MIN_CONFIDENT_SHARE", "LOLSTATS_AGG_MAX_REJECTED_RATE"} {
 		if !strings.Contains(err.Error(), key) {
 			t.Errorf("error does not name %s: %v", key, err)
 		}
@@ -203,5 +214,22 @@ func TestValidationIsPerComponent(t *testing.T) {
 	}
 	if err := ok.Postgres.Validate(); err != nil {
 		t.Errorf("Postgres.Validate: %v", err)
+	}
+}
+
+// TestMaxRejectedRateKeepsZeroMeaningOff pins the one place this rate differs
+// from the confidence share: its zero is a value an operator may deploy, not a
+// mistake to refuse. The allowance has an absolute floor beside it, so a rate
+// of zero is "let the floor decide", and the fail-closed behaviour of an
+// unconfigured build comes from the floor being zero too.
+func TestMaxRejectedRateKeepsZeroMeaningOff(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := LoadFrom(envFrom(map[string]string{"LOLSTATS_AGG_MAX_REJECTED_RATE": "0"}))
+	if err != nil {
+		t.Fatalf("a rate of zero must be accepted: %v", err)
+	}
+	if cfg.Aggregate.MaxRejectedRate != 0 {
+		t.Errorf("Aggregate.MaxRejectedRate = %v, want 0", cfg.Aggregate.MaxRejectedRate)
 	}
 }

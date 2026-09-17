@@ -3,6 +3,7 @@ package aggregate
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // The fail-closed gates.
@@ -72,25 +73,54 @@ type GateConfig struct {
 	// wholesale instead of narrowed.
 	ReconcileTolerance int
 
-	// MaxRejectedRows is how many participant rows may lack a champion or a
-	// role before the build stops. It defaults to zero: a rejected row lowers
-	// every rate it should have contributed to, and there is no way to tell a
-	// queue quirk from a parsing bug by looking at the total.
+	// MaxRejectedRows is the absolute floor of the rejected-row allowance: how
+	// many participant rows may lack a champion or a role before the build
+	// stops, whatever the size of the window. It defaults to zero: a rejected
+	// row lowers every rate it should have contributed to, and there is no way
+	// to tell a queue quirk from a parsing bug by looking at the total.
 	//
 	// A non-zero value is an allowance measured against the archive, not a
 	// relaxation of the rule. The live EUW/420 archive contains rows Riot
 	// itself reports as position-less - teamPosition "" together with
 	// individualPosition "Invalid", the literal sentinel, mostly in sub-four
 	// minute remakes that never assigned a lane - and a build that refuses
-	// them publishes nothing. Measured over the 2026-09-04..2026-09-17 window:
-	// 3 rejected rows out of 27,790 participant rows for the published patch
-	// 16.18, 7 for the whole two-patch window. The deployed allowance is 25,
-	// several times the measurement and still under a tenth of a percent of
-	// the window, so a real classification defect (which rejects a large
-	// fraction of the archive) still stops the build. The rows themselves are
-	// never guessed into a role: featureFilter drops them from every cell and
-	// CheckOutput's reconciliation counts them as unclassified.
+	// them publishes nothing.
+	//
+	// The floor is what keeps the allowance usable on a small archive; the
+	// window-sized part of it is MaxRejectedRate below. The rows themselves
+	// are never guessed into a role: featureFilter drops them from every cell
+	// and CheckOutput's reconciliation counts them as unclassified.
 	MaxRejectedRows int
+
+	// MaxRejectedRate is the window-sized part of the rejection allowance: a
+	// share of the window's participant rows. The allowance the input gate
+	// applies is
+	//
+	//	max(MaxRejectedRows, ceil(MaxRejectedRate x ParticipantRows))
+	//
+	// so it grows with the crawl instead of being outgrown by it.
+	//
+	// The shape is the answer to the second calibration event of this gate.
+	// The allowance was an absolute count first, calibrated at 3 rejected rows
+	// of 27,790 participant rows (0.011%); two weeks later the same window
+	// held 141,150 participant rows with 30 of them (0.021%)
+	// position-less, so a deployed 25 refused to publish a build whose *rate*
+	// had barely moved. An absolute allowance on a growing archive fails on a
+	// timer - the archive grew 5x between the two events - while a rate does
+	// not, because the rejected rows are a property of the crawl (roughly one
+	// per remake), not of its size.
+	//
+	// Zero is the default and means "no rate ceiling", which leaves
+	// MaxRejectedRows to decide alone: an unconfigured build is still
+	// fail-closed at zero allowed rows. The deployed ceiling is 0.0008
+	// (0.08% of the window): 3.8x the worst rate measured over the live builds
+	// (0.011%, 0.018%, 0.018%, 0.019%, 0.021%) and still under the tenth of a
+	// percent the docs hold this allowance to. A classification
+	// regression does not reject a rate in that band: the extraction stops
+	// classifying a role, a champion or a payload shape, which rejects a large
+	// fraction of the window, and a rate ceiling rejects that just as an
+	// absolute one did.
+	MaxRejectedRate float64
 }
 
 // DefaultGateConfig is what a build uses unless the operator overrides it.
@@ -100,7 +130,30 @@ func DefaultGateConfig(minCellN int) GateConfig {
 		MinConfidentShare:  0.5,
 		ReconcileTolerance: 0,
 		MaxRejectedRows:    0,
+		MaxRejectedRate:    0,
 	}
+}
+
+// AllowedRejectedRows is the allowance the input gate applies to a window of
+// participantRows participant rows: the larger of the absolute floor and the
+// rate ceiling, rounded up so that the ceiling is "at most this share of the
+// window" rather than "less than one row below it".
+//
+// It is a method on the gate configuration rather than arithmetic buried in
+// CheckInput because two callers need the same number: the gate that judges it
+// and the run's log, which reports the allowance in force next to the count it
+// judged. A window with no participant rows gets the floor: the ceiling of a
+// share of nothing is nothing, and the input gate has already reported the
+// empty window.
+func (cfg GateConfig) AllowedRejectedRows(participantRows int) int {
+	if participantRows <= 0 || cfg.MaxRejectedRate <= 0 {
+		return cfg.MaxRejectedRows
+	}
+	ceiling := int(math.Ceil(cfg.MaxRejectedRate * float64(participantRows)))
+	if ceiling > cfg.MaxRejectedRows {
+		return ceiling
+	}
+	return cfg.MaxRejectedRows
 }
 
 // GateCounts is the evidence the gates judge.
@@ -145,9 +198,9 @@ func (c GateCounts) CheckInput(cfg GateConfig) error {
 		errs = append(errs, fmt.Errorf("%w: no matches with a champion and a role in the window (matches=%d, classified rows=%d)",
 			ErrEmptyWindow, c.MatchesUsed, c.ClassifiedRows))
 	}
-	if c.RejectedRows > cfg.MaxRejectedRows {
-		errs = append(errs, fmt.Errorf("%w: %d of %d participant rows lack a champion or a role (allowed %d)",
-			ErrRejectedRows, c.RejectedRows, c.ParticipantRows, cfg.MaxRejectedRows))
+	if allowance := cfg.AllowedRejectedRows(c.ParticipantRows); c.RejectedRows > allowance {
+		errs = append(errs, fmt.Errorf("%w: %d of %d participant rows lack a champion or a role (allowed %d = max(floor %d, rate %.4f%% of the window))",
+			ErrRejectedRows, c.RejectedRows, c.ParticipantRows, allowance, cfg.MaxRejectedRows, cfg.MaxRejectedRate*100))
 	}
 
 	return errors.Join(errs...)

@@ -72,7 +72,8 @@ rather than one at a time.
 | `LOLSTATS_AGG_ROOT` | `/var/lib/lolstats/agg` | Aggregate output root, served at `/agg` |
 | `LOLSTATS_AGG_SCHEMA_VERSION` | `1` | Artifact envelope version. Changing it needs an ADR |
 | `LOLSTATS_AGG_MIN_CELL_N` | `100` | Minimum sample size for a published cell |
-| `LOLSTATS_AGG_MAX_REJECTED_ROWS` | `0` | Participant rows without a champion or a role a build tolerates before it refuses to publish. Deployed as `25`, an allowance measured against position-less rows Riot itself reports |
+| `LOLSTATS_AGG_MAX_REJECTED_ROWS` | `0` | Participant rows without a champion or a role a build tolerates before it refuses to publish - the floor of the allowance. Deployed as `25`, measured against position-less rows Riot itself reports |
+| `LOLSTATS_AGG_MAX_REJECTED_RATE` | `0` | Share of the window's participant rows the allowance scales with, so a growing archive does not trip a stale absolute floor: `max(floor, ceil(rate * participant_rows))`. Deployed as `0.0008`, 3.8x the worst measured rate and under a tenth of a percent of any window |
 | `LOLSTATS_AGG_MIN_CONFIDENT_SHARE` | `0.5` | Share of computable cells that must clear `LOLSTATS_AGG_MIN_CELL_N` for a build to publish. Deployed as `0.15`, a value measured against the live archive's crawl depth |
 | `LOLSTATS_AGG_SOURCE_WINDOW_DAYS` | `14` | Trailing window of raw data a build reads |
 | `LOLSTATS_AGG_BRACKET` | `all` | Bracket segment. `all` in v1 |
