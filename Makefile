@@ -316,3 +316,149 @@ migrate:
 	kubectl -n lolstats wait --for=condition=Complete job/lolstats-migrate --timeout=300s
 
 # ---- end additions: deploy-time migration ----
+
+# ---- additions: gates lane (web reference build + fail-closed render parity) ----
+# Appended at the end, and declared on its own .PHONY line, so this addition
+# stays append-only like the blocks above it.
+.PHONY: web-deps web-dist test-parity verify-serving verify-serving-local compliance-negative-control
+
+# `web-install` runs `npm ci` unconditionally, which is right for a clean build
+# and wasteful for a second `make` in the same checkout. This target only
+# installs when the tree is missing, and never touches the network otherwise.
+web-deps:
+	@if [ -d web/node_modules ] && [ -d web/node_modules/astro ]; then \
+		echo "web/node_modules present: skipping npm ci"; \
+	else \
+		echo "web/node_modules missing: running npm ci"; \
+		cd web && npm ci; \
+	fi
+
+# Builds the Astro reference tree in web/dist, which is what the parity tests
+# compare the Go tier's rendering against (internal/webtier/parity_test.go
+# reads ../../web/dist). Skips the rebuild when web/dist is newer than every
+# input, so `make test-parity` twice in a row does not rebuild twice; the stamp
+# lives inside the ignored web/dist.
+#
+# `make test-parity WEB_DIST_SKIP=1` is the negative control for the gate below:
+# it leaves the reference tree out, so the parity tests skip, and the gate has
+# to fail instead of reporting a pass over tests that never ran. With web/dist
+# moved aside it reproduces the CI ordering defect exactly.
+WEB_DIST_STAMP := web/dist/.make-web-dist.stamp
+
+web-dist: web-deps
+	@if [ "$(WEB_DIST_SKIP)" = 1 ]; then \
+		echo "web-dist skipped on purpose (WEB_DIST_SKIP=1): the parity gate below must fail closed"; \
+		exit 0; \
+	fi; \
+	stamp="$(CURDIR)/$(WEB_DIST_STAMP)"; \
+	stale=yes; \
+	if [ -f "$$stamp" ] && [ -f web/dist/index.html ]; then \
+		if [ -z "$$(find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json -newer "$$stamp" -print -quit 2>/dev/null)" ]; then \
+			stale=no; \
+		fi; \
+	fi; \
+	if [ "$$stale" = yes ]; then \
+		echo "web/dist is absent or older than web/ inputs: building (npm run build)"; \
+		( cd web && npm run build ) || exit 1; \
+		[ -f web/dist/index.html ] || { echo "npm run build produced no web/dist/index.html" >&2; exit 1; }; \
+		mkdir -p "$(dir $(WEB_DIST_STAMP))"; : > "$$stamp"; \
+	else \
+		echo "web/dist is up to date: $(WEB_DIST_STAMP)"; \
+	fi
+
+# The render-parity gate. internal/webtier/parity_test.go compares the Go tier's
+# HTML against the Astro reference tree and calls t.Skip when web/dist is not
+# present - which is exactly what happened in CI while the workflow ran
+# `make test-race` before `npm run build`, so three tests that prove the
+# redesign is faithful gated nothing at all. This target is the fix: it builds
+# the reference tree first, then requires that each named parity test reported
+# PASS and that nothing in the run skipped. Modelled on `test-build` above,
+# including carrying the exit status out of the pipeline in a file.
+test-parity: web-dist
+	@log="$(CURDIR)/bin/test-parity.log"; statusfile="$$log.status"; \
+	{ go test -race -count=1 -v \
+		-run 'TestRenderParity|TestInteractiveRenderParity|TestFeedParity' \
+		./internal/webtier/... 2>&1; echo $$? > "$$statusfile"; } | tee "$$log"; \
+	status=$$(cat "$$statusfile"); rm -f "$$statusfile"; \
+	if [ "$$status" -ne 0 ]; then \
+		echo "FAIL: go test exited $$status; full output in $$log" >&2; \
+		exit 1; \
+	fi; \
+	if grep -qE '(^|[[:space:]])--- SKIP:' "$$log"; then \
+		echo "FAIL: a parity test skipped; this gate does not accept a skip:" >&2; \
+		grep -E '(^|[[:space:]])--- SKIP:' "$$log" >&2; \
+		echo "      the reference tree in web/dist is what the tests compare against; build it" >&2; \
+		echo "      first (make web-dist), and never run this gate with the tree absent" >&2; \
+		exit 1; \
+	fi; \
+	for t in TestRenderParity TestInteractiveRenderParity TestFeedParity; do \
+		if ! grep -qE "^--- PASS: $$t( |$$)" "$$log"; then \
+			echo "FAIL: $$t did not report PASS." >&2; \
+			echo "      A parity test that does not run proves nothing; full output in $$log" >&2; \
+			exit 1; \
+		fi; \
+	done; \
+	echo "ok: TestRenderParity, TestInteractiveRenderParity and TestFeedParity PASSed against web/dist and nothing skipped"
+
+# The serving-contract gate for the deployed tier: /healthz, /metrics, the HTML
+# cache/ETag/304 policy, the Data Dragon static policy and the 503 + visible
+# error page for a missing agg/v1. It needs a reachable tier, so it is what CI
+# runs against a locally started `bin/lolstats-web` (verify-serving-local) and
+# what an operator runs against the cluster through
+#   kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80
+verify-serving:
+	@LOLSTATS_SERVE_URL="$${LOLSTATS_SERVE_URL:-http://127.0.0.1:18099}" \
+		sh scripts/verify-serving.sh
+
+# Starts the tier on a loopback port with the checked-in fixture artifact tree
+# (no cluster, no PVC, no network) and runs the same gate against it, including
+# the 503 path with LOLSTATS_EXPECT_NO_AGG=1 - the tier is started a second time
+# with a deliberately corrupt aggregate root, because a corrupt artifact must
+# produce a visible error page rather than a truncated 200. Nothing here touches
+# the cluster: it is an ephemeral process on 127.0.0.1.
+verify-serving-local: build
+	@port=$${LOLSTATS_LOCAL_PORT:-18098}; pid=""; \
+	cleanup() { [ -n "$$pid" ] && kill "$$pid" 2>/dev/null; }; \
+	trap cleanup EXIT INT TERM; \
+	start() { \
+		( export LOLSTATS_AGG_FIXTURES="$$1"; \
+		  [ -n "$$2" ] && export LOLSTATS_AGG_ROOT="$$2"; \
+		  export LOLSTATS_WEB_ADDR="127.0.0.1:$$port"; \
+		  [ -n "$$LOLSTATS_SITE_URL" ] && export LOLSTATS_SITE_URL; \
+		  exec ./bin/lolstats-web ) >bin/verify-serving-local.log 2>&1 & \
+		pid=$$!; \
+		i=0; \
+		while [ $$i -lt 40 ]; do \
+			if curl -fsS "http://127.0.0.1:$$port/healthz" >/dev/null 2>&1; then return 0; fi; \
+			kill -0 "$$pid" 2>/dev/null || break; \
+			i=$$((i+1)); sleep 0.5; \
+		done; \
+		echo "FAIL: bin/lolstats-web did not answer /healthz within 20s; see bin/verify-serving-local.log" >&2; \
+		return 1; \
+	}; \
+	corrupt="$(CURDIR)/bin/verify-serving-corrupt-agg"; \
+	rm -rf "$$corrupt"; mkdir -p "$$corrupt/v1"; \
+	printf '{"schema": 1, "source": "broken-fixture"' > "$$corrupt/v1/manifest.json"; \
+	echo "== tier over the checked-in fixture artifact tree =="; \
+	start only "" || exit 1; \
+	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" sh scripts/verify-serving.sh || exit 1; \
+	kill "$$pid" 2>/dev/null; wait "$$pid" 2>/dev/null; pid=""; \
+	echo "== tier over a corrupt artifact root (must answer 503, never a truncated 200) =="; \
+	start off "$$corrupt" || exit 1; \
+	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" LOLSTATS_EXPECT_NO_AGG=1 LOLSTATS_AGG_ROOT="$$corrupt" sh scripts/verify-serving.sh || exit 1; \
+	kill "$$pid" 2>/dev/null; wait "$$pid" 2>/dev/null; pid=""; \
+	echo "ok: the serving contract holds over the fixtures, and a missing agg/v1 is a visible 503"
+
+# The negative control for the amended compliance gate (scripts/compliance-check.sh,
+# amendment of 2026-09-17, docs/compliance.md). Checks 3 and 4 were failing a
+# legitimate server-rendered page - a page may load no <script> at all, and a
+# no-JS sort/filter/pagination form is a <form> - so their rules were replaced by
+# the invariant they were standing in for: no third-party script that phones
+# home, and every form submits through an on-origin GET that the server can
+# answer. This target is what keeps that amendment honest: it plants one
+# violation at a time into a scratch copy of web/dist and fails unless the gate
+# rejects each of them, with a page stripped of every <script> passing.
+compliance-negative-control:
+	sh scripts/compliance-negative-control.sh
+
+# ---- end additions: gates lane ----

@@ -60,6 +60,17 @@ jobs:
           node-version-file: web/package.json
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      # The reference tree has to exist before any test runs: the parity tests in
+      # internal/webtier compare the Go tier's HTML against web/dist and call
+      # t.Skip when it is absent. While this step sat after `make test-race`, the
+      # three tests that prove the redesign is faithful reported SKIP and gated
+      # nothing. Building here, and asserting the tests really ran in
+      # `make test-parity` below, is what closes that hole. `make web-dist` also
+      # installs web/node_modules with npm ci when it is missing.
+      - name: Build the Astro reference tree (web/dist)
+        run: make web-dist
+
       - name: fmt vet
         run: make fmt vet
 
@@ -68,6 +79,12 @@ jobs:
 
       - name: Test
         run: make test-race
+
+      # Render parity, fail-closed: the three parity tests must report PASS. A
+      # SKIP is a failure here, because a parity test that does not run proves
+      # nothing about the Go tier that replaced the pre-rendered site.
+      - name: Render parity (must not skip)
+        run: make test-parity
 
       # The end-to-end analytics tests in internal/aggregate need the pinned
       # DuckDB CLI, and they skip themselves rather than fail when it is absent.
@@ -101,13 +118,24 @@ jobs:
           make types
           git diff --exit-code -- web/src/types
 
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
+      # The serving contract of the deployed Go tier, exercised against a tier
+      # started in the runner over the checked-in fixture artifact tree, and
+      # again over a corrupt root to prove a missing agg/v1 is a 503 with a
+      # visible page rather than a truncated 200. No cluster is involved.
+      - name: Serving contract
+        run: make verify-serving-local
 
-      - name: Build site
-        working-directory: web
-        run: npm run build
+      # The launch-blocking compliance gate. It had never run in CI, so the two
+      # checks amended on 2026-09-17 (docs/compliance.md) could have been
+      # weakened without anything noticing.
+      - name: Compliance gate
+        run: make compliance
+
+      # ...and the proof that the amendment is not a weakening: one planted
+      # violation at a time, each of which the amended gate must still fail on,
+      # plus a page with no <script> at all, which must pass.
+      - name: Compliance negative controls
+        run: make compliance-negative-control
 
   build-and-push:
     needs: verify

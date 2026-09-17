@@ -89,7 +89,7 @@ day one so that adding brackets later is additive instead of a URL break.
 | `tierlist.json` | `aggmodel.TierList` | `TierList` | Envelope plus `cells: Cell[]`, one row per (champion, role) |
 | `champions/<id>.json` | `aggmodel.Champion` | `Champion` | Envelope plus `champion_id`, `champion_slug`, `roles: ChampionRole[]` |
 | `matchups/<role>.json` | `aggmodel.Matchups` | `Matchups` | Envelope plus `role`, `champions: number[]`, `cells: MatchupCell[]` |
-| `manifest.json` | `aggmodel.Manifest` | `Manifest` | Envelope-free: `schema`, `generated_at`, `latest`, `partitions[]` |
+| `manifest.json` | `aggmodel.Manifest` | `Manifest` | The publish pointer and the frozen contract: `schema`, `source`, `generated_at`, `latest`, `partitions[]`. See section 4.3 |
 | `static/<ddragon>/*.json` | `aggmodel.Static*` | `Static*` | Data Dragon projection, see section 4 |
 
 `ChampionRole` carries the whole champion page for one role. The page reads one
@@ -120,11 +120,14 @@ not exist and must 404 at build time.
 
 ### 1.3 Route table
 
-Every route is pre-rendered at build time. `<root>` is the aggregate root, which
-the static server exposes at the URL prefix `/agg`. A page that needs
-`<root>/v1/manifest.json` fetches `/agg/v1/manifest.json`.
+Every route is **rendered at request time** by the Go serving tier
+(`lolstats-web`, section 4.4) from the artifacts below - not pre-rendered into a
+directory of HTML. `<root>` is the aggregate root on the tier's volume, and the
+tier exposes it at the URL prefix `/agg`, so a page that needs
+`<root>/v1/manifest.json` reads `/agg/v1/manifest.json` through the same origin
+it is served from. There is no CORS exception and no second server.
 
-| Route | Artifacts fetched | JavaScript |
+| Route | Artifacts read | JavaScript |
 | --- | --- | --- |
 | `/` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/patches.json`, `<root>/v1/p/<latest>/tierlist.json` | none |
 | `/tier-list/<role>` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/champions.json`, `<root>/v1/p/<latest>/<region>/<queue>/<bracket>/tierlist.json` | `TableIsland`, deferred |
@@ -148,7 +151,9 @@ the route's `<slug>` against `ChampionSlug(champion.key)`. `<slug>` is never
 parsed back into a champion name.
 
 No route requires JavaScript to render its primary content. Patch switching is
-plain links between pre-generated snapshots.
+plain links between snapshots, and the sort/filter/paging controls are GET forms
+that the tier answers server-side; the islands only add interaction on top of a
+page that is already complete.
 
 ## 2. Go interfaces
 
@@ -532,23 +537,91 @@ templates by hand.
         patches.json
 ```
 
-The tree is versioned at `v1/`, not at the root, so a breaking reader change
-ships as `v2/` alongside it and clients migrate on their own schedule. Nothing
-inside `p/` is ever rewritten in place: a build writes its artifacts and only
-then flips `manifest.json`, which is the single atomic publish step.
+### 4.1 The tree
 
-Served paths are this tree with the URL prefix in front:
-`/agg/v1/manifest.json`, `/agg/v1/p/16.18/EUW/420/all/tierlist.json`.
+The tree is versioned at `v1/`, not at the root, so a breaking reader change
+ships as `v2/` alongside it and clients migrate on their own schedule.
+
+### 4.2 Publishing
+
+Nothing inside `p/` is ever rewritten in place: a build writes its artifacts and
+only then flips `manifest.json`, which is the single atomic publish step.
+Publishing nothing beats publishing garbage, so a build that fails leaves the
+previous tree - and the previous manifest - live.
 
 The static tree is synced as a whole by version directory and old version
 directories are pruned after one release of overlap. The raw archive is
 `raw/riot/match-v5/dt=<date>/part-<n>.parquet.zst`, append-only, never rewritten
 and never migrated in place.
 
+### 4.3 The frozen manifest contract
+
+`manifest.json` is the one file a reader may depend on for the shape of
+everything else, so its keys are frozen. Frozen does not mean optional: a
+missing key is a contract break, and `scripts/verify-serving.sh` fails when the
+served manifest does not carry them.
+
+| Key | Frozen value or meaning |
+| --- | --- |
+| `schema` | `1`. A change here is a new major version of the tree, not an edit |
+| `source` | `riot-match-v5`. The provenance the pages read their labelling from: only this value lets a page describe MATCH-V5, and every other value renders the demo or no-data language |
+| `generated_at` | RFC 3339 build time |
+| `latest` | The partition every route without an explicit patch reads. A partition is the envelope fields plus `cells_published`, `build_run_id`, `git_sha`, `champions[]` and `matchup_roles[]` |
+| `partitions[]` | Every published partition, including `latest`. One entry in v1 |
+| `min_cell_n` | `100`. The suppression floor: a cell with `n` below it is not emitted, and the reader cannot reconstruct it |
+| `cells_published` | Cells actually published in that partition |
+| `suppressed_cells` | Cells withheld by `min_cell_n`. Published on purpose, so a thin patch is visible to the operator and to the page rather than looking like an empty region |
+
+The deployed snapshot as of 2026-09-17 publishes exactly one partition -
+`16.18` / `EUW` / `420` / `all` - with `min_cell_n: 100`, **130 cells published
+and 511 suppressed**. That is a real tree, and it is why the contract can cite
+numbers rather than placeholders: `cells_published` far below the champion-role
+cross product is the expected state of a young archive, and it is disclosed
+rather than hidden.
+
+### 4.4 How the tree is served
+
+The serving tier exposes the aggregate root at the URL prefix `/agg` on its own
+origin: `/agg/v1/manifest.json`,
+`/agg/v1/p/16.18/EUW/420/all/tierlist.json`,
+`/agg/v1/static/<ddragon_version>/champions.json`. There is no separate
+artifact host and no CORS exception, which is why a page and the data it renders
+cannot become two origins that drift apart.
+
+Cache policy is part of the contract, because it is what a reader's browser and
+every intermediate cache will do with the bytes:
+
+| Path | Response |
+| --- | --- |
+| `/agg/v1/manifest.json` and the other artifacts under `p/` | `Cache-Control: public, max-age=60`, with an `ETag` |
+| `/agg/v1/static/<ddragon_version>/**.json` | `Cache-Control: public, max-age=3600` - immutable upstream data with no reader in it, so it is safe to cache publicly for longer |
+| HTML | `Cache-Control: private, max-age=60, stale-while-revalidate=300`, `ETag`, `Vary: Accept-Encoding`; a matching `If-None-Match` is `304` |
+
+Two failure modes are contract, not implementation detail:
+
+- **A missing or unreadable `agg/v1` is a 503 with a visible error page**, never
+  a 200 with a truncated body. A page that cannot be rendered correctly must not
+  be served at all.
+- **A corrupt artifact is passed through as it is.** The tier serves the bytes
+  it was given rather than inventing a state; `make verify-serving-local`
+  byte-compares the served manifest against a deliberately corrupt fixture for
+  exactly this reason.
+
+**Known gap, 2026-09-17.** The deployed snapshot publishes **no `v1/static/`
+tree**: `/agg/v1/static/<version>/champions.json` is 404 for both `16.18.1` and
+`16.18`, and the pages therefore fall back to the copy of Data Dragon checked
+into `web/src/fixtures/v1/static`. The serving tier is correct - it serves what
+exists - but the publisher's static sync is not yet writing the projection, so
+the fallback is live rather than latent. `scripts/verify-serving.sh` reports
+this as a WARN against the deployed tier and as a checked assertion against the
+fixture tree, so the gap is visible without pretending the tier is at fault.
+
 ## 5. CI image contract
 
-One image contains both binaries. A deployment or CronJob selects the binary it
-needs with `command`, so a new subcommand never needs a new image.
+One image contains all three binaries. A deployment or CronJob selects the binary
+it needs with `command`, so a new subcommand never needs a new image; the serving
+tier is the third (`lolstats-web`, section 4.4), which is why adding it did not
+add an image.
 
 | Item | Value |
 | --- | --- |
@@ -586,8 +659,10 @@ DuckDB CLI is a glibc binary that needs `libc`, `libstdc++` and `libgcc_s`,
 which the `cc` variant carries and the `static` variant does not; that amendment
 is recorded in `docs/decisions/ADR-007-pinned-duckdb-cli-engine.md`.
 
-Binary names inside the image are `/lolstats-ingest` and `/lolstats-aggregate`,
-with `ENTRYPOINT ["/lolstats-ingest"]` and `CMD ["worker"]`.
+Binary names inside the image are `/lolstats-ingest`, `/lolstats-aggregate` and
+`/lolstats-web` (with the Data Dragon fallback fixtures at
+`/web/src/fixtures`), with `ENTRYPOINT ["/lolstats-ingest"]` and
+`CMD ["worker"]`.
 
 An image is only published by a run in which the DuckDB-dependent build tests
 actually executed. The end-to-end analytics tests in
@@ -602,6 +677,21 @@ against), exports `LOLSTATS_DUCKDB_BIN` at its absolute path, and fails if
 package reported `SKIP`. A skip is a failure in CI, not a pass. The same two
 commands - `make duckdb` and then `make test-build` - are how a contributor runs
 that gate locally.
+
+Two more gates run in the same job, both added because they were passing for the
+wrong reason:
+
+- **Render parity must not skip.** `make test-parity` builds the reference tree
+  (`make web-dist`) and then requires `TestRenderParity`,
+  `TestInteractiveRenderParity` and `TestFeedParity` to report `PASS`. While the
+  reference tree was built *after* the test step, all three called `t.Skip` and
+  gated nothing; a `SKIP` is a failure here, and `make test-parity
+  WEB_DIST_SKIP=1` is the negative control that proves it.
+- **The serving contract and the compliance gate.** `make verify-serving-local`
+  starts the tier over the checked-in fixture tree and again over a deliberately
+  corrupt aggregate root, and `make compliance` plus `make
+  compliance-negative-control` run the launch-blocking compliance gate and its
+  negative controls.
 
 ## 6. Ownership map
 
