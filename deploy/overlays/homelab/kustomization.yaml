@@ -26,14 +26,49 @@ resources:
 images:
   # One image, three binaries: /lolstats-ingest, /lolstats-aggregate and
   # /lolstats-web. The Go web tier (deploy/base/web/go-deployment.yaml) selects
-  # the third with `command`, so this single pin covers it as well - there is no
-  # second reference to keep in step.
+  # the third with `command`, so this pin covers ingest and the jobs. The tier
+  # itself is pinned by digest in the `replacements` block below instead, and
+  # that block is where its pin is bumped.
   - name: ghcr.io/erik-schuetze/league-of-legends
     newTag: latest
   - name: ghcr.io/erik-schuetze/league-of-legends-site
     newTag: latest
   - name: ghcr.io/erik-schuetze/league-of-legends-caddy
     newTag: latest
+
+replacements:
+  # The Go tier's image is pinned by digest, not by tag, for a reason that
+  # showed up on the first deploy: `latest` on this cluster already named a build
+  # from before the tier was written, a node that has a tag cached does not
+  # re-resolve it, and a Deployment whose spec does not change is not rolled out
+  # when the tag moves - so the pods restarted into a crash loop on a binary
+  # (/lolstats-web) that image did not contain, and stayed there. A digest is
+  # immutable, is a diff ArgoCD can see, and is the same fact in the manifest as
+  # in the cluster. The value comes from the annotated field in
+  # deploy/base/web/go-deployment.yaml rather than from this file, because the
+  # base describes *what* the tier is and only the pin is environment-specific.
+  #
+  # A replacement is used rather than a patch because the `images` transformer
+  # above matches every workload that names the shared repository, and one of
+  # them is another agent's pipeline: this must move the third binary alone. A
+  # replacement runs after the image transformers, so the digest survives.
+  #
+  # sha-8739aa8 is the tier's first green CI run; bump the annotation when the
+  # tier changes.
+  - source:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: lolstats-go-web
+      fieldPath: metadata.annotations.[lolstats.dev/pinned-image]
+    targets:
+      - select:
+          group: apps
+          version: v1
+          kind: Deployment
+          name: lolstats-go-web
+        fieldPaths:
+          - spec.template.spec.containers.[name=web].image
 
 patches:
   # Tier 2 (ZFS-backed NFS) for the archive and the rendered site: ReadWriteMany,
