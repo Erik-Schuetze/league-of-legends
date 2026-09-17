@@ -409,6 +409,67 @@ func TestFixtureToleratedRejection(t *testing.T) {
 	}
 }
 
+// TestGateConfidentShareIsExactAndExplainsRows pins the two halves of the
+// confidence-majority failure: the share of cells is what the gate judges, and
+// the message also has to say how much of the window the surviving cells carry,
+// because that is the number an operator calibrates the share against.
+func TestGateConfidentShareIsExactAndExplainsRows(t *testing.T) {
+	t.Parallel()
+
+	// 2 of 10 cells published: 20% of the cells, holding 80 of 100 rows.
+	counts := GateCounts{
+		ArchiveRows: 100, MatchesUsed: 10, ParticipantRows: 100, ClassifiedRows: 100,
+		CellsTotal: 10, CellsPublished: 2, CellsSuppressed: 8, SumN: 100, SumNPublished: 80,
+	}
+	cases := []struct {
+		share   float64
+		wantErr bool
+	}{
+		{0.5, true},
+		{0.21, true},
+		{0.2, false},
+		{0.15, false},
+	}
+	for _, tc := range cases {
+		cfg := DefaultGateConfig(1)
+		cfg.MinConfidentShare = tc.share
+		err := counts.CheckOutput(cfg)
+		if gotErr := errors.Is(err, ErrSuppressionMajority); gotErr != tc.wantErr {
+			t.Errorf("share = %v: ErrSuppressionMajority = %v (%v), want %v", tc.share, gotErr, err, tc.wantErr)
+		}
+	}
+
+	cfg := DefaultGateConfig(1)
+	err := counts.CheckOutput(cfg)
+	if err == nil {
+		t.Fatal("expected the default 0.5 share to fail on a 20% window")
+	}
+	for _, want := range []string{"2 of 10 cells (20.0%)", "80 of 100 classified rows, 80.0%"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not report %q: %v", want, err)
+		}
+	}
+}
+
+// TestGateConfidentShareReportsNothingWithoutRows keeps the row sentence out of
+// a window the input gate has already rejected for having no classified rows:
+// there is no share to report there, and printing 0.0% of 0 would read like a
+// second, independent defect.
+func TestGateConfidentShareReportsNothingWithoutRows(t *testing.T) {
+	t.Parallel()
+
+	counts := GateCounts{ArchiveRows: 5, MatchesUsed: 0, ParticipantRows: 0, ClassifiedRows: 0,
+		CellsTotal: 4, CellsPublished: 1, CellsSuppressed: 3, SumN: 0, SumNPublished: 0}
+	cfg := DefaultGateConfig(1)
+	err := counts.CheckOutput(cfg)
+	if err == nil {
+		t.Fatal("expected the 25% share to fail")
+	}
+	if strings.Contains(err.Error(), "classified rows") {
+		t.Errorf("error invents a row share for an empty window: %v", err)
+	}
+}
+
 // TestGateRejectedRowAllowanceIsExact pins the boundary of the allowance: the
 // count is a ceiling, not a threshold.
 func TestGateRejectedRowAllowanceIsExact(t *testing.T) {

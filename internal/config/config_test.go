@@ -44,6 +44,10 @@ func TestLoadFromUsesDefaults(t *testing.T) {
 		t.Errorf("Aggregate.MaxRejectedRows = %d, want %d: an unset allowance must stay fail-closed",
 			cfg.Aggregate.MaxRejectedRows, defaultMaxRejectedRows)
 	}
+	if cfg.Aggregate.MinConfidentShare != defaultMinConfidentShare {
+		t.Errorf("Aggregate.MinConfidentShare = %v, want %v: an unset share must stay at the strict default",
+			cfg.Aggregate.MinConfidentShare, defaultMinConfidentShare)
+	}
 	if cfg.Aggregate.QueueID != 420 {
 		t.Errorf("Aggregate.QueueID = %d, want 420", cfg.Aggregate.QueueID)
 	}
@@ -64,6 +68,7 @@ func TestLoadFromOverrides(t *testing.T) {
 		"LOLSTATS_RIOT_API_KEY_EXPIRES_AT":  "2026-10-01T00:00:00Z",
 		"LOLSTATS_AGG_MIN_CELL_N":           "250",
 		"LOLSTATS_AGG_MAX_REJECTED_ROWS":    "25",
+		"LOLSTATS_AGG_MIN_CONFIDENT_SHARE":  "0.15",
 		"LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT":  "768MiB",
 		"LOLSTATS_AGG_DUCKDB_THREADS":       "3",
 		"LOLSTATS_AGG_DUCKDB_TEMP_DIR":      "/tmp",
@@ -106,6 +111,9 @@ func TestLoadFromOverrides(t *testing.T) {
 	if cfg.Aggregate.MaxRejectedRows != 25 {
 		t.Errorf("Aggregate.MaxRejectedRows = %d, want 25", cfg.Aggregate.MaxRejectedRows)
 	}
+	if cfg.Aggregate.MinConfidentShare != 0.15 {
+		t.Errorf("Aggregate.MinConfidentShare = %v, want 0.15", cfg.Aggregate.MinConfidentShare)
+	}
 	// The DuckDB bounds are read as written: the engine is the only place that
 	// decides what a size literal means, and "empty means the engine default" is
 	// what an unset ConfigMap projects.
@@ -133,11 +141,14 @@ func TestLoadFromReportsEveryProblemAtOnce(t *testing.T) {
 		"LOLSTATS_AGG_MIN_CELL_N":        "many",
 		"LOLSTATS_AGG_DUCKDB_THREADS":    "many",
 		"LOLSTATS_AGG_MAX_REJECTED_ROWS": "-1",
+		// A share of 0 would mean "publish nothing" and a share above 1 can
+		// never be met; both must be refused rather than clamped.
+		"LOLSTATS_AGG_MIN_CONFIDENT_SHARE": "1.5",
 	}))
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, key := range []string{"LOLSTATS_LOG_LEVEL", "LOLSTATS_RIOT_TIMEOUT", "LOLSTATS_AGG_MIN_CELL_N", "LOLSTATS_AGG_DUCKDB_THREADS", "LOLSTATS_AGG_MAX_REJECTED_ROWS"} {
+	for _, key := range []string{"LOLSTATS_LOG_LEVEL", "LOLSTATS_RIOT_TIMEOUT", "LOLSTATS_AGG_MIN_CELL_N", "LOLSTATS_AGG_DUCKDB_THREADS", "LOLSTATS_AGG_MAX_REJECTED_ROWS", "LOLSTATS_AGG_MIN_CONFIDENT_SHARE"} {
 		if !strings.Contains(err.Error(), key) {
 			t.Errorf("error does not name %s: %v", key, err)
 		}

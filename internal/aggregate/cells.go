@@ -90,6 +90,14 @@ type CellOutput struct {
 	// is the left hand side of the reconciliation gate.
 	SumN int
 
+	// SumNPublished is the sum of n over the published cells only: how many
+	// classified participant rows the published tier list actually describes.
+	// It is reported next to the share of cells that survived suppression so
+	// that an operator can tell "a few big cells carry the window" (a
+	// representativeness statement) apart from "the tail of one-off
+	// champion/role pairs is thick" (a volume statement).
+	SumNPublished int
+
 	// BaselineWinRate is the win rate of the whole window, which the tier
 	// scorer grades against.
 	BaselineWinRate float64
@@ -160,6 +168,7 @@ func ComputeCells(input CellInput) (CellOutput, error) {
 			continue
 		}
 		rawRate := float64(count.Wins) / float64(count.N)
+		out.SumNPublished += count.N
 		out.Cells = append(out.Cells, aggmodel.Cell{
 			ChampionID:    count.ChampionID,
 			Role:          role,

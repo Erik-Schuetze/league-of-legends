@@ -378,7 +378,7 @@ audit row and the log line name the cause.
 | rejection rate | `rejected_rows` exceeds `GateConfig.MaxRejectedRows` | `ErrRejectedRows` |
 | reconciliation | `abs(sum(cell n) - classified_rows) > GateConfig.ReconcileTolerance` | `ErrReconciliation` |
 | something to say | `cells_published == 0` | `ErrNoPublishedCells` |
-| confidence majority | `cells_published / cells_total < 0.5` | `ErrSuppressionMajority` |
+| confidence majority | `cells_published / cells_total < GateConfig.MinConfidentShare` | `ErrSuppressionMajority` |
 
 Two of these deserve their reasoning spelled out.
 
@@ -400,14 +400,32 @@ silently dropped rows without dropping a whole column, and it is why the
 extraction reports both a row count and a classified count.
 
 **The confidence majority** is what turns "some cells are thin" into "this
-build has nothing to say". If more than half the cells fall below the floor,
-the window is too small, or the extraction is mis-attributing roles, and the
-honest move is to leave the previous artifacts live. The threshold is
-`GateConfig.MinConfidentShare`, 0.5, and unlike the tolerance it has no flag at
-all: it is a policy about what a published tier list means, not an operational
-knob. `GateConfig` is a library-level struct - `build` fills it with
-`DefaultGateConfig` - so the gates stay directly testable without a command
-line in the way.
+build has little to say". If most cells fall below the floor, the window is too
+small, or the extraction is mis-attributing roles, and the honest move is to
+leave the previous artifacts live. The threshold is
+`GateConfig.MinConfidentShare`, and it is calibrated rather than assumed,
+because a real window always carries a long tail of one-off champion/role pairs
+(a champion played once, off-role, in two weeks) and the share of cells that
+clears `min_cell_n` therefore measures how deeply the patch the window ends on
+has been crawled, not how healthy the pipeline is. Measured on the live EUW/420
+archive at `min_cell_n=100`: 19.3% of cells at 34,780 classified rows
+(2026-09-04..2026-09-17), 12.1% at 21,620 (the same window cut to its last four
+days, when the crawler was already running at its current depth) and 2.1% at
+8,770 (patch 16.17 pinned, which the crawler barely covered). Meeting the 0.5
+default would need a floor near `min_cell_n=15`, and a cell of 15 games has a
+±25 point 95% interval, so the threshold moves instead of the floor:
+`GateConfig.MinConfidentShare` is `LOLSTATS_AGG_MIN_CONFIDENT_SHARE`, surfaced
+as `--min-confident-share`, with 0.5 as the default and the deployed value
+calibrated to the archive (see `deploy/base/config.yaml`, which carries the
+measurement and the instruction to raise it as the crawl deepens). Nothing else
+relaxes: every published cell still holds at least `min_cell_n` games, the
+suppressed cells are counted in the manifest, and a window materially thinner
+than the last one still stops the build - the failure names both the share of
+cells and the share of classified rows the surviving cells hold, so an operator
+sees immediately whether the artifact that was not replaced would have been
+more representative than the one that would. `GateConfig` is a library-level
+struct - `build` fills it from `DefaultGateConfig` plus the operator's values -
+so the gates stay directly testable without a command line in the way.
 
 Every failure path also rolls the staging directory back (section 7) and closes
 the audit row with `failed` (or `quarantined` for a data problem), carrying the
