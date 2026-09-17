@@ -58,7 +58,18 @@ spec:
                   staging=/var/lib/lolstats/.site-staging
                   previous=/var/lib/lolstats/.site-previous
                   rm -rf "$staging" "$previous"
-                  cp -a /site/dist "$staging"
+                  # -R, not -a: the only thing -a adds over -R here is ownership
+                  # and symlink preservation, and the tree has no symlinks.
+                  # Preserving ownership needs root, which runAsNonRoot forbids,
+                  # and the NFS export root-squashes anyway, so `cp -a` prints
+                  # "can't preserve ownership" and proceeds only because it
+                  # chooses to tolerate that error. Under `set -eu` that is a
+                  # tolerated error standing between a good build and a stale
+                  # site, so ask for the copy that can actually succeed and then
+                  # make the result readable no matter the image's umask.
+                  # The web tier reads this tree as uid 1000.
+                  cp -R /site/dist "$staging"
+                  chmod -R a+rX "$staging"
                   if [ -d /var/lib/lolstats/site ]; then
                     mv /var/lib/lolstats/site "$previous"
                   fi
