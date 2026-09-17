@@ -320,7 +320,7 @@ migrate:
 # ---- additions: gates lane (web reference build + fail-closed render parity) ----
 # Appended at the end, and declared on its own .PHONY line, so this addition
 # stays append-only like the blocks above it.
-.PHONY: web-deps web-dist test-parity verify-serving verify-serving-local compliance-negative-control
+.PHONY: web-deps web-dist test-parity verify-serving verify-serving-local compliance-negative-control compliance-gnu
 
 # `web-install` runs `npm ci` unconditionally, which is right for a clean build
 # and wasteful for a second `make` in the same checkout. This target only
@@ -460,5 +460,29 @@ verify-serving-local: build
 # rejects each of them, with a page stripped of every <script> passing.
 compliance-negative-control:
 	sh scripts/compliance-negative-control.sh
+
+# The compliance gate under GNU userland, which is what the CI runner has and
+# what this machine is not. The gate's scans hand a NUL-delimited list of paths
+# to grep, and an empty list is answered differently by the two implementations:
+# GNU xargs still runs the command when the list is empty, and grep then reads its
+# own standard input, so two phantom "(standard input)" pages were reported as
+# missing their banner and CI went red on a tree that passes here. That is a
+# class of defect a green local run cannot show, so this target re-runs the same
+# script in debian:12-slim with a non-empty stdin. It is the local half of the
+# portability control; the half that runs everywhere, including CI, is check 12
+# inside the gate, which asserts the empty-list behaviour directly.
+# Silent skip with a reason when there is no usable container runtime, because
+# this is a verification aid and not a launch gate.
+compliance-gnu:
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "skipped: docker is not installed, so the gate ran only under $(uname -s) grep"; \
+	elif ! docker info >/dev/null 2>&1; then \
+		echo "skipped: the container runtime is not answering, so the gate ran only under $(uname -s) grep"; \
+	else \
+		echo "== the compliance gate under GNU userland (debian:12-slim) =="; \
+		cat scripts/compliance-check.sh | docker run --rm -i --user "$$(id -u):$$(id -g)" \
+			-v "$(CURDIR):/w" -w /w debian:12-slim \
+			sh -c 'grep --version | head -1; sh /w/scripts/compliance-check.sh' || exit 1; \
+	fi
 
 # ---- end additions: gates lane ----
