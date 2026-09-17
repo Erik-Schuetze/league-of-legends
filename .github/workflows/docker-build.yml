@@ -15,9 +15,9 @@ on:
       - 'v*'
   pull_request:
   # So an image can be republished without a commit - after a failed tag push,
-  # or when only the Caddy module pin changed. A manual run on main publishes
-  # sha-<short> and latest; it cannot publish a semver tag, because those come
-  # from the git ref.
+  # or to pick up a base-image or Go patch release that moved no file in this
+  # repository. A manual run on main publishes sha-<short> and latest; it cannot
+  # publish a semver tag, because those come from the git ref.
   workflow_dispatch:
 
 # Least privilege for the whole workflow; only the job that pushes adds the
