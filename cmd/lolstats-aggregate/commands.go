@@ -44,6 +44,7 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		duckdbThreads     = cfg.Aggregate.DuckDBThreads
 		duckdbTempDir     = cfg.Aggregate.DuckDBTempDir
 		duckdbMaxTempSize = cfg.Aggregate.DuckDBMaxTempSize
+		crawlMaxAge       time.Duration
 	)
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -73,6 +74,8 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		"bound on the DuckDB spill directory such as 10GiB")
 	fs.StringVar(&metricsAddr, "metrics-addr", metricsAddr,
 		"prometheus listen address, empty disables the endpoint")
+	fs.DurationVar(&crawlMaxAge, "crawl-max-age", 0,
+		"fail instead of publishing when the newest crawled payload is older than this, zero disables the check")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -84,6 +87,15 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 	ctx, stop := signalContext()
 	defer stop()
 	defer serveMetrics(ctx, env.log, metricsAddr, env.metrics)()
+
+	// The crawl check runs before the auditor is opened and long before
+	// anything is staged, so a stale archive costs one dial rather than a
+	// DuckDB pass - and, more to the point, cannot reach the publish step.
+	if crawlMaxAge > 0 {
+		if err := env.requireFreshCrawl(ctx, crawlMaxAge); err != nil {
+			return fail(stderr, "build", err)
+		}
+	}
 
 	auditor, err := env.auditor(aggRoot)
 	if err != nil {

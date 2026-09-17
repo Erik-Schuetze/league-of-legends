@@ -101,6 +101,21 @@ func TestNewWorkerFillsDefaults(t *testing.T) {
 	}
 }
 
+// The job deadline has to outlast the slowest Riot call the client will make on
+// a row's behalf. One attempt may take riot.DefaultTimeout, and the client is
+// allowed to sit out riot.DefaultRetryWaitBudget of Riot's own backpressure
+// inside that same call; a job timeout shorter than the two together would cut
+// a throttled fetch off in the middle of a wait Riot asked for, requeue the row
+// and leave the wait unpaid - the measured defect, one level up. Both sides
+// live in different packages, so the relationship is pinned here.
+func TestJobTimeoutOutlastsTheClientsSlowestCall(t *testing.T) {
+	slowest := riot.DefaultTimeout + riot.DefaultRetryWaitBudget
+	if DefaultJobTimeout <= slowest {
+		t.Fatalf("DefaultJobTimeout = %s, want more than the client's slowest call (%s)",
+			DefaultJobTimeout, slowest)
+	}
+}
+
 // Step drains the queue before walking the frontier, which is what makes a
 // restart with a backlog finish what it already claimed.
 func TestStepDrainsTheQueueBeforeWalkingTheFrontier(t *testing.T) {
@@ -757,6 +772,63 @@ func TestRunIdlesWithoutAKeyAndStartsWhenOneAppears(t *testing.T) {
 	}
 	if got := writer.flushCount(); got == 0 {
 		t.Fatal("shutdown did not flush the archive")
+	}
+}
+
+// A declared expiry in the past must stop the crawl and exit non-zero rather
+// than spend the day's remaining budget discovering the same fact one 401 at a
+// time. The context here is never cancelled, so the run has to stop on its own.
+func TestRunRefusesToCrawlPastADeclaredKeyExpiry(t *testing.T) {
+	clock := riot.NewFakeClock(testBaseTime())
+	store := newFakeStore()
+	fetcher := newFakeFetcher("RGAPI-test-key")
+	writer := newFakeWriter()
+	store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_1"})
+
+	expires := testBaseTime().Add(-90 * time.Minute)
+	deps := testDeps(store, fetcher, writer, clock)
+	deps.KeyExpiry = riot.NewKeyExpiry(expires)
+
+	err := mustWorker(t, WorkerOptions{Deps: deps}).Run(context.Background())
+	if !errors.Is(err, riot.ErrKeyExpired) {
+		t.Fatalf("Run = %v, want ErrKeyExpired: an expired key is a failure, not a shutdown", err)
+	}
+	if got := fetcher.fetchCount(""); got != 0 {
+		t.Fatalf("the worker made %d Riot calls with an expired key", got)
+	}
+	if got := store.logCount("claim-jobs"); got != 0 {
+		t.Fatalf("the worker claimed %d batches with an expired key", got)
+	}
+	if got := store.logCount("complete-job"); got != 0 {
+		t.Fatalf("the worker completed %d jobs with an expired key", got)
+	}
+	// Stopping must not cost the payloads already in the open part file.
+	if writer.flushCount() == 0 {
+		t.Fatal("the expired-key exit did not flush the archive")
+	}
+}
+
+// The other half: a deadline in the future is not a reason to stop, and an
+// undeclared deadline is not a reason either. Both are the zero-risk cases that
+// would make the check above dangerous if it were written the other way round.
+func TestRunCrawlsUntilTheDeclaredExpiryArrives(t *testing.T) {
+	store := newFakeStore()
+	fetcher := newFakeFetcher("RGAPI-test-key")
+	writer := newFakeWriter()
+	store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_1"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clock := newStopClock(testBaseTime(), 2, cancel)
+
+	deps := testDeps(store, fetcher, writer, clock)
+	deps.KeyExpiry = riot.NewKeyExpiry(testBaseTime().Add(time.Hour))
+
+	if err := mustWorker(t, WorkerOptions{Deps: deps}).Run(ctx); err != nil {
+		t.Fatalf("Run = %v, want nil: a deadline an hour away must not stop the crawl", err)
+	}
+	if got := fetcher.fetchCount("match:"); got == 0 {
+		t.Fatal("the worker never fetched while the declared key was still valid")
 	}
 }
 

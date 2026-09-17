@@ -65,6 +65,13 @@ type Deps struct {
 	// deadlines are all derived from one clock. Tests that use a fake clock
 	// get deterministic dt= directories and not_before values.
 	Now func() time.Time
+	// KeyExpiry is the operator's declaration of when the Riot key dies
+	// (LOLSTATS_RIOT_API_KEY_EXPIRES_AT). The zero value declares nothing, and
+	// then the crawl behaves as it always did: the key's age is a warning and
+	// its death is discovered by Riot answering 401. When the deadline is
+	// written down, the loop refuses to crawl past it instead of spending the
+	// rest of the day's request budget on refusals.
+	KeyExpiry riot.KeyExpiry
 }
 
 func (d *Deps) normalize() {
