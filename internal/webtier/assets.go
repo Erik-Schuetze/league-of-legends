@@ -17,30 +17,32 @@ import (
 	"io/fs"
 )
 
-// The `data-astro-cid-*` tokens the Astro compiler assigned to each component.
+// ScopedCIDs are the `data-astro-cid-*` tokens the Astro compiler assigned to
+// each component, keyed by the component name.
 //
 // They are the scoped-style suffixes of the design system that was kept as-is:
 // the stylesheets below are the ones web/src/*.astro compiled to, and the
 // selectors in them are `[data-astro-cid-<token>]` attribute selectors. A
 // template that emits the matching attribute therefore gets the component's
 // styles without the CSS having to be rewritten, and the rendered output stays
-// comparable to the site the tier replaced. TestScopedCIDsArePresentInCSS
-// asserts every token here still appears in the embedded stylesheet, so a
-// mistyped token fails a test instead of rendering an unstyled component.
-const (
-	cidFallbackBuildList = "4wwh6mzq"
-	cidBuildList         = "hqssc25b"
-	cidCard              = "yk4hkwyg"
-	cidDataTable         = "3jeeeo45"
-	cidFilterBar         = "2t5tmnod"
-	cidFooter            = "jo6i4kqk"
-	cidHeatmapIsland     = "5wqubv3u"
-	cidNav               = "wpvy4v7s"
-	cidSampleSizeNotice  = "6yasdyvb"
-	cidStatValue         = "owrb7bwm"
-	cidTableIsland       = "zt6f6xwj"
-	cidTierBadge         = "n644qoiz"
-)
+// comparable to the site the tier replaced. The templates hardcode the
+// attribute, so TestScopedCIDsArePresentInCSS asserts every token here against
+// the embedded stylesheet: a mistyped token fails a test instead of rendering
+// an unstyled component that still looks plausible.
+var ScopedCIDs = map[string]string{
+	"fallback-build-list": "4wwh6mzq",
+	"build-list":          "hqssc25b",
+	"card":                "yk4hkwyg",
+	"data-table":          "3jeeeo45",
+	"filter-bar":          "2t5tmnod",
+	"footer":              "jo6i4kqk",
+	"heatmap-island":      "5wqubv3u",
+	"nav":                 "wpvy4v7s",
+	"sample-size-notice":  "6yasdyvb",
+	"stat-value":          "owrb7bwm",
+	"table-island":        "zt6f6xwj",
+	"tier-badge":          "n644qoiz",
+}
 
 //go:embed assets
 var assetsFS embed.FS
@@ -112,14 +114,13 @@ func staticAsset(path string) (body []byte, contentType string, found bool) {
 	return nil, "", false
 }
 
-// hasScopedCID reports whether a component's token is present in the embedded
-// stylesheet, which is what makes emitting the attribute in a template useful.
 // scopedCSSChunk is the scopedCSS value the templates inline.
 func scopedCSSChunk(withFallbackBuildList bool) string {
 	return string(scopedCSS(withFallbackBuildList))
 }
 
-// hasScopedCID reports whether a component's scoped suffix appears in the styles.
+// hasScopedCID reports whether a component's scoped suffix appears in the
+// champion stylesheet, which is the one that carries every chunk.
 func hasScopedCID(cid string) bool {
 	return bytes.Contains(scopedCSS(true), []byte("data-astro-cid-"+cid))
 }

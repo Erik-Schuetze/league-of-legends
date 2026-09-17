@@ -202,7 +202,7 @@ func (r *Renderer) tierListPage(role aggmodel.Role, patch string, query Query, i
 		StatusText: statusText(len(window), len(ordered), ColumnLabel(columns, query.Sort), query.Dir),
 		Rows:       window,
 		ColCount:   len(columns),
-		Note:       template.HTML(islandNote(minCellN, suppressed)),
+		Note:       trustedHTML(islandNote(minCellN, suppressed)),
 	}
 	island.Caption = "Champion tier list for " + scopeLabel(role, "") + ", patch " + snap.Patch + ", " +
 		snap.bracketLabel() + ". Rates are published only when the cell has at least n = " +
@@ -220,7 +220,7 @@ func (r *Renderer) tierListPage(role aggmodel.Role, patch string, query Query, i
 		HasSample:    hasSample,
 		Notice:       sampleNotice(cellGames, minCellN, suppressed, roleFor(role)),
 		Island:       island,
-		Note:         template.HTML(columnAvailabilityNote(minCellN, suppressed)),
+		Note:         trustedHTML(columnAvailabilityNote(minCellN, suppressed)),
 		SPlusBadge:   fallbackBadge(aggmodel.TierSPlus, 0),
 		Tail:         tierListTail(label, snap, role),
 	}

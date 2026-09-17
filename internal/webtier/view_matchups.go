@@ -145,7 +145,7 @@ func (r *Renderer) matchupsPage(role aggmodel.Role, query Query, interactive boo
 		Island:       island,
 		MinCellN:     minCellN,
 		Links:        heatmapLinks(island, slug, strings.ToLower(label)),
-		ColumnNote:   template.HTML(columnAvailabilityNote(minCellN, suppressed)),
+		ColumnNote:   trustedHTML(columnAvailabilityNote(minCellN, suppressed)),
 		Tail:         matchupTail(label, minCellN, snap),
 	}
 	if snap.Partition != nil {
@@ -322,22 +322,22 @@ func buildHeatmap(matchups *aggmodel.Matchups, site *Site, role aggmodel.Role, m
 			if index == 0 {
 				tabstop = ` tabindex="0"`
 			}
-			switch {
-			case column.id == row.id:
-				rendered.Cells = append(rendered.Cells, matchupCellView{Markup: template.HTML(
+			switch column.id {
+			case row.id:
+				rendered.Cells = append(rendered.Cells, matchupCellView{Markup: trustedHTML(
 					`<td class="cell self" data-n="0"` + tabstop + ` aria-label="not applicable: the same champion ` +
 						`in both axes, a champion is never matched against itself" data-astro-cid-5wqubv3u>&middot;</td>`)})
 			default:
 				result, ok := pairs[pairKey{row.id, column.id}]
 				if !ok || CellAvailabilityOf(result.n, minCellN) != AvailabilityPublished {
-					rendered.Cells = append(rendered.Cells, matchupCellView{Markup: template.HTML(
+					rendered.Cells = append(rendered.Cells, matchupCellView{Markup: trustedHTML(
 						`<td class="cell missing" data-n="0"` + tabstop + ` aria-label="not published" ` +
 							`data-astro-cid-5wqubv3u>&mdash;</td>`)})
 					continue
 				}
 				published++
 				deviation := result.winRate - 0.5
-				rendered.Cells = append(rendered.Cells, matchupCellView{Markup: template.HTML(
+				rendered.Cells = append(rendered.Cells, matchupCellView{Markup: trustedHTML(
 					`<td class="cell ` + matchTone(deviation) + `" data-n="` + itoa(result.n) +
 						`"` + tabstop + ` aria-label="` + EscapeString(Percent(result.winRate, 1)) + ` over ` +
 						EscapeString(IntegerAny(float64(result.n))) + ` games" data-astro-cid-5wqubv3u>` +
@@ -355,7 +355,7 @@ func buildHeatmap(matchups *aggmodel.Matchups, site *Site, role aggmodel.Role, m
 		"champion it faced; the cell is the row champion's win rate in that pairing, and the small signed number " +
 		"beside it is the distance from even in percentage points. A dash means the pair has fewer than n = " +
 		IntegerAny(float64(minCellN)) + " games in this window and is not published."
-	view.Note = template.HTML(IntegerAny(float64(published)) + " of " + IntegerAny(float64(totalCells)) +
+	view.Note = trustedHTML(IntegerAny(float64(published)) + " of " + IntegerAny(float64(totalCells)) +
 		" pairings are published for this role. Cells withheld for being below the threshold are absent from the " +
 		"artifact and read as a dash here, never as zero" + suppressedClause(matchups) + ".")
 	return view

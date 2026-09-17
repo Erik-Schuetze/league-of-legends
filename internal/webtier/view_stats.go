@@ -251,7 +251,7 @@ type islandView struct {
 func columnsToIsland(columns []sortColumn) []islandColumn {
 	out := make([]islandColumn, 0, len(columns))
 	for _, column := range columns {
-		out = append(out, islandColumn{Key: column.Key, Label: column.Label, Numeric: column.Numeric})
+		out = append(out, islandColumn(column))
 	}
 	return out
 }

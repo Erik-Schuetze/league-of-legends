@@ -11,7 +11,7 @@ import (
 // normaliser folds the two together, but the served bytes should be the ones the
 // reference produced, so every view-provided string goes through here.
 func textHTML(value string) template.HTML {
-	return template.HTML(strings.ReplaceAll(template.HTMLEscapeString(value), "&#34;", "&quot;"))
+	return trustedHTML(strings.ReplaceAll(template.HTMLEscapeString(value), "&#34;", "&quot;"))
 }
 
 // EscapeText is textHTML for callers outside this package.
@@ -40,7 +40,7 @@ func (e EmptyState) HTML() template.HTML {
 		b.WriteString(` games. Nothing here is estimated or back-filled from a thinner sample.</p>`)
 	}
 	b.WriteString(`</div>`)
-	return template.HTML(b.String())
+	return trustedHTML(b.String())
 }
 
 // emptyFunc adapts EmptyState to the template FuncMap. minCellN is a *int so a

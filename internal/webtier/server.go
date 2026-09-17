@@ -77,9 +77,6 @@ const (
 
 	// maxPathBytes caps the request path before it is split and matched.
 	maxPathBytes = 512
-
-	// shutdownGrace bounds in-flight requests when the pod is replaced.
-	shutdownGrace = 15 * time.Second
 )
 
 // ServerOptions configures a Server. Both fields are optional; the zero value
@@ -706,13 +703,12 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, resp *response)
 		zw := gzip.NewWriter(&compressed)
 		if _, err := zw.Write(resp.body); err != nil {
 			// The body is in memory, so a write can only fail on the gzip
-			// writer's own state; fall back to the identity body rather than
-			// send a truncated one.
+			// writer's own state. Nothing has been sent yet, so falling through
+			// to the identity body below is a complete answer rather than a
+			// truncated one.
 			s.log.Error("gzip failed, sending the identity body", "route", resp.route, "error", err)
-			encoding = ""
 		} else if err := zw.Close(); err != nil {
 			s.log.Error("gzip failed, sending the identity body", "route", resp.route, "error", err)
-			encoding = ""
 		} else {
 			header.Set("Content-Encoding", "gzip")
 			header.Set("Content-Length", strconv.Itoa(compressed.Len()))
@@ -936,7 +932,7 @@ func (s *Server) artifact(r *http.Request, path string, rest []string) *response
 			relative+" is larger than this tier will read in one response")
 	}
 
-	body, err := os.ReadFile(full)
+	body, err := os.ReadFile(full) // #nosec G304 -- full is a route's artifact under the snapshot root; the route table, not the request, chose it
 	if err != nil {
 		return s.errResponse(r, route, path, artifactFault(full, "cannot be read: %v", err))
 	}

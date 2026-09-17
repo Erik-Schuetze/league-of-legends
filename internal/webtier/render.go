@@ -51,12 +51,6 @@ type Page struct {
 	PatchLabelValue string
 }
 
-// ShellAssets is the subset of the design system a rendered page needs.
-type shellAssets struct {
-	Stylesheet string
-	ScopedCSS  template.CSS
-}
-
 // Renderer turns a Page plus the loaded snapshot into a response body.
 type Renderer struct {
 	loader  *Loader
@@ -244,10 +238,10 @@ func (r *Renderer) shellData(site *Site, page *Page) (*shellData, error) {
 		Canonical:   r.absolute(path),
 		State:       string(site.State()),
 		Source:      site.SourceAttribute(),
-		ScopedCSS:   template.CSS(scopedCSSChunk(page.Champion)),
+		ScopedCSS:   trustedCSS(scopedCSSChunk(page.Champion)),
 		Stylesheet:  baseCSSPath,
-		Body:        template.HTML(page.Body),
-		JSONLD:      template.JS(page.JSONLD),
+		Body:        trustedHTML(page.Body),
+		JSONLD:      trustedJS(page.JSONLD),
 	}
 	if page.Noindex {
 		data.Robots = "noindex,follow"
@@ -286,7 +280,7 @@ func bannerFor(site *Site, siteURL string, page *Page) bannerView {
 			Class:    "state-banner--live",
 			Style:    calm,
 			Heading:  "Published snapshot",
-			Body:     template.HTML(body),
+			Body:     trustedHTML(body),
 			LinkHref: banner.Href,
 			LinkText: "How these numbers are produced",
 		}
@@ -299,7 +293,7 @@ func bannerFor(site *Site, siteURL string, page *Page) bannerView {
 		Class:    "state-banner--" + string(banner.State),
 		Style:    warning,
 		Heading:  banner.Heading,
-		Body:     template.HTML(template.HTMLEscapeString(banner.Body)),
+		Body:     trustedHTML(template.HTMLEscapeString(banner.Body)),
 		LinkHref: banner.Href,
 		LinkText: linkText,
 	}
@@ -384,15 +378,6 @@ func (s *Site) PatchLabel() string {
 		return latest.Patch
 	}
 	return "not published"
-}
-
-// bodyData is unused by the views directly but keeps the template set honest
-// about what a page can see.
-type bodyData struct {
-	Renderer *Renderer
-	Site     *Site
-	SiteURL  string
-	Data     any
 }
 
 // ChampionIDOf, championName and the JSON-LD helpers below are used by the
