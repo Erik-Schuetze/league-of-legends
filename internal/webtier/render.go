@@ -187,6 +187,7 @@ type shellData struct {
 	State       string
 	Source      string
 	ScopedCSS   template.CSS
+	FrozenCSS   template.CSS
 	Stylesheet  string
 	Banner      bannerView
 	Nav         navView
@@ -244,6 +245,7 @@ func (r *Renderer) shellData(site *Site, page *Page) (*shellData, error) {
 		State:       string(site.State()),
 		Source:      site.SourceAttribute(),
 		ScopedCSS:   trustedCSS(scopedCSSChunk(page.Champion)),
+		FrozenCSS:   trustedCSS(frozenCSSChunk()),
 		Stylesheet:  baseCSSPath,
 		Body:        trustedHTML(page.Body),
 		JSONLD:      trustedJS(page.JSONLD),
