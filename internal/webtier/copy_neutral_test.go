@@ -11,19 +11,20 @@ import (
 // what happened "at build time" is false the moment the snapshot changes
 // underneath it, even though the same sentence was true of the static tier.
 //
-// The sweep below is deliberately mechanical. It is the plan's own acceptance
-// phrase list, run over the two documents this lane owns, as they are served,
-// in every data posture the tier can be in. A posture left out of the sweep is
-// a posture where the claim can come back unnoticed - which is how the
-// "published as static pages" heading survived three edits to the branch that
-// is not the one the edge serves.
+// The sweep below is deliberately mechanical: it is the plan's own acceptance
+// phrase list, run over every route this tier serves, as it is served, in every
+// data posture the tier can be in. A route left out of the sweep is a route
+// where the claim can come back unnoticed, and a posture left out is the same
+// hole per posture - which is how the "... as static pages" heading on /about
+// and the "rendered at build time" sentences in prose.go survived the first
+// edits to this row, all of which landed on the other tier's copy.
 
-// mechanismPhrases is plan §7.5's list, plus the two ways this repository
-// spells the same claim in the other direction (the tier renders the page, it
-// does not read a pre-built artifact) and SSG/SSR written out.
+// mechanismPhrases is plan §7.5's list, plus the other ways this repository
+// spells the same claim, plus SSG/SSR written out.
 var mechanismPhrases = []string{
 	"static page",
 	"static pages",
+	"static content",
 	"pre-rendered",
 	"prerendered",
 	"statically generated",
@@ -37,38 +38,87 @@ var mechanismPhrases = []string{
 	"rendered at build time",
 }
 
-// TestOwnedPagesNameNoRenderingMechanism sweeps / and /legal/privacy in the
-// demo, live and no-data postures.
+// copyRoute is one served URL. The name is what a failure reports, so it has to
+// identify the page without the path.
+type copyRoute struct {
+	name string
+	path string
+}
+
+// proseRoutes are the pages made of prose. They are served in every posture and
+// their sentences differ per posture, so they are swept in all of them.
+var proseRoutes = []copyRoute{
+	{"home", "/"},
+	{"about", "/about"},
+	{"disclaimer", "/disclaimer"},
+	{"legal-terms", "/legal/terms"},
+	{"legal-privacy", "/legal/privacy"},
+}
+
+// dataRoutes are the pages made of numbers. They carry prose.go's
+// posture-dependent sentences too, but only a posture with a snapshot can serve
+// them, so they are swept in the demo and live postures.
+var dataRoutes = []copyRoute{
+	{"tier-list-top", "/tier-list/top"},
+	{"tier-list-mid", "/tier-list/mid"},
+	{"matchups-top", "/matchups/top"},
+	{"matchups-mid", "/matchups/mid"},
+	{"champion-ahri", "/champions/ahri"},
+	{"champion-ahri-mid", "/champions/ahri/mid"},
+	{"patch-tier-list-top", "/patch/16.18/tier-list/top"},
+}
+
+// TestOwnedPagesNameNoRenderingMechanism sweeps every route in every posture and
+// fails on the mechanism phrase, with the sentence it was found in.
 func TestOwnedPagesNameNoRenderingMechanism(t *testing.T) {
 	t.Parallel()
 
 	liveRoot, _, _, _, _, _, _ := republishedSnapshot(t)
 
 	postures := []struct {
-		name   string
-		state  string
-		branch string
-		opts   Options
+		name     string
+		state    string
+		opts     Options
+		routes   []copyRoute
+		mustShow []string
 	}{
 		{
-			name:   "demo",
-			state:  `data-state="demo"`,
-			branch: "This site publishes per-patch tier lists and champion matchup tables.",
+			name:  "demo",
+			state: `data-state="demo"`,
 			opts: Options{
 				FixturesDir:  fixtureDir(),
 				FixturesMode: FixturesOnly,
 				DataDir:      fixtureDataDir(),
 			},
+			routes: append(append([]copyRoute{}, proseRoutes...), dataRoutes...),
+			mustShow: []string{
+				"<h1>Ranked statistics, every rate with its sample size</h1>",
+				"This site publishes per-patch tier lists and champion matchup tables.",
+			},
 		},
 		{
-			name:   "live",
-			state:  `data-state="live"`,
-			branch: "This site aggregates League of Legends ranked matches into per-patch tier lists and champion matchup tables.",
+			name:  "live",
+			state: `data-state="live"`,
 			opts: Options{
 				AggRoot:      liveRoot,
 				FixturesMode: FixturesOff,
 				DataDir:      fixtureDataDir(),
 			},
+			routes: append(append([]copyRoute{}, proseRoutes...), dataRoutes...),
+			mustShow: []string{
+				"<h1>Ranked statistics, every rate with its sample size</h1>",
+				"This site aggregates League of Legends ranked matches into per-patch tier lists and champion matchup tables.",
+			},
+		},
+		{
+			name: "no-data",
+			opts: Options{
+				AggRoot:      t.TempDir(),
+				FixturesMode: FixturesOff,
+				DataDir:      fixtureDataDir(),
+			},
+			routes:   proseRoutes,
+			mustShow: []string{"No aggregate snapshot has been published yet"},
 		},
 	}
 
@@ -77,51 +127,27 @@ func TestOwnedPagesNameNoRenderingMechanism(t *testing.T) {
 			t.Parallel()
 			_, live := newTestServer(t, posture.opts)
 
-			home := get(t, live, "/")
-			if home.status != 200 {
-				t.Fatalf("GET / -> %d, want 200", home.status)
+			for _, route := range posture.routes {
+				res := get(t, live, route.path)
+				if res.status != 200 {
+					t.Errorf("GET %s in the %s posture -> %d, want 200", route.path, posture.name, res.status)
+					continue
+				}
+				if route.name == "home" && posture.state != "" && !strings.Contains(res.text(), posture.state) {
+					t.Fatalf("/ is not the %s posture: %s", posture.name, excerpt(res.text(), "data-state="))
+				}
+				sweepMechanismPhrases(t, posture.name+" "+route.path, res.text())
 			}
-			if !strings.Contains(home.text(), posture.state) {
-				t.Fatalf("/ is not the %s posture: %s", posture.name, excerpt(home.text(), "data-state="))
-			}
-			if !strings.Contains(home.text(), "<h1>Ranked statistics, every rate with its sample size</h1>") {
-				t.Errorf("/ does not carry the architecture-neutral heading: %s", excerpt(home.text(), "<h1"))
-			}
-			if strings.Contains(home.text(), "published as static pages") {
-				t.Errorf("/ still carries the claim this row exists to remove")
-			}
-			if !strings.Contains(home.text(), posture.branch) {
-				t.Errorf("/ does not carry the %s posture's intro: %s", posture.name, excerpt(home.text(), "<h1"))
-			}
-			sweepMechanismPhrases(t, "/", home.text())
 
-			privacy := get(t, live, "/legal/privacy")
-			if privacy.status != 200 {
-				t.Fatalf("GET /legal/privacy -> %d, want 200", privacy.status)
+			home := get(t, live, "/")
+			for _, want := range posture.mustShow {
+				if !strings.Contains(home.text(), want) {
+					t.Errorf("the home page in the %s posture does not carry %q: %s",
+						posture.name, want, excerpt(home.text(), "<h1"))
+				}
 			}
-			if strings.Contains(privacy.text(), "the site serves static pages") {
-				t.Errorf("/legal/privacy still carries the claim this row exists to remove")
-			}
-			sweepMechanismPhrases(t, "/legal/privacy", privacy.text())
 		})
 	}
-
-	t.Run("no-data", func(t *testing.T) {
-		t.Parallel()
-		_, live := newTestServer(t, Options{
-			AggRoot:      t.TempDir(),
-			FixturesMode: FixturesOff,
-			DataDir:      fixtureDataDir(),
-		})
-		home := get(t, live, "/")
-		if home.status != 200 {
-			t.Fatalf("GET / with no snapshot anywhere -> %d, want 200", home.status)
-		}
-		if !strings.Contains(home.text(), "No aggregate snapshot has been published yet") {
-			t.Fatalf("/ is not the no-data posture: %s", excerpt(home.text(), "No aggregate snapshot"))
-		}
-		sweepMechanismPhrases(t, "/", home.text())
-	})
 }
 
 // sweepMechanismPhrases fails on every mechanism phrase the served document
