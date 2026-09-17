@@ -126,7 +126,7 @@ func MarshalSchema() ([]byte, error) {
 }
 
 // TypeScript renders the artifact types as an ambient module declaration. The
-// output is written to web/src/types/agg.d.ts by cmd/gen-types.
+// output is written to schema/agg.d.ts by cmd/gen-types.
 func TypeScript() string {
 	var b strings.Builder
 

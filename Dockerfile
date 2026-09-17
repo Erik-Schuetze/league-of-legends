@@ -26,7 +26,14 @@ COPY sql ./sql
 # without it answers 503 on every ladder route rather than serving a table with
 # holes in it. The Data Dragon projection the champion pages need is embedded in
 # the binary instead (internal/webtier/data.go), so it is not copied here.
-COPY web/src/fixtures /web/src/fixtures
+#
+# The source is fixtures/site since 2026-09-17; the destination stays
+# /web/src/fixtures because that is the path deploy/base/web/go-deployment.yaml
+# sets LOLSTATS_FIXTURES_DIR to, and the deployment is not this change's to
+# make. Nothing named web/ remains in the repository: this is one directory
+# name inside the image, kept so an image-path rename does not have to travel
+# with a manifest change.
+COPY fixtures/site /web/src/fixtures
 
 # CGO disabled: the three Go binaries link no C, so they are fully static. A
 # single build stage produces all of them because they share every dependency. The

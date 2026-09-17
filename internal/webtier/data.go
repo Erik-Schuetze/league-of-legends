@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 )
 
-// The Data Dragon projections the repository checks in under web/src/data/.
+// The Data Dragon projections the repository checks in under projection/.
 //
 // They are read from disk when the repository is present (the local and CI
 // layout) and from this embedded copy otherwise, which is what makes the
 // deployed binary self-contained: a container has no checkout, and a build row
 // whose item names were silently missing would be a worse outcome than a larger
-// binary. The copies are byte-identical to web/src/data/*.json and
+// binary. The copies are byte-identical to projection/*.json and
 // TestEmbeddedProjectionsMatchTheRepository fails when they drift.
 //
 //go:embed data
