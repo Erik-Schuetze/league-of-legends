@@ -23,7 +23,7 @@ metadata:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: aggregate
 spec:
-  schedule: "* * * * *"
+  schedule: "0 1 * * *"
   timeZone: Europe/Berlin
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
