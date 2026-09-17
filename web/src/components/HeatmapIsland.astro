@@ -372,7 +372,14 @@ const caption =
   }
 
   .cell:focus-visible {
-    outline: var(--focus-ring);
+    /*
+     * The ring sits 2px inside the cell, so it is read against the cell's own
+     * fill rather than against the page. The accent blue is only 2.45:1 on the
+     * darkest fill; --tier-ink is the ink this system already picked to clear
+     * 4.5:1 on every step of the ramp (6.06:1 on the darkest, 13.78:1 on the
+     * lightest), so it is the correct ring here.
+     */
+    outline: var(--border-width) solid var(--tier-ink);
     outline-offset: -2px;
   }
 

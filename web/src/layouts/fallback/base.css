@@ -19,32 +19,28 @@
   --fallback-border: 2px solid var(--fallback-primary);
 }
 
-body {
-  margin: 0;
-  padding: 0 0 3rem;
-  background: var(--fallback-bg);
-  color: var(--fallback-text);
-  font-family: var(--font-body, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif);
-  line-height: 1.5;
-}
+/*
+ * This file must not restate the page field, the link colour or the focus ring
+ * on a bare element selector. BaseLayout imports tokens.css - and so global.css
+ * and fonts.css - unconditionally, and this sheet comes after it in the bundle,
+ * so an equal-specificity rule here silently *wins* over the design system.
+ * That happened: a `body` rule with a `background` shorthand erased the 27px
+ * graph-paper field on every route and its `padding` erased the 4rem clearance
+ * under the fixed navbar, and an `a:focus-visible` rule with `outline: 0`
+ * replaced the design system's focus ring site-wide with a box-shadow ring that
+ * is 2.47:1 on the navy footer. Documented in docs/design-system.md under
+ * "Cascade: who owns what". Everything below is scoped to this folder's own
+ * class names, and the fallback renderers used by a page inherit the page field
+ * and the focus ring from the design system like any other component.
+ */
 
-main,
+/* The shell's `main` column belongs to the design system (global.css), not to
+   this file; only these two, which this folder renders itself, are scoped here. */
 .fallback-site-nav,
-.fallback-site-footer,
-.state-banner {
-  max-width: 72rem;
+.fallback-site-footer {
+  max-width: var(--content-max, 72rem);
   margin: 0 auto;
-  padding: 0 1rem;
-}
-
-a {
-  color: var(--fallback-accent);
-}
-
-a:focus-visible,
-summary:focus-visible {
-  outline: 0;
-  box-shadow: 0 0 0 2px var(--fallback-accent);
+  padding: 0 var(--space-5, 1rem);
 }
 
 .fallback-skip {
@@ -120,7 +116,18 @@ summary:focus-visible {
   font-size: 0.85rem;
 }
 
+/*
+ * `display: block` so the table can scroll itself. The fallback renderer emits
+ * the `<table>` with no wrapper, and the design system deliberately does not put
+ * `overflow-x: hidden` on the page, so a wide champion table used to push a
+ * horizontal scrollbar onto the whole document at 360px. A table laid out as a
+ * block still generates its internal table boxes, and `overflow-x: auto` then
+ * clips the *table* instead of the page. Same idea as `.ds-table-scroll`.
+ */
 .fallback-data-table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
   border-collapse: collapse;
   width: 100%;
   margin: 0.75rem 0;
@@ -131,6 +138,26 @@ summary:focus-visible {
   text-align: left;
   font-weight: 700;
   padding-bottom: 0.4rem;
+  font-family: var(--font-heading, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+/*
+ * Mono display type is one of the four idioms: headings, labels and numbers are
+ * JetBrains Mono. These renderers carry the only tables on the 865 champion
+ * pages, and they were the one surface still setting a header in the body face,
+ * so the columns read as prose rather than as furniture. `--font-mono` for the
+ * header and for every right-aligned (i.e. numeric) cell matches what
+ * components/DataTable.astro does with `th` and `.num`; the running text in a
+ * cell stays in the body face.
+ */
+.fallback-data-table th,
+.fallback-data-table .fallback-is-end {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.fallback-data-table th {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .fallback-data-table th,
