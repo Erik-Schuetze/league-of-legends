@@ -9,27 +9,40 @@ import "io/fs"
 //
 // ## The served tree: 0o755 directories, 0o644 files
 //
-// The published tree is written by the aggregate job and read by processes that
-// are neither its uid nor its group:
+// The published tree is written by the aggregate job as 65532:65532 with fsGroup
+// 65532 (deploy/base/jobs/aggregate.yaml) and read by the Go serving tier, which
+// runs as the image's distroless nonroot uid - the same 65532
+// (deploy/base/web/go-deployment.yaml).
 //
-//   - the aggregate CronJob runs as 65532:65532 with fsGroup 65532
-//     (deploy/base/jobs/aggregate.yaml);
-//   - the site-build CronJob reads the same tree as 1000:1000 with fsGroup 1000
+// The modes below predate that and are deliberately left alone in this pass.
+// Until 2026-09-17 the tree was also read by two processes that were *not* the
+// writer's uid:
+//
+//   - the site-build CronJob, which ran as 1000:1000 with fsGroup 1000
 //     (deploy/base/jobs/site-build.yaml) - the `node` user of node:22-alpine,
-//     which prerenders the aggregate over HTTP content into the static site;
-//   - Caddy serves /var/lib/lolstats/agg directly with `file_server` as
-//     1000:1000 (deploy/base/web/deployment.yaml and caddyfile.yaml).
+//     which prerendered the aggregate over HTTP content into the static site;
+//   - the inner Caddy, which served /var/lib/lolstats/agg directly with
+//     `file_server` as 1000:1000 (deploy/base/web/deployment.yaml and
+//     caddyfile.yaml).
 //
-// The group cannot bridge that gap. The volume is the nfs-client StorageClass
+// Both were deleted with the static tier (plan.md D-9) and no uid 1000 reader
+// remains, so 0o750/0o640 would now be enough on a fresh volume. The values stay
+// because the mode is a property of the bytes already on the volume as much as of
+// the code that wrote them: agg/ carries 0755/0644 today, tightening it means
+// rewriting or chmod-sweeping the tree on the PVC, and a partial sweep would
+// leave the two modes mixed. That change is its own decision with its own
+// verification, not a comment edit inside a deletion pass.
+//
+// The group could never bridge the gap. The volume is the nfs-client StorageClass
 // (deploy/overlays/homelab), and the kubelet cannot chown an NFS export, so
 // fsGroup is not honoured on it: the group on disk stays whatever the writer
-// left, and the two workloads do not share a group to begin with. This is not
+// left, and the two workloads did not share a group to begin with. This is not
 // theoretical - it is why the pre-existing persistent volumes on that
 // provisioner carry mode 0777.
 //
-// A mode of 0o750 therefore publishes artifacts that uid 1000 can see the
-// directory of but not enter: the aggregate build succeeds, the nightly
-// site-build job fails with EACCES, and the failure looks like a bug in the
+// A mode of 0o750 therefore published artifacts that uid 1000 could see the
+// directory of but not enter: the aggregate build succeeded, the nightly
+// site-build job failed with EACCES, and the failure looked like a bug in the
 // site build rather than in these modes. The tree is public web content that
 // anonymous readers fetch over HTTPS and it holds no secret, so the modes that
 // always work are the ones with the other bits set - traversable directories
@@ -41,9 +54,9 @@ import "io/fs"
 //
 // The staging tree, the trash directory that holds displaced artifacts, the
 // decompressed raw-archive scratch, and the file-audit breadcrumbs are read by
-// this process alone: none of them is under a path the site build or Caddy
-// reads, and no other uid has any business in them. They get the tightest mode
-// that still lets the owner work, which is also what the linter prefers.
+// this process alone: none of them is under a path the serving tier reads, and no
+// other uid has any business in them. They get the tightest mode that still lets
+// the owner work, which is also what the linter prefers.
 const (
 	// publishedDirPerm is the mode of every directory on a served path.
 	publishedDirPerm fs.FileMode = 0o755

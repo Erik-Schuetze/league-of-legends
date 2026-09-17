@@ -31,10 +31,6 @@ images:
   # that block is where its pin is bumped.
   - name: ghcr.io/erik-schuetze/league-of-legends
     newTag: latest
-  - name: ghcr.io/erik-schuetze/league-of-legends-site
-    newTag: latest
-  - name: ghcr.io/erik-schuetze/league-of-legends-caddy
-    newTag: latest
 
 replacements:
   # The Go tier's image is pinned by digest, not by tag, for a reason that
@@ -71,9 +67,11 @@ replacements:
           - spec.template.spec.containers.[name=web].image
 
 patches:
-  # Tier 2 (ZFS-backed NFS) for the archive and the rendered site: ReadWriteMany,
-  # because the worker, four jobs and two web replicas all mount it, and the
-  # bytes are large and cold. See homecluster/docs/architecture.md section 3.
+  # Tier 2 (ZFS-backed NFS) for the raw archive and the published aggregates:
+  # ReadWriteMany, because the worker, several jobs and two web replicas all
+  # mount it, and the bytes are large and cold. The `site/` tree the deleted
+  # static tier rendered into is no longer written; `raw/` and `agg/` are what
+  # this volume is for now. See homecluster/docs/architecture.md section 3.
   - target:
       kind: PersistentVolumeClaim
       name: lolstats-data

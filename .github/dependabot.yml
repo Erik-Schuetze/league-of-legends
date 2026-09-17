@@ -33,24 +33,11 @@ updates:
         patterns:
           - "*"
 
-  # The other two images this project publishes. Separate entries because
-  # Dependabot reads one Dockerfile per directory: the base images here are
-  # pinned by digest too, and without these the pins would go stale silently -
-  # which is the one failure mode digest pinning is supposed to prevent.
-  - package-ecosystem: docker
-    directory: /build/caddy
-    schedule:
-      interval: weekly
-      day: monday
-    commit-message:
-      prefix: "chore(docker)"
-  - package-ecosystem: docker
-    directory: /build/site
-    schedule:
-      interval: weekly
-      day: monday
-    commit-message:
-      prefix: "chore(docker)"
+  # There used to be one `docker` entry per published context here - /build/caddy
+  # and /build/site - because Dependabot reads one Dockerfile per directory and
+  # those two Dockerfiles pinned their base images by digest. Both directories
+  # were deleted with the static tier on 2026-09-17 (plan.md D-9); the Go image's
+  # own Dockerfile is covered by the root entry at the bottom of this file.
 
   # Actions in .github/workflows, which are pinned to full commit SHAs. This
   # is what keeps those pins from going stale, and it rewrites both the SHA

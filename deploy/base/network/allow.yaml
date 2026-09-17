@@ -49,11 +49,16 @@ spec:
           port: 53
 ---
 # The only pods that ever fetch anything from the public internet: the worker and
-# the three jobs that talk to Riot. The aggregate build reads the archive, the
-# site build reads the archive, maintenance reads the archive, and the web tier
-# reads the volume - none of them has a reason to open a socket outward, so this
-# rule does not cover them, and adding a component means deciding explicitly
-# whether it belongs in this list.
+# the two jobs that talk to Riot. The aggregate build reads the archive,
+# maintenance reads the archive, and the web tier reads the volume - none of them
+# has a reason to open a socket outward, so this rule does not cover them, and
+# adding a component means deciding explicitly whether it belongs in this list.
+#
+# `static-sync` was the fourth value here. It mirrored the public Data Dragon CDN
+# over 443, so this rule was written for it as much as for Riot; the job was
+# deleted with the static tier on 2026-09-17 (plan.md D-9) and the value went with
+# it, because a selector value no pod can carry is a claim about a workload that
+# is not deployed. Riot egress itself is still needed by the three above.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -68,7 +73,6 @@ spec:
         values:
           - ingest
           - discover-seeds
-          - static-sync
           - backfill
   policyTypes:
     - Egress
@@ -164,30 +168,14 @@ spec:
         - protocol: TCP
           port: 9090
 ---
-# The one way in from outside the namespace: the shared Caddy in namespace `web`,
-# which reverse-proxies lol.erik-schuetze.dev to lolstats-web. 8080 is the
-# container's listen port and 80 is the Service's, listed together so the rule
-# does not depend on whether the CNI evaluates it before or after service DNAT -
-# the same reason go-get-a-job lists both.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-web-ingress
-  labels:
-    app.kubernetes.io/name: lolstats
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/component: web
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: web
-      ports:
-        - protocol: TCP
-          port: 8080
-        - protocol: TCP
-          port: 80
+# `allow-web-ingress` used to be here: an ingress rule selecting
+# `component: web` - the inner Caddy Deployment - that admitted the shared Caddy
+# in namespace `web` on ports 8080 and 80. The Deployment was deleted with the
+# static tier on 2026-09-17 (plan.md D-9), which left the rule matching no pod at
+# all, so it was deleted in the same change rather than kept as an object that
+# looks like it guards the public route and admits nothing. The flow it described
+# lives on unchanged in `deploy/base/web/go-networkpolicy.yaml`
+# (`allow-go-web-ingress`), which admits the same peer - namespace `web`, ports
+# 8080 and 80 - to `component: web-go`, plus the pod CIDR that makes a
+# port-forward probe work. `deploy/base/web/service.yaml` is what chooses which
+# pods answer on the public name.

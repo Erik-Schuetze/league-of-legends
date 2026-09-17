@@ -15,8 +15,8 @@
 # at most an hour idle rather than most of a day.
 #
 # The :10 offset keeps this run clear of `maintain` at :20 and of the jobs in the
-# rest of the homelab that fire at :00, and 00:10 is outside the 03:10-05:00
-# block of site, static-sync and backup jobs.
+# rest of the homelab that fire at :00, and 00:10 is outside the 03:10-05:00 block
+# of the backup jobs.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
