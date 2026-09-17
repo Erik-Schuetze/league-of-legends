@@ -537,5 +537,74 @@ Record the result of each run: date, dump name and sha256, the counts table, the
 measured RTO, and anything in *Known gaps* that changed. The gap list shrinking over
 time is the point.
 
+## Addendum, 2026-09-17 (operations lane): what changed since this drill
+
+Appended, not rewritten: the drill above is dated and still correct for the state it
+observed. Everything below was observed after it, and three of its findings have
+moved.
+
+### Why the two CronJobs had never fired: arithmetic, not a defect
+
+Both were created `2026-09-17T12:43:04Z`. `backup-postgres` runs `30 4 * * *` and
+`backup-archive` `0 5 * * *`, both `Europe/Berlin` (CEST, UTC+2 until late October),
+so their daily fire times are 02:30Z and 03:00Z - **both were already in the past
+when the objects were created**. Neither is suspended, `startingDeadlineSeconds` is
+600, and Kubernetes does not back-fill a schedule that old, so the controller does
+the only correct thing and waits for tomorrow. That the hourly `maintain` CronJob in
+this namespace shows a recent `LAST SCHEDULE` proves the scheduler itself is healthy.
+Next fire: 2026-09-18 04:30/05:00 CEST. Nothing needed fixing here; the manifests
+were never the problem, and `scripts/backup-status.sh` now says so in one line
+instead of leaving `LAST SCHEDULE <none>` to be read as a defect.
+
+### Both jobs have now completed, by hand, with visible output
+
+`kubectl -n lolstats create job <name> --from=cronjob/<cronjob>` for each, both
+`succeeded=1/failed=0`:
+
+| job | duration | output |
+| --- | --- | --- |
+| `backup-postgres-prove-1` | ~16 s | `backups/postgres/daily/lolstats-20260917T183639Z.dump`, `done, 7844722 bytes`, sha256 `c12a7e0ef3d787be06d92107cdb3aa286bcffde810d30162e4d0fb102f1d6711`, 53 TOC entries |
+| `backup-archive-prove-1` | ~31 s | repository created at `/var/lib/lolstats/backups/restic`, `783 new files, 1.296 GiB`, snapshot `63eaf09e` |
+
+This is the distinction the launch gate turns on: **the manual one-off is proven;
+the scheduled fire had not happened when the drill ran and its first opportunity is
+2026-09-18 04:30/05:00 CEST.** A YAML review cannot tell those apart, which is why
+`scripts/backup-status.sh` exists: it reads the artifacts, the `LATEST` marker, the
+dump's manifest (`schema_md5` `93266586b9c074ce408310e4e47e4f84`, plus the row
+counts: `matches` 14502, `crawl_frontier` 114712, `fetch_queue` 14853, `build_runs`
+10, `crawl_seeds` 3, `schema_migrations` 3, `source_toggles` 0) and the newest
+snapshot, and it fails loudly on an empty result.
+
+### Status of the gaps this drill listed
+
+1. **Closed** for the archive: snapshots exist (`63eaf09e`, `7220621a`, `ccafc2f5`,
+   802 files / 1.329 GiB). The sentence in the list above is now historical.
+2. **Half closed** for Postgres: a real dump exists and the job is proven. Retention
+   and prune still have not run against a real tree - that path is Sunday's, and
+   `weekly/` stays empty until then.
+3. **Unchanged**: one restoration point per artifact, no weekly yet.
+4. **Unchanged and still the gate: no off-site copy (R6).** Surveyed with evidence;
+   `docs/runbooks/offsite-options.md`. Blocked on the owner naming a destination.
+5. **Unchanged**: `.globals.sql` carries a credential hash. Quote only its sha256.
+6. **Narrowed**: `scripts/backup-status.sh` now reads the real artifacts and exits
+   non-zero on a missing or stale one, and `scripts/offsite-verify.sh` proves a
+   remote round-trip. Neither replaces this runbook, and both are still instruments
+   rather than a rehearsal.
+7. **Unchanged**: the namespace policies are the reason the drill needs its own
+   namespace.
+8. **Unchanged**, and confirmed: `crawl_frontier` moved under the drill's feet.
+9. **Unchanged.**
+10. **Unchanged.**
+
+### Alerts: still delivered nowhere
+
+`kubectl get alertmanager -A` returns **No resources found**, and the Prometheus CR
+`prometheus-persistant` in namespace `monitoring` has `alerting: {}` - so the nine
+rules in `homecluster/monitoring/prometheus/lolstats-rules.yaml` are loaded and
+evaluated and their firings go nowhere. An opt-in Alertmanager bundle exists in
+`homecluster/monitoring/alertmanager/` and is deliberately not applied by ArgoCD;
+`docs/runbooks/enable-alert-delivery.md` is the switch. This is an unmet gate of the
+same kind as R6: recorded, not hidden.
+
 
 

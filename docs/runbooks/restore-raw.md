@@ -286,3 +286,52 @@ Nothing in step 1-6 requires a schema change, a new image, or a change to any
 manifest other than `deploy/base/backup/config.yaml`, the CronJob's `env:` list
 and one NetworkPolicy. The two edits outside this workstream's ownership are the
 NetworkPolicy and, if the medium is a new machine, that machine's own setup.
+
+## Addendum, 2026-09-17 (operations lane): what is true now
+
+Read this with the two sections above, not instead of them. Three things in them
+have been overtaken, and one of them was wrong.
+
+**State of the repository, observed, not expected:**
+
+```sh
+sh scripts/backup-status.sh          # the whole picture, exit code 0 only if all of it is fresh
+kubectl -n lolstats get cronjob backup-postgres backup-archive
+kubectl -n lolstats get secret lolstats-restic     # exists now: 17 Sep
+```
+
+- The `lolstats-restic` Secret exists (created out of band; its value is stored
+  off-cluster, because a lost password makes every snapshot unreadable).
+- Snapshots exist: `63eaf09e` (2026-09-17T18:36Z), `7220621a` (18:42Z), `ccafc2f5`
+  (18:44Z) - 802 files, 1.329 GiB in the tree, ~190 MiB stored. This runbook now
+  has something to restore.
+- The repository is still `/var/lib/lolstats/backups/restic`, a path on the same
+  NFS export as the archive. **R6 stays accepted and unmet.** There is still no
+  destination that leaves the premises; `docs/runbooks/offsite-options.md` is the
+  options paper, and the gate is blocked on an owner decision, not on engineering.
+
+**Steps 2 and 3 are now easier than written, and step 5 was never wrong.**
+
+- Step 2: extra keys are no longer referenced one by one on the CronJob. The
+  container takes **every** key of the Secret with `envFrom`, so adding
+  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (S3, R2, B2) to the Secret is the
+  whole of the credential work. An `sftp` host needs no SSH key at all if it has a
+  password; if it needs one, the Secret already mounts at `/etc/restic` (0440) and
+  `RESTIC_EXTRA` carries the `-o sftp.command=...`.
+- Step 3: `RESTIC_REPOSITORY` in `deploy/base/backup/config.yaml` no longer has to
+  change. Set `RESTIC_REPOSITORY_OVERRIDE` in the Secret instead; it wins by name,
+  so no manifest edit and no dependency on `envFrom` ordering. The `allow.yaml`
+  egress rule from step 4 is **still required** and still belongs to another lane.
+- Step 5's `kubectl create job --from=cronjob/backup-archive` is correct and is what
+  this lane used to take the snapshots above; it inherits the security context, the
+  env, the volume and the node affinity, so it is the CronJob's own command rather
+  than an approximation of it. It *writes* a snapshot into the live repository -
+  that is the point of it - which is why `docs/runbooks/restore-drill.md`'s table
+  forbids it inside a drill whose invariant is "nothing was written". The two rules
+  do not contradict each other once the different invariants are named.
+
+**Proving the off-site mechanism works before a destination exists:** run
+`sh scripts/offsite-verify.sh --docker`. It stands up a real S3-compatible
+endpoint, moves a tree there with credentials supplied only as environment
+variables, restores it and compares every file by sha256. It proves the transport,
+and it prints that it does **not** prove the off-site property.
