@@ -74,15 +74,36 @@ spec:
               containerPort: 9090
               protocol: TCP
           envFrom:
-            # LOLSTATS_AGG_ROOT, LOLSTATS_SITE_URL, LOLSTATS_METRICS_ADDR and
-            # LOLSTATS_AGG_FIXTURES come from here. The last one is the deployed
-            # "render the labelled preview" switch (deploy/base/config.yaml
-            # explains when to flip it), which is also what makes this pod
-            # comparable to the static site it is replacing: both are rendering
-            # the checked-in demo tree today.
+            # LOLSTATS_AGG_ROOT, LOLSTATS_SITE_URL and LOLSTATS_METRICS_ADDR
+            # come from here, and so does LOLSTATS_AGG_FIXTURES - with the
+            # value the *old static tier* still needs ("only", the labelled
+            # preview). That switch is deliberately global until the cutover,
+            # because deploy/base/config.yaml is shared by both tiers and the
+            # static tier stays up as the fallback until the Go tier is proven
+            # in front of the public URL. The override below is what makes
+            # *this* container read the real snapshot in the meantime.
             - configMapRef:
                 name: lolstats-config
           env:
+            # The fixtures tree is off for this tier, and `off` rather than
+            # `auto` on purpose.
+            #
+            # `auto` falls back to the checked-in demo tree whenever the
+            # configured root has no manifest, which is the silent
+            # substitution the design forbids: a visitor would be shown
+            # illustrative figures by a tier whose job is to publish the
+            # snapshot. `off` means "render LOLSTATS_AGG_ROOT or answer with a
+            # visible 503" - the artifact tree is published (agg/v1, source
+            # riot-match-v5), so a missing or corrupt artifact is a fault and
+            # has to be loud, never a demo page wearing a live banner.
+            #
+            # An explicit env entry takes precedence over envFrom, so this
+            # overrides the ConfigMap's "only" for this container alone and the
+            # static tier keeps rendering the preview it is deployed with.
+            # The fixtures tree stays where it is: the tests and a local
+            # `go run` still read it (internal/webtier/artifacts.go).
+            - name: LOLSTATS_AGG_FIXTURES
+              value: "off"
             - name: LOLSTATS_WEB_ADDR
               value: ":8080"
             # Where the demo tree is inside this image (the Dockerfile copies

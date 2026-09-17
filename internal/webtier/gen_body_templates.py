@@ -27,6 +27,31 @@ PAGES = {
          '{{ .SourceSentence }}'),
         ('PREVIEW - illustrative data generated to exercise the layout, not real match statistics',
          '{{ .StateDescription }}'),
+        # The partition summary. Every one of these six values is read off the
+        # page's partition by the reference build, and the demo manifest's
+        # values happen to be the ones the reference dist was rendered from.
+        # Transcribing those literals would be the port lying in the live
+        # state: a published snapshot would print "141 cells" and "n = 500"
+        # beside its real cells. `integer` is format.ts's thousands separator,
+        # `windowLabel`/`utcStamp` are format.ts's date labels, and
+        # `shortCommit` is git_sha.slice(0, 12).
+        ('<li>Patch <strong>16.18</strong> &middot; region EUW &middot; queue 420 &middot; rank bracket all</li>',
+         '<li>Patch <strong>{{ .Partition.Patch }}</strong> &middot; region {{ .Partition.Region }} &middot; '
+         'queue {{ .Partition.Queue }} &middot; rank bracket {{ .Partition.Bracket }}</li>'),
+        ('<li>Crawl window: 2026-09-08 to 2026-09-14 (the window of match timestamps the aggregation covered, not the time it ran)</li>',
+         '<li>Crawl window: {{ windowLabel .Partition.SourceWindow.From .Partition.SourceWindow.To }} '
+         '(the window of match timestamps the aggregation covered, not the time it ran)</li>'),
+        ('<li>Snapshot generated 2026-09-15 04:10 UTC (the time the aggregate build ran)</li>',
+         '<li>Snapshot generated {{ utcStamp .Partition.GeneratedAt }} (the time the aggregate build ran)</li>'),
+        ('<li>Aggregated cells published: 141 across 80champions; cells withheld for being below the sample threshold: 3</li>',
+         '<li>Aggregated cells published: {{ integer .Partition.CellsPublished }} across '
+         '{{ integer (len .Partition.Champions) }}champions; cells withheld for being below the sample threshold: '
+         '{{ integer .Partition.SuppressedCells }}</li>'),
+        ('<li>Publication threshold: a win, pick or ban rate is published only for a cell holding at least n = 500 games</li>',
+         '<li>Publication threshold: a win, pick or ban rate is published only for a cell holding at least '
+         'n = {{ integer .Partition.MinCellN }} games</li>'),
+        ('<li>Build run 2 from commit 000000000000</li>',
+         '<li>Build run {{ integer .Partition.BuildRunID }} from commit {{ shortCommit .Partition.GitSHA }}</li>'),
         ('<h2>How the data will be produced</h2>', '<h2>{{ .ProductionHeading }}</h2>'),
         ('Five steps, in order. No run of this pipeline has produced anything for this build - the aggregate manifest this build read declares its source as &quot;demo&quot; - so this is the method the numbers will come from, not a description of an ingestion that has happened. The pipeline is deliberately boring, because every interesting shortcut here would be a way to publish a wrong number.',
          '{{ .PipelineLeadIn }}'),
@@ -145,7 +170,7 @@ def main():
         if 'riotNote' not in text:
             raise SystemExit('about: riot verification note not found')
         # The partition summary and the empty state are one slot.
-        start = text.index('<ul><li>Patch <strong>16.18</strong>')
+        start = text.index('<ul><li>Patch <strong>{{ .Partition.Patch }}</strong>')
         end = text.index('</ul>', start) + len('</ul>')
         text = text[:start] + '{{ if .Partition }}' + text[start:end] + '{{ else }}{{ .Empty }}{{ end }}' + text[end:]
         # The three state-conditional paragraphs.
