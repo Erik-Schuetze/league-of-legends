@@ -335,3 +335,43 @@ kubectl -n lolstats get secret lolstats-restic     # exists now: 17 Sep
 endpoint, moves a tree there with credentials supplied only as environment
 variables, restores it and compares every file by sha256. It proves the transport,
 and it prints that it does **not** prove the off-site property.
+
+## State observed on the cluster, 2026-09-18 00:15 CEST
+
+Measured with `sh scripts/backup-status.sh --all-snapshots`, not read off the
+manifest - the difference matters, because until 2026-09-17 the honest answer to
+"does a repository exist?" was *no*, and the YAML said otherwise:
+
+| what | observed |
+| --- | --- |
+| repository | `/var/lib/lolstats/backups/restic` - **exists and reads** (228.3 MB on the volume) |
+| snapshots | **5** for host `lolstats-archive`: `63eaf09e` 18:36:40Z 1.296 GiB, `7220621a` 18:42:57Z 1.321 GiB, `ccafc2f5` 18:44:49Z 1.329 GiB, `5e3c8217` 18:45:40Z 1.331 GiB, `aee7bcb0` 22:10:00Z 2.090 GiB |
+| source tree | `/var/lib/lolstats/raw`, 803 files unmodified between two runs, 455 new files in the 22:10 run |
+| newest | 2026-09-17 22:10:00Z, tag `raw-archive`, host `lolstats-archive` |
+
+Three things about that table are easy to get wrong:
+
+- **Who created the repository:** the job itself. `backup-archive` runs
+  `restic cat config` and, if that fails, prints the failure and runs
+  `restic init`. So the first successful run of the CronJob *is* how the
+  repository comes into being; there is no separate bootstrap step, and a job
+  that has never run has a repository that has never existed. That is exactly
+  what the drill lane saw before this run, and it is why "no repository" and
+  "job never fired" are one finding rather than two.
+- **`1 snapshots` in the default output is a number `--latest 1` printed, not
+  the number the repository holds.** Use `--all-snapshots` when the question is
+  retention ("is this accumulating one snapshot per night?") rather than
+  freshness.
+- **Where the snapshots land is not off-site, and it is not a second failure
+  domain either.** The repository is a directory on the `lolstats-data` PVC:
+  `ReadWriteMany`, PV `pvc-67c695c9-68af-4100-a4a6-606b07d9bb33`, backed by
+  `192.168.10.100:/nas-main/k3s-volumes/lolstats-lolstats-data-pvc-...` with
+  `reclaim=Delete`. Two consequences worth stating plainly:
+
+  1. it *does* leave the node, so losing `bee01`/`bee02`/`bee03` is survivable;
+  2. it does **not** leave the machine holding the live archive, and it is the
+     same host (`atlas`, 192.168.10.100) that serves Longhorn's
+     `nfs://atlas.hive:/longhorn-backups`. Losing that export loses the live
+     archive, the Postgres dumps and every snapshot at once. That is risk R6,
+     and it is why the snapshot being recent is not the same claim as the
+     backup being safe.
