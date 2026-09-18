@@ -383,6 +383,29 @@ A 4 B to 956 B spread between instruments on one route is three orders of magnit
 this section is about, and none of it changes a verdict — but it is on the record, because the audit's
 job is the verdict and the last byte is not reproducible to the byte across instruments.
 
+**Reconciliation 3, later vintage.** The same instrument read the same five routes again at ~03:35-03:43Z,
+**after** r10's 03:23-03:25Z fetches, and every route that moved moved **up** by 2 B to 24 B on unchanged
+code: `/matchups/{top,jungle,mid,bottom,support}/` **50,257 / 33,997 / 49,870 / 69,514 / 58,999 B**
+against r10's **50,233 / 33,995 / 49,846 / 69,490 / 58,975 B**. That is the same direction, and the same
+order of magnitude, as the `cells_published` growth the ladder above measures: the bounded grid's bytes
+track the corpus, which is exactly why the row is graded on a round and not on a single reading. Worst
+role in the later read is **69,514 B (67.9 KiB)**, **2.2x** under the 150 KB row, and no verdict moves.
+
+**The cause of `/matchups/top/` 33,881 -> 50,257 B is a commit, not data filling in.** That move is
+quoted elsewhere as the top lane being empty at deploy time and filling in "with no code change"; the
+rounds falsify it. `33,881 B` is what the tier served on top under §11.9's own commit (`59d6920`, pin
+`sha256:17a977e0…`) — its live before and after columns are both that figure — and it is still
+**33,881 B** in **r5** (23:54Z), **r6** (00:16Z) and **r8** (00:23Z), i.e. on the far side of
+`88a53f0`'s pin `sha256:5031f92f…` (§11.8's lineage table). The move is **`1232d0a`** — "an empty matchup
+role stops being denied" — pinned at 02:45Z, **two minutes before r9's first fetch**: r9 (02:47Z) reads
+**50,257 B** and r10 (03:24Z) reads **50,233 B**. The discriminating observation is inside r10 alone,
+which measures both roles on the same build: `/matchups/top/` **50,233 B** and `/matchups/jungle/`
+**33,995 B**. An empty role that *renders its bounded grid* costs ~16 KB more than an empty role that
+renders the honest-empty shell — jungle is still 33,923 B live at §11.9's commit and 33,995 B in r10, so
+it is the corpus, not the code, that decides which of the two a role gets. The bound survived the
+transition either way, which is §11.9's point; but the transition belongs to `1232d0a`, and the record
+should not carry a no-code-change story its own tables contradict.
+
 ### 5.3 The FAIL r9 measured has a landed fix, and r10's audit confirms it by measurement
 
 `/explore/` is the only route r9 measured over the ceiling, and it went over because its default window
