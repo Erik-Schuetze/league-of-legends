@@ -132,6 +132,14 @@ short. "Breaking" means something that used to work no longer does.
   concurrent agents, and no longer points at `docs/contracts.md` section 6 for
   the ownership map that section 6 was. Its rules - the README's job, the ADR
   rule, the house style, "before you say it works" - are unchanged.
+- Citations to a design document that is not in this repository were dropped
+  from `deploy/`, `.github/`, `Dockerfile`, `Makefile`, `scripts/` and the docs -
+  the `plan.md` and `plan section N` pointers, which named a file a reader could
+  not open. Every statement they annotated already stood on its own
+  (`plan.md D-9` on the deleted static tier, `plan section 4-D2` on the pinned
+  DuckDB engine, `plan section 14` on the restore gates, and so on). The `.zz-`,
+  `files/` and `.lane-` ignore rules keep their patterns; only the coordinator-era
+  narrative around them was cut back.
 - The design freeze over the served CSS layer was retired with
   `DESIGN-FREEZE.md`: the token set, the contrast floors, the "is it still
   inlined last" checks and the byte ceiling are still asserted by

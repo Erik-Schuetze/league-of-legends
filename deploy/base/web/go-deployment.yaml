@@ -2,7 +2,7 @@
 # from the published aggregate snapshot.
 #
 # This is the public tier. The static tier it was staged beside was retired on
-# 2026-09-17 (plan.md D-9): the owner ruled that the artifact was not worth
+# 2026-09-17: the owner ruled that the artifact was not worth
 # keeping, and `lolstats-web` selects this Deployment, so there is no second copy
 # to compare against and no parity gate left to clear. `go-service.yaml` stays as
 # this tier's own Service for in-cluster probes.
@@ -178,7 +178,7 @@ metadata:
     #     champion's complete row across the role's whole column axis, and the
     #     note under the grid discloses what the page left out.
     #   - /matchups/mid served 2,768,758 B of HTML and /matchups/bottom
-    #     2,100,737 B, against the plan's 150 KB ceiling (plan section 7.4);
+    #     2,100,737 B, against the plan's 150 KB ceiling;
     #     /matchups/top served 33,881 B only because its artifact stores no
     #     cell to name an axis from. The bounds are sized from measured bytes -
     #     224 B for a published cell, 99 B for a dash, 53,015 B of live chrome

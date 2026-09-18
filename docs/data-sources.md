@@ -111,14 +111,13 @@ unless a row enables it. Enabling one also requires a named `decided_by` and a
 
 ### The position on the named targets
 
-The plan probed candidate targets first-hand (2026-09-17). The register below
-covers all eight named across the brief and the plan, whether the plan named one
-as usable or as forbidden, because a target that was *rejected* still needs its
-rejection recorded.
+Candidate targets were probed first-hand (2026-09-17). The register below covers
+all eight named in the brief, whether named as usable or as forbidden, because a
+target that was *rejected* still needs its rejection recorded.
 
 | Target | Position | Reason |
 | --- | --- | --- |
-| `u.gg` | **Excluded permanently** | Everything, including its `robots.txt`, is behind a 403 Cloudflare challenge. Reaching it would mean circumventing an access control, which moves the exposure from a contract dispute to an access-control fact pattern. The plan says "do not build on this" and that stands |
+| `u.gg` | **Excluded permanently** | Everything, including its `robots.txt`, is behind a 403 Cloudflare challenge. Reaching it would mean circumventing an access control, which moves the exposure from a contract dispute to an access-control fact pattern. The brief says "do not build on this" and that stands |
 | `leagueofgraphs.com` | **Excluded permanently** | Its `robots.txt` explicitly disallows `/api/*`, `/*match/*`, `/*summoner/*`, `/*live/*` and `/*search/*`, and pages return 403. A crawling prohibition is an explicit refusal, not an absence of permission |
 | `op.gg` | Not permitted today; **excluded in practice** | Robots-permissive, and it publishes a tolerance policy for non-commercial, attributed, low-volume crawling - so crawling is not the obstacle. Republishing its derivation of Riot's data is, and that is the question that matters |
 | `lolalytics.com` | Not permitted today; **excluded in practice** | Permissive `robots.txt` (only `AmazonAdBot` rules). Same reason as `op.gg`: its numbers are its own derivation of Riot data, not Riot data |
@@ -427,9 +426,9 @@ statement, and it is labelled as one.
   "reduce the retention window, tighten the sample, or move to a weekly cadence with a
   documented trade-off", and all three shrink the input window while the measurement above is
   that a **one-day** window is already too large. The fallback therefore cannot be invoked as
-  if it addressed the measured cause. The plan's risk register (`plan.md:770-782`) has no
-  entry for the aggregate engine's memory ceiling either, so this waiver is that risk's
-  record rather than a reference to an existing one.
+  if it addressed the measured cause. No entry in the risk register covers the
+  aggregate engine's memory ceiling either, so this waiver is that risk's record rather
+  than a reference to an existing one.
 - **What must not be read into this waiver.** "Chunk per window-day" - the follow-up recorded
   above - is **insufficient**: the statement that fails already runs against one day-partition,
   so a chunk the size of a day is a chunk the size of the failure. The chunk has to be
@@ -586,9 +585,9 @@ this list. Per gate, with the authority named:
 - **G0.1 Data access.** Cannot run: ACCOUNT-V1, LEAGUE-V4 and MATCH-V5 all require a
   key, so no real payload can be inspected. Authority: the gate's own response to
   failure - "drop the unsupported feature from v1 rather than infer it; record the
-  finding here" (plan.md:753) - with
-  `docs/decisions/ADR-010-public-preview-posture.md` (superseded) and plan risk R2
-  (plan.md:771, accepted).
+  finding here" - with
+  `docs/decisions/ADR-010-public-preview-posture.md` (superseded) and the accepted risk
+  R2.
   The design's answer is that a field nobody has observed is not inferred, so no v1
   feature ships on one; with no payload observed at all, that is a design statement
   and not evidence, and it is not presented as evidence. The only payloads in the tree

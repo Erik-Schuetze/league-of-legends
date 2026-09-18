@@ -56,7 +56,7 @@ spec:
 #
 # `static-sync` was the fourth value here. It mirrored the public Data Dragon CDN
 # over 443, so this rule was written for it as much as for Riot; the job was
-# deleted with the static tier on 2026-09-17 (plan.md D-9) and the value went with
+# deleted with the static tier on 2026-09-17 and the value went with
 # it, because a selector value no pod can carry is a claim about a workload that
 # is not deployed. Riot egress itself is still needed by the three above.
 apiVersion: networking.k8s.io/v1
@@ -171,7 +171,7 @@ spec:
 # `allow-web-ingress` used to be here: an ingress rule selecting
 # `component: web` - the inner Caddy Deployment - that admitted the shared Caddy
 # in namespace `web` on ports 8080 and 80. The Deployment was deleted with the
-# static tier on 2026-09-17 (plan.md D-9), which left the rule matching no pod at
+# static tier on 2026-09-17, which left the rule matching no pod at
 # all, so it was deleted in the same change rather than kept as an object that
 # looks like it guards the public route and admits nothing. The flow it described
 # lives on unchanged in `deploy/base/web/go-networkpolicy.yaml`

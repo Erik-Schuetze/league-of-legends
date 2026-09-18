@@ -25,7 +25,7 @@ import "io/fs"
 //     `file_server` as 1000:1000 (deploy/base/web/deployment.yaml and
 //     caddyfile.yaml).
 //
-// Both were deleted with the static tier (plan.md D-9) and no uid 1000 reader
+// Both were deleted with the static tier and no uid 1000 reader
 // remains, so 0o750/0o640 would now be enough on a fresh volume. The values stay
 // because the mode is a property of the bytes already on the volume as much as of
 // the code that wrote them: agg/ carries 0755/0644 today, tightening it means

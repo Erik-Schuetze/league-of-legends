@@ -123,7 +123,8 @@ engine the build step depends on.
   unmarshalling every match summary into Go structs - which is precisely the
   cost profile the DuckDB choice exists to avoid, and it would move a
   considerable amount of SQL into hand-written Go.
-- **`latest` DuckDB.** Rejected per plan section 4-D2.
+- **`latest` DuckDB.** Rejected: re-validating the analytics engine on every
+  DuckDB release is the cost the pin exists to avoid.
 
 ## Consequences
 

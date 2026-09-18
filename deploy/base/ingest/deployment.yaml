@@ -54,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ingest
-          # TODO(plan section 10, Phase 1): the first published tag is not
+          # TODO: the first published tag is not
           # pushed yet. Replace `latest` with `v<semver>@sha256:<digest>` here
           # and in the other workloads as soon as the release workflow has run
           # once, so a rollout is reproducible from this file alone.

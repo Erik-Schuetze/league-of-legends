@@ -102,7 +102,7 @@ spec:
                 readOnlyRootFilesystem: true
           containers:
             - name: discover-seeds
-              # TODO(plan section 10, Phase 1): pin `latest` to
+              # TODO: pin `latest` to
               # v<semver>@sha256:<digest> once the release workflow has published
               # a tag, here and in the other jobs.
               image: ghcr.io/erik-schuetze/league-of-legends:latest

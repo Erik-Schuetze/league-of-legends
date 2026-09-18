@@ -20,7 +20,7 @@ resources:
 #   - name: ghcr.io/erik-schuetze/league-of-legends
 #     newTag: v0.1.0
 #     digest: sha256:...
-# because a tag can be re-pushed while a digest cannot (plan section 5, R13).
+# because a tag can be re-pushed while a digest cannot.
 # See deploy/README.md for the full TODO list; there is a matching TODO on each
 # image reference in the base.
 images:

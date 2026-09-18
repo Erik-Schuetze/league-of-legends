@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/archive-verify.sh - the raw-archive restore drill. It is the other
 # half of the evidence behind the launch gate "Postgres and the raw archive have
-# both been restored from backup in a test" (plan section 14).
+# both been restored from backup in a test".
 #
 #   sh scripts/archive-verify.sh            # a throwaway restic repository in Docker
 #

@@ -1,5 +1,5 @@
 // Package crawl turns the frozen control plane (contract.Store) and the Riot
-// client (internal/riot) into the crawler described in plan section 3.2: a
+// client (internal/riot) into the crawler: a
 // breadth-first walk that seeds a frontier from the ladder, fetches match
 // payloads into the immutable archive, and widens through the ten participants
 // of every match it keeps.
