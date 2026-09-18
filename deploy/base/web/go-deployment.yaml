@@ -20,6 +20,51 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    # sha-11866c4: the revision that stops quoting the partition's withheld count as
+    #   a matchup count.
+    #   - every matchup page printed the document's `suppressed_cells` as `(513
+    #     withheld in total)` beside sentences about matchup PAIRS. That number is
+    #     not a count of pairs: internal/aggregate/assemble.go builds the envelope
+    #     once per partition from the tier-list cell build (SuppressedCells:
+    #     s.cells.Suppressed) and internal/aggregate/artifacts.go reuses it for
+    #     every role, so all five roles carry one value. The published tree proves
+    #     it - measured on the edge 2026-09-18, the five documents at
+    #     /agg/v1/p/16.18/EUW/420/all/matchups/{top,jungle,mid,bottom,support}.json
+    #     report cells 1/0/1/31/8 and champions 170/135/164/144/160, with
+    #     `suppressed_cells 513` identical on all five and `min_cell_n 100` on all
+    #     five, while the tier-list partition that shares the number is a different
+    #     artifact with `cells 260`.
+    #   - the four publishing roles count pairing universes of 28,900 / 26,896 /
+    #     20,736 / 25,600 and jungle counts none. Five different universes cannot
+    #     share one withheld total, which is the arithmetic that settles it.
+    #   - the five served sentences, measured on the edge against the build of
+    #     sha-ea03221, each carrying the same parenthetical: top "*2 of 28,900
+    #     pairings are published for this role. ... read as a dash here, never as
+    #     zero (513 withheld in total). Only the 2 champions ...*"; mid `2 of
+    #     26,896` / `2 champions`; bottom `62 of 20,736` / `10 champions`; support
+    #     `16 of 25,600` / `7 champions`; and jungle "*stores no pairing for this
+    #     role: every pair it counted was withheld below n = 100 games (513
+    #     withheld in total), so no pair is shown rather than an estimate.*"
+    #   - `suppressedClause()` is deleted. `matchupEmpty` now reports only what the
+    #     role's own document holds: no stored cell, exactly one stored cell below
+    #     its floor, or N stored cells all below it - then, when the document names
+    #     a non-empty champion pool, "N champions appear in the pairings it
+    #     counted" (135 for jungle, which is the lane-is-running signal the old text
+    #     hid). The nil-artifact fallback is now "publishes no pairing for this role
+    #     at or above n = N games", a fact about publication rather than a claim
+    #     about a file. The matrix `Note` drops the withheld clause and keeps the
+    #     dash-never-zero sentence; the tier-list sample-size notice still carries
+    #     the count, as docs/contracts.md:442 requires of that component.
+    #   - this is the fourth instance of one class in this repo: a shipped claim
+    #     about the system that the system contradicts - the `38996d4` "published as
+    #     static pages" copy on a dynamic tier, the `sha-9f23333` robots.txt that
+    #     hardcoded its own state, and the `sha-ea03221` jungle sentence that denied
+    #     an artifact it could have read.
+    #   - **no route, indexability or data changes.** jungle's document moves
+    #     33,923 -> 33,997 B, a sentence replaced rather than appended. The other
+    #     four roles' bytes move only with the data. Both empty-state shapes stay
+    #     bounded at 33,060 B / 33,012 B against the 150,000 B ceiling.
+    #
     # sha-ea03221: the revision that describes an empty matchup role by the cells
     #   it holds, rather than by an artifact it claims does not exist.
     #   - /matchups/jungle told the reader "has no matchup artifact for this role,
@@ -123,7 +168,7 @@ metadata:
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:fbe21de1d86637e3ba608412f92581c6be52cf343811bc3b6c967ef75733b0bf
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:cee0f1032a533d5e23ec9c2a732db9d9c2b095f518e7268d45f76d6aebeef12d
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
