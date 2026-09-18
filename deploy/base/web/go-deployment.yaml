@@ -20,6 +20,26 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    # sha-75ef944: the revision that makes every URL the site advertises one shape.
+    #   - the site named its URLs two ways while serving them: rel=canonical,
+    #     og:url and the structured-data url node carried the trailing-slash form,
+    #     while /sitemap.xml's <loc> entries carried the bare path. Measured on
+    #     the edge against the build of sha-5c626df: /tier-list/top's canonical
+    #     reads `https://lol.erik-schuetze.dev/tier-list/top/` while its <loc> read
+    #     `https://lol.erik-schuetze.dev/tier-list/top`, and /explore differs the
+    #     same way. So every one of the sitemap's entries advertised a URL that is
+    #     not the canonical of the page it points at, which leaves a crawler no way
+    #     to tell which of the two to keep. The before-state, measured there:
+    #     /sitemap.xml 71,375 B with 454 <loc> entries, every one the bare shape.
+    #   - CanonicalPath() in render.go is now the single builder for both sides —
+    #     the page metadata and the sitemap — so they cannot disagree about the
+    #     shape of a URL again. The trailing-slash form is the one that has never
+    #     sat behind a redirect.
+    #   - sitemap_invariant_test.go asserts the two agree per route, in addition to
+    #     its existing `in_sitemap == page_is_indexable` assertion in both
+    #     directions. **No route, and no page's indexability, changes** — this moves
+    #     URLs the site advertises onto the URLs it already serves.
+    #
     # sha-5c626df: the revision that makes the sitemap advertise exactly the
     # routes whose pages ask to be indexed, and nothing else.
     #   - /sitemap.xml enumerated its routes from the manifest alone while the
@@ -66,7 +86,7 @@ metadata:
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:37e466151c06a291b1ee28c57f006ffe681c9a5bd141f64f3d54214738dd7380
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:7cbb40860341c728ee177612c78b153661528eeab82a5a0fbe4a96015aad33f7
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
