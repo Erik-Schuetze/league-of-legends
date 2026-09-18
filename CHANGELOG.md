@@ -53,6 +53,19 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Fixed
 
+- The crawl worker wrote nothing while it was parked on Riot's `Retry-After`.
+  The loop reports after a pass that fetched, and the branch that waits out a
+  rate limit jumped straight back to the top of the loop, so a throttled crawl
+  emitted only a `Debug` line - invisible at `LOLSTATS_LOG_LEVEL=info` - for as
+  long as the limiter held it. Measured in production on 2026-09-18: heartbeat
+  spacing of 121 s against a `DefaultReportInterval` of 60 s, i.e. about half
+  the iterations were wait iterations that logged nothing. The wait branch now
+  makes the same report a fetch does, naming the wait it is holding
+  (`paused_on_rate_limit`), and a wait cut short by shutdown is not claimed as
+  served. This is the same defect the heartbeat was added for - a healthy
+  throttled crawl and a stopped one writing the same bytes - one branch
+  further in.
+
 - `lolstats_riot_key_age_seconds` was scraped as a constant `0`. The only writer
   sat behind a `Age() (time.Duration, bool)` assertion on the crawl worker's
   `Fetcher`, and the only type that satisfied it was the crawl test fake: the

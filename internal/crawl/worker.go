@@ -93,6 +93,11 @@ type Worker struct {
 	warnedEmpty bool
 	rng         *rand.Rand
 
+	// pausedFor is how long the loop last waited out Riot's Retry-After. It is
+	// carried into the report that follows so a parked crawl says so on the
+	// line that carries the numbers which stop moving while it waits.
+	pausedFor time.Duration
+
 	// matchesRetained counts the payloads this process has put in the archive
 	// since it started. It is the number the report interval publishes, and it
 	// is the one that stops moving when the crawl stops working - which is how
@@ -294,6 +299,14 @@ func (w *Worker) Run(ctx context.Context) error {
 		if paused, err := w.pause(ctx); err != nil {
 			return w.shutdown(ctx)
 		} else if paused {
+			// Waiting out Riot's Retry-After costs time on the clock and
+			// fetches nothing, and this branch used to write nothing at all:
+			// the only trace was a debug line, so at the level production runs
+			// at, a crawler parked on a rate limit and a crawler that had
+			// stopped produced the same bytes. The line is the one a fetch
+			// writes, so the numbers that freeze in a wait stay readable while
+			// it waits, and the wait is named on it.
+			w.report(ctx, false)
 			continue
 		}
 
@@ -904,6 +917,9 @@ func (w *Worker) widen(ctx context.Context, dto riot.MatchDTO, meta contract.Mat
 // the alert that matters: if nothing has been fetched for longer than a poll
 // interval, the operator wants to know before the frontier silently empties.
 //
+// It is called from both places the loop can be: after a pass that fetched, and
+// while it is parked on Riot's Retry-After, so that neither state is silent.
+//
 // The heartbeat exists because a throttled crawler and a stopped one used to
 // write the same thing to this log - nothing, or a warning about a rate limit -
 // and a reader could not tell them apart. The measured case is a development
@@ -920,6 +936,10 @@ func (w *Worker) report(ctx context.Context, force bool) {
 	w.lastReport = w.deps.Now()
 
 	attrs := []any{"matches_retained", w.matchesRetained}
+	if w.pausedFor > 0 {
+		attrs = append(attrs, "paused_on_rate_limit", w.pausedFor.Round(time.Second).String())
+	}
+	w.pausedFor = 0
 
 	if w.pacer != nil {
 		attrs = append(attrs,
@@ -1028,7 +1048,11 @@ func (w *Worker) pause(ctx context.Context) (bool, error) {
 		wait = maxRateLimitPause
 	}
 	w.deps.Log.Debug("pausing before claiming work", "wait", wait.String())
+	w.pausedFor = wait
 	if err := w.Clock().Sleep(ctx, wait); err != nil {
+		// A wait that was cut short is not a wait this process served, so the
+		// report the shutdown makes does not claim it did.
+		w.pausedFor = 0
 		return true, err
 	}
 	return true, nil
