@@ -145,18 +145,22 @@ func exploreColumns() []sortColumn {
 	return TierListColumns(true)
 }
 
-// explorePerOptions are the row windows the explorer offers. The default is a
-// hundred rather than the whole selection: the explorer spans every role at
-// once, so an unpaged table is several times the size of a tier list, and the
-// page-quality budget in the plan is measured per route. "All rows" stays on the
-// list because a reader who asks for the whole table should get it.
+// explorePerOptions are the row windows the explorer offers; the default has to
+// be one of them, or the "Rows per page" selector cannot show the current state
+// as selected. The default is fifty rather than the whole selection: the
+// explorer spans every role at once, so an unpaged table is several times the
+// size of a tier list, and the page-quality budget in the plan is measured per
+// route. At roughly 900 B a row a hundred rows put the default document plus its
+// always-loaded subresources over that 300 KiB ceiling; fifty clears it with
+// room for the row cost and the fixed chrome to keep growing. "All rows" stays
+// on the list because a reader who asks for the whole table should get it.
 var explorePerOptions = []int{0, 25, 50, 100, 200}
 
 // DefaultExploreQuery is the view an unfiltered request gets: the busiest cells
-// first, a hundred rows to a page, and the newest published patch. The default
-// is also what a link drops, so a shared URL names only what it changes.
+// first, fifty rows to a page, and the newest published patch. The default is
+// also what a link drops, so a shared URL names only what it changes.
 func DefaultExploreQuery() Query {
-	return Query{Sort: "n", Dir: DirDesc, Per: 100}
+	return Query{Sort: "n", Dir: DirDesc, Per: 50}
 }
 
 // exploreFilteredCells narrows the published cells to the selection the request
