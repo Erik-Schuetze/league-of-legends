@@ -55,8 +55,10 @@ kubectl -n lolstats logs deploy/lolstats-ingest --tail=80
 #    fails with an exec-format error - and the metrics listener is the only port
 #    it opens. Port-forward instead. /readyz is the honest one: it reports
 #    riot_key_age_seconds, riot_key_source and, when a deadline has been
-#    declared, riot_key_expires_at. The same-named metric on /metrics is scraped
-#    as a constant 0 (see below), so do not read the age from there.
+#    declared, riot_key_expires_at. The same-named metric on /metrics now
+#    carries the same live value (repaired 2026-09-18: measured tracking
+#    /readyz at 1023.833 -> 1099.692 over two reports), so either one works;
+#    /readyz is still the honest one because it also names the key's source.
 kubectl -n lolstats port-forward deploy/lolstats-ingest 9090:9090 &
 curl -s http://localhost:9090/readyz | head -c 400; echo
 curl -s http://localhost:9090/metrics \
@@ -78,19 +80,26 @@ response code, or `0` for a transport failure. Read the rates, not the counters:
 ## The one thing that cannot tell you the key is expiring
 
 `lolstats_riot_key_age_seconds` is **not the age of the key**. It is the time
-since *this process* first saw the key that is currently configured, it is `0`
-when no key is configured, and it resets to `0` on every restart.
+since *this process* first saw the key that is currently configured, it is
+**absent** rather than `0` when no key is configured (the series exists only once
+a known age is published), and it resets to `0` on every restart.
 
 **There is no key-age alert, and that is deliberate.** `LolstatsRiotKeyOld` and
 the whole `lolstats-riot-key` group were removed on 2026-09-17, because the gauge
 could not answer the question the alert asked. `KeyProvider.Age()`
-(`internal/riot/key.go:101`) returns a single `time.Duration` measured from
-`firstSeen`, i.e. process key lifetime rather than key age; the only writer sits
-behind a two-value `Age() (time.Duration, bool)` assertion
-(`internal/crawl/worker.go:916`) that the real ingest client never satisfies - it
-exposes `Keys() *KeyProvider` (`internal/riot/client.go:222`) - so the gauge was
+(`internal/riot/key.go:119`) returns a single `time.Duration` measured from
+`firstSeen`, i.e. process key lifetime rather than key age; the writer sat behind
+a two-value `Age() (time.Duration, bool)` assertion
+(`internal/crawl/worker.go`) that the real ingest client never satisfied - it
+exposed `Keys() *KeyProvider` (`internal/riot/client.go:222`) - so the gauge was
 scraped as a constant `0` and no value of any real key could have fired the
-alert. A repaired gauge would not have rescued it either:
+alert. **The gauge is now repaired** (`a3be6f3`: `riot.Client.Age()` in
+`internal/riot/keyage.go` -> `KeyProvider.AgeKnown()` in `internal/riot/key.go`,
+pinned at compile time at both ends, and published only when the age is known),
+and it was measured tracking `/readyz` live on 2026-09-18 (`1023.833030043` at
+00:28:16Z, `1099.692236706` at 00:29:31Z, against `/readyz riot_key_age_seconds
+1043 -> 1075`). A repaired gauge still would not have rescued the alert, for two
+reasons that are properties of the reading rather than of the writer:
 
 - a restart clears it, so it can be silenced by the very action that does not fix
   the key;
@@ -108,9 +117,8 @@ So what you watch is the crawler failing loudly rather than a clock on the
 credential: a `4xx` rate in the ingest log, a sustained 403 in
 `lolstats_riot_requests_total`, `lolstats_pipeline_staleness_seconds{stage="crawl"}`
 rising, or the `LolstatsRiotKeyRevoked` / `LolstatsRiotAuthFailures` alerts. The
-gauge fix in flight in the ingestion workstream (`internal/riot`,
-`internal/crawl`) may make the age readable again; it will not make it an expiry
-clock.
+gauge is **live** now - repaired on 2026-09-18 and measured tracking `/readyz`
+above - which makes the age readable again, but still not an expiry clock.
 
 A real expiry alert needs a metric derived from the key's own `expires_at`.
 `LOLSTATS_RIOT_API_KEY_EXPIRES_AT` is parsed by `internal/config`
@@ -124,7 +132,7 @@ is missing is a *metric*; the deadline itself still has to be written down by
 hand, and Riot does not tell this stack when a development key dies.
 
 It has never been written down here: Secret `lolstats-riot` carries
-`RIOT_API_KEY` and no `RIOT_API_KEY_EXPIRES_AT` (verified 2026-09-17), so no
+`RIOT_API_KEY` and no `RIOT_API_KEY_EXPIRES_AT` (re-verified 2026-09-18), so no
 process can fail early on a passed deadline and a dead key is discovered exactly
 as the code comment says it is - a 401 on the first call. Until the ingestion
 workstream emits an expiry metric, the symptom you can actually observe is a

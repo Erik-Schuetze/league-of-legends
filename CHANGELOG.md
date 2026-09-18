@@ -64,6 +64,21 @@ short. "Breaking" means something that used to work no longer does.
   vector so the series is *absent* until a known age is published instead of
   defaulting to `0`.
 
+- Three documents described that gauge as deliberately unreadable and were
+  stale from the fix onward: `deploy/README.md` called
+  `LOLSTATS_RIOT_API_KEY_EXPIRES_AT` "consumed by nothing" and the metric a
+  "Dead gauge", `docs/runbooks/enable-alert-delivery.md` said the repair was
+  "in flight in another lane" and that no rule may read the gauge, and
+  `docs/runbooks/key-rotation.md` / `docs/runbooks/ingest-down.md` sent readers
+  to the metric without saying it had only just started working. They now
+  record the repair, the measured value (2026-09-18: `1023.833030043` at
+  00:28:16Z and `1099.692236706` at 00:29:31Z, against `/readyz
+  riot_key_age_seconds 1043 -> 1075`), and the surviving objection that the
+  reading is process key lifetime rather than key age. `deploy/README.md` also
+  now states the expiry guard's truthful production status: wired
+  (`secretKeyRef` with `optional: true` at `deploy/base/ingest/deployment.yaml`)
+  but **unarmed**, because Secret `lolstats-riot` carries only `RIOT_API_KEY`.
+
 - Demo fixture data published contradictory numbers. `web/scripts/make-fixtures.mjs`
   drew each number independently, so the tier list, champion page,
   champion-by-role page and matchup matrix disagreed about the same

@@ -19,7 +19,13 @@ Work down this list in order. Each step is a question with a cheap answer.
    after 24 hours. `lolstats_riot_key_age_seconds` above 12h means the swap is
    due. Point `LOLSTATS_RIOT_API_KEY_FILE` at the key file and rotate that file
    rather than restarting: the key provider re-reads it, so a 24h development
-   key can be swapped under a running worker.
+   key can be swapped under a running worker. Read the number from `/readyz`
+   (`riot_key_age_seconds`; a `0` there means no key is held, not a fresh key)
+   and treat the metric as a cross-check: it was a constant `0` until the gauge
+   was repaired on 2026-09-18, it now tracks `/readyz` (measured
+   `1023.833030043` -> `1099.692236706`), refreshes only once per report, and -
+   like `/readyz` - measures *this process's* key lifetime, so both reset on
+   every deploy and neither is an expiry clock.
 3. **Is the circuit open?** Repeated 403 or 429 responses open the breaker.
    `lolstats_riot_requests_total{status="403"}` climbing while other statuses
    are flat is an expired or revoked key, not a rate problem.
