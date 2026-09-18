@@ -5,7 +5,7 @@
 //
 //   node scripts/perf/verify-report.mjs
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const DOC = process.env.PERF_DOC ?? 'docs/PERF-EVIDENCE.md';
@@ -188,6 +188,122 @@ checkTrue(
     doc.includes('1,057 of 1,058 sitemap URLs'),
 );
 checkTrue('§7 every page reports data-state=live', pages.every((p) => p.dataState === 'live'));
+
+// ---------------------------------------------------------------- §11.9 later measured rounds
+// r6-r8 were measured after the /matchups grid was bounded. They are Go-tier rounds, not edge
+// rounds, and §11.9 is where that is said. These checks exist for two reasons: so the section's
+// figures cannot drift from the reports they cite, and so nobody can replace §5's r1/r2 measurement
+// with a later round's better number without this failing.
+const thousands = (n) => n.toLocaleString('en-US');
+
+const section119 = (() => {
+  const start = doc.indexOf('### 11.9 ');
+  if (start === -1) return '';
+  const next = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, next === -1 ? undefined : next);
+})();
+checkTrue('§11.9 exists', section119.length > 1000, `${section119.length} chars`);
+
+for (const round of ['6', '7', '8']) {
+  const p = `${EV}/lh-summary-r${round}.json`;
+  if (!existsSync(p)) continue;
+  const records = json(p);
+  const passed = records.filter((r) => r.overall === 'PASS').length;
+  const failed = records.filter((r) => r.overall !== 'PASS');
+  checkTrue(
+    `r${round} summary is self-consistent`,
+    records.every((r) => r.overall === (Object.values(r.grades).includes('FAIL') ? 'FAIL' : 'PASS')),
+  );
+  checkTrue(
+    `r${round} reports the raw files it summarises`,
+    records.every((r) => r.file.startsWith(`${EV}/lh-r${round}-`) && existsSync(r.file)),
+  );
+  // The only route allowed to fail in these rounds is the §6.2 SEO one; a second failure would mean
+  // §11.9's tables are describing a different run than the reports do.
+  checkTrue(
+    `r${round} fails on nothing but §6.2's route`,
+    failed.every((r) => r.route === '/champions/ahri/mid/' && r.failingAudits.includes('is-crawlable')),
+    failed.map((r) => `${r.route}:${Object.entries(r.grades).filter(([, g]) => g === 'FAIL').map(([k]) => k)}`).join(' '),
+  );
+  if (round !== '6') {
+    checkTrue(`§11.9 quotes r${round}'s pass count`, section119.includes(`${passed} of ${records.length} routes PASS`));
+    // Each measured round must show up in §11.9's tables: the fixture round in the "fixture after"
+    // column and the live round in the "live after" column of the byte table, plus its own column pair
+    // in the Lighthouse table. Cell-by-cell, so the units and the ordering are checked too.
+    const cellsOf = (l) => l.split('|').slice(1, -1).map((c) => c.trim());
+    const byteTable = (() => {
+      const h = section119.indexOf('| route | fixture before | fixture after');
+      return h === -1 ? [] : section119.slice(h).split('\n').slice(2, 7).map(cellsOf);
+    })();
+    const lhTable = (() => {
+      const h = section119.indexOf('| route | r7 fixture: HTML raw');
+      return h === -1 ? [] : section119.slice(h).split('\n').slice(2, 7).map(cellsOf);
+    })();
+    checkTrue('§11.9 has both measured tables', byteTable.length === 5 && lhTable.length === 5);
+    const byteCol = round === '7' ? 2 : 4;
+    const lhCols = round === '7' ? [1, 3] : [6, 7];
+    for (const r of records.filter((x) => x.route.startsWith('/matchups/'))) {
+      const byteRow = byteTable.find((c) => c[0] === `\`${r.route}\``);
+      const lhRow = lhTable.find((c) => c[0] === `\`${r.route}\``);
+      const raw = `${thousands(r.weight.htmlRawBytes)} B`;
+      const first = `${thousands(r.weight.firstLoadBytes)} B`;
+      checkTrue(
+        `§11.9's tables carry ${r.route} as measured in r${round}`,
+        Boolean(byteRow) &&
+          Boolean(lhRow) &&
+          byteRow[byteCol].includes(raw) &&
+          lhRow[lhCols[0]].includes(raw) &&
+          lhRow[lhCols[1]].includes(first),
+        byteRow ? `byte:${byteRow[byteCol]} lh:${lhRow[lhCols[0]]}/${lhRow[lhCols[1]]} raw:${raw}/${first}` : 'row missing',
+      );
+    }
+  }
+}
+checkTrue(
+  '§11.9 names the worst HTML and first-load of the shipped posture',
+  section119.includes('74.1 KiB') &&
+    section119.includes('245,229 B (239.5 KiB)') &&
+    section119.includes('19.7% under'),
+);
+checkTrue(
+  '§11.9 says its rounds are not edge measurements',
+  section119.includes('not edge measurements') && section119.includes('No row above is a production measurement'),
+);
+checkTrue(
+  '§11.9 keeps the r1/r2 26.4 KiB reading as a real measurement',
+  section119.includes('26.4 KiB') && section119.includes('was never reproduced'),
+);
+
+// §5 still carries the r1/r2 measurement in its cells, with the later rounds as annotation.
+const row = (label) => doc.split('\n').find((l) => l.startsWith(`| ${label} `)) ?? '';
+checkTrue(
+  '§5 first-load row still measures FAIL with the r1/r2 worst value',
+  row('total first-load ≤300 KB uncompressed').includes('**FAIL**') &&
+    row('total first-load ≤300 KB uncompressed').includes('1013.3'),
+);
+checkTrue(
+  '§5 first-load row still refuses the §11 projection',
+  row('total first-load ≤300 KB uncompressed').includes('not** superseded by them') ||
+    row('total first-load ≤300 KB uncompressed').includes('**not** superseded by them'),
+  row('total first-load ≤300 KB uncompressed').slice(0, 80),
+);
+checkTrue(
+  '§5 HTML row keeps the later rounds that broke it',
+  row('HTML ≤150 KB uncompressed').includes('164,502') && row('HTML ≤150 KB uncompressed').includes('2,768,758'),
+);
+checkTrue(
+  '§5 HTML row conditions its PASS on the deploying image, not on a projection',
+  row('HTML ≤150 KB uncompressed').includes('once the image carrying §11.9 is deployed') &&
+    row('HTML ≤150 KB uncompressed').includes('Measured, not projected'),
+);
+checkTrue(
+  'note (a) still states that a projection replacing a measurement would be a laundered pass',
+  doc.includes('A projection that replaces a measurement would be a\nlaundered pass'),
+);
+checkTrue(
+  'note (b) still records the coordinator withdrawing the fixture-only instruction',
+  doc.includes('The coordinator withdrew') && doc.includes('LOLSTATS_AGG_FIXTURES=only'),
+);
 
 // ---------------------------------------------------------------- JS budget
 const jsTotal = r1.reduce((n, x) => n + x.weight.jsBytes, 0);

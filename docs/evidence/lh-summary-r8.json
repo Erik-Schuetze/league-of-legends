@@ -1,0 +1,344 @@
+[
+  {
+    "file": "docs/evidence/lh-r8-about.json.gz",
+    "route": "/about/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1803.027,
+      "cls": 0.001373699637756168,
+      "tbtMs": 0,
+      "fcpMs": 1503.027,
+      "speedIndexMs": 1503.027,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 46286,
+      "htmlGzipBytes": 12058,
+      "firstLoadBytes": 211065,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 9,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r8-champions-ahri-mid.json.gz",
+    "route": "/champions/ahri/mid/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 69
+    },
+    "metrics": {
+      "lcpMs": 1801.04175,
+      "cls": 0.0006406804615049402,
+      "tbtMs": 0,
+      "fcpMs": 1501.04175,
+      "speedIndexMs": 1501.04175,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 34660,
+      "htmlGzipBytes": 7706,
+      "firstLoadBytes": 227950,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 10,
+      "thirdPartyHosts": [
+        "ddragon.leagueoflegends.com"
+      ]
+    },
+    "failingAudits": [
+      "is-crawlable"
+    ],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "FAIL",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "FAIL"
+  },
+  {
+    "file": "docs/evidence/lh-r8-champions-ahri-top.json.gz",
+    "route": "/champions/ahri/top/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1804.9422,
+      "cls": 0.0003795748999063096,
+      "tbtMs": 0,
+      "fcpMs": 1504.9422,
+      "speedIndexMs": 1504.9422,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 46341,
+      "htmlGzipBytes": 9377,
+      "firstLoadBytes": 239631,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 10,
+      "thirdPartyHosts": [
+        "ddragon.leagueoflegends.com"
+      ]
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r8-home.json.gz",
+    "route": "/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1801.67445,
+      "cls": 0.001163192595725125,
+      "tbtMs": 0,
+      "fcpMs": 1501.67445,
+      "speedIndexMs": 1501.67445,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 42390,
+      "htmlGzipBytes": 9499,
+      "firstLoadBytes": 207169,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 9,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r8-matchups-mid.json.gz",
+    "route": "/matchups/mid/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1952.4980999999998,
+      "cls": 0.001361773867705111,
+      "tbtMs": 0,
+      "fcpMs": 1577.4981,
+      "speedIndexMs": 1577.4981,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 49870,
+      "htmlGzipBytes": 10898,
+      "firstLoadBytes": 219211,
+      "jsBytes": 4562,
+      "jsFiles": 3,
+      "requestCount": 12,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r8-matchups-top.json.gz",
+    "route": "/matchups/top/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1803.1579500000003,
+      "cls": 0.001847921003584511,
+      "tbtMs": 0,
+      "fcpMs": 1503.1579499999998,
+      "speedIndexMs": 1503.1579499999998,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 33881,
+      "htmlGzipBytes": 7674,
+      "firstLoadBytes": 198660,
+      "jsBytes": 0,
+      "jsFiles": 0,
+      "requestCount": 9,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r8-tier-list-mid.json.gz",
+    "route": "/tier-list/mid/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1800.8783999999998,
+      "cls": 0.001742653148710754,
+      "tbtMs": 0,
+      "fcpMs": 1575.8784,
+      "speedIndexMs": 1575.8784,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 65453,
+      "htmlGzipBytes": 11774,
+      "firstLoadBytes": 232144,
+      "jsBytes": 1912,
+      "jsFiles": 2,
+      "requestCount": 11,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  },
+  {
+    "file": "docs/evidence/lh-r8-tier-list-top.json.gz",
+    "route": "/tier-list/top/",
+    "scores": {
+      "performance": 99,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    "metrics": {
+      "lcpMs": 1803.2250000000001,
+      "cls": 0.001742653148710754,
+      "tbtMs": 0,
+      "fcpMs": 1578.2250000000001,
+      "speedIndexMs": 1578.2250000000001,
+      "inpMs": null,
+      "inpStatus": "absent"
+    },
+    "weight": {
+      "htmlRawBytes": 60071,
+      "htmlGzipBytes": 11138,
+      "firstLoadBytes": 226762,
+      "jsBytes": 1912,
+      "jsFiles": 2,
+      "requestCount": 11,
+      "thirdPartyHosts": []
+    },
+    "failingAudits": [],
+    "grades": {
+      "performance": "PASS",
+      "accessibility": "PASS",
+      "bestPractices": "PASS",
+      "seo": "PASS",
+      "lcp": "PASS",
+      "cls": "PASS",
+      "tbt": "PASS",
+      "htmlRaw": "PASS",
+      "htmlGzip": "PASS",
+      "firstLoad": "PASS"
+    },
+    "overall": "PASS"
+  }
+]

@@ -94,15 +94,15 @@ because the namespace was shared with other agents' pods.
 | Performance ≥90 | 99–100, all 9 routes × 2 rounds | **PASS** (margin ≥9) |
 | Accessibility =100 | 100, all 9 routes × 2 rounds | **PASS** |
 | Best Practices ≥95 | 100, all 9 routes × 2 rounds | **PASS** |
-| SEO ≥95 | 100 on 8 of 9; **69** on `/champions/ahri/top/` | **FAIL** (1 route) |
+| SEO ≥95 | 100 on 8 of 9; **69** on `/champions/ahri/top/` | **FAIL** (1 route) — on later rounds the *same* failure sits on the other role, `/champions/ahri/mid/`, because it follows the served artifact's cells and not the route. The route named here is the one r1/r2 measured; the later rounds measured it again and it is unchanged: **r3, r4, r5, r7 and r8 all score `/champions/ahri/mid/` 69** (`failingAudits: ["is-crawlable"]`) while every other sampled route scores 100, i.e. this row fails **without any weight being over budget**. See §6.2 (fix routed to another lane; measured here, not fixed here) |
 | LCP ≤2.5 s | worst 1,849 ms | **PASS** (margin 651 ms) |
 | CLS ≤0.1 | worst 0.002 | **PASS** |
 | TBT ≤200 ms | 0 ms on every route and round | **PASS** |
 | INP ≤200 ms | not emitted by Lighthouse in navigation mode | **NOT MEASURED** |
-| HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** |
+| HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** — of the r1/r2 revisions of those routes. Later rounds measured `/matchups/{mid,top}/` at **164,502 B** (r3/r4) and **2,768,758 B** (r5) on the same tier. **Measured after §11.9 bounded the grid** — worst **75,888 B / 74.1 KiB** (r7, shipped fixture posture, 11 routes) and **65,453 B / 63.9 KiB** (r8, live, 8 routes) — so the row holds on both postures **once the image carrying §11.9 is deployed**; it does not hold on the tier as it runs today. Measured, not projected. See note (b) |
 | HTML ≤40 KB gzipped | worst as served on the wire 10.2 KiB (`/tier-list/top/`, Lighthouse); worst across all 1,058 routes 9.5 KiB (`/about/` = 9,731 B). The same page is 9.3 KiB when re-gzipped with zlib defaults, i.e. the origin's own gzip output runs ~8% larger than zlib — the audited on-wire figure is the conservative one | **PASS** |
 | islands ≤2/page, both deferred | max **1** island/page, on 10 of 1,058 pages; 0 blocking scripts | **PASS** |
-| total first-load ≤300 KB uncompressed | 187.3–199.4 KiB on 4 routes; **429.7 / 447.7 / 939.0 / 1013.3 KiB** on 5 routes | **FAIL** (4 routes) — this row is *measured live*; the lower §11 figures are a **projection**, and this row is **not** superseded by them. See note (a) |
+| total first-load ≤300 KB uncompressed | 187.3–199.4 KiB on 4 routes; **429.7 / 447.7 / 939.0 / 1013.3 KiB** on 5 routes | **FAIL** (4 routes) — this row is *measured live*; the lower §11 figures are a **projection**, and this row is **not** superseded by them. Measured (not projected) after §11.9 bounded the grid, on the same tier: worst **245,229 B / 239.5 KiB** (r7, shipped fixture posture, 11 routes) and **239,631 B / 234.0 KiB** (r8, live, 8 routes), i.e. 19.7% under the row — but still **not the edge**, so this row is not closed until §11.8's post-cutover run. See note (a), and note (b) for the two `/matchups/*` routes whose later revisions measured **2,938,099 B** before §11.9 bounded the grid |
 | zero axe serious+critical | 0 on all 9 routes (axe 4.13.0, 63 rules evaluated) | **PASS** |
 
 **Note (a) — every cell above is a measurement; §11's smaller numbers are arithmetic, not a re-measurement.**
@@ -115,13 +115,31 @@ last live measurement (429.7–1013.3 KiB) and is **not known to hold in product
 post-cutover run in §11.8 measures the real edge. A projection that replaces a measurement would be a
 laundered pass; §11.4 restates this on its own side.
 
-**Note (b) — the HTML row and `/matchups/*` are posture-dependent; do not chase them as defects.**
-The 150 KiB HTML ceiling passes live (worst audited 65.4 KiB). The same route renders very differently
-in local fixture posture: `/matchups/mid/` is 26.4 KiB of HTML in the committed live run
-(`lh-r2-matchups-mid`) and 160.6 KiB against local fixtures. That difference is what puts
-`/matchups/{mid,top}/` over the first-load ceiling locally even though **both routes carry zero
-images**; §11.3 reports them unchanged before and after §11.2 for that reason. Fixture-posture HTML is
-not this budget's failure and not a real defect in the served pages.
+**Note (b) — `/matchups/*` is a real FAIL on the tier the edge will dial, not a fixture artifact.**
+This document's own live r1/r2 run measured `/matchups/{mid,top}/` at 26.4 KiB of HTML and 187.3 KiB
+first-load, and that is why the 150 KiB HTML row passes above. **Later measurements of the same route
+on the Go tier did not reproduce it**: r3/r4 measured the document at 164,502 B and r5 at
+**2,768,758 B** with **2,938,099 B** first-load (the ladder in note (a); §11.9 has the cause). Both
+are over the 150 KiB ceiling, and the r5 figure is 9.8× the 300 KB first-load budget — on the live
+posture, which is the tier the cutover points at. The cause is a quadratic matrix, not markup: the
+grid rendered `pool × pool` cells (r5: 164 champions in the artifact, **1** published cell, 26,896
+`<td>`), because the frame was sized by the champion list rather than by the cells the artifact
+stores. §11.9 bounds the grid to a window of the pool and measures the result on both postures.
+
+An earlier revision of this note called the local 160.6 KiB figure "posture-dependent… do not chase
+them as defects" and told later readers to treat it as a fixture artifact. **The coordinator withdrew
+that instruction** once r5 showed the same defect at live scale, and the withdrawal is recorded here
+rather than silently dropped: the fixture page *is* the shipped product whenever the tier runs
+`LOLSTATS_AGG_FIXTURES=only`, which is the posture the Go tier is deployed with.
+
+**How the defect is now bounded, and what was measured after bounding it** (§11.9): the grid renders a
+window of the champions the artifact *stores a cell for*, not its champion list. Measured after that
+change on both postures: r7 — the shipped fixture posture, 11 routes, including all five matchup roles —
+**10/11 PASS, worst matchup document 74.1 KiB and worst first-load 239.5 KiB**; r8 (live, 8 routes)
+**7/8 PASS, `/matchups/mid/` 49,870 B / 214.1 KiB first-load**. The single failing route in both rounds
+is `/champions/ahri/mid/` on the SEO row, which is the §6.2 defect, not weight. All of those are Go-tier
+measurements; the edge still dials the static tier, so §11.8 remains the measurement that closes the
+traffic ceiling.
 
 **Residual for the design lane (recorded, not actioned): the font payload.**
 150.2 KiB over 6 requests, incurred on **every** route, so it is ~78% of the 188–199 KiB image-free
@@ -242,7 +260,7 @@ gunzip -c docs/evidence/lh-r1-home.json.gz | jq '.categories.performance.score'
 node scripts/perf/extract-lh.mjs docs/evidence/lh-r1-*.json.gz
 node scripts/perf/extract-lh.mjs --json docs/evidence/lh-r1-*.json.gz > docs/evidence/lh-summary-r1.json
 
-# verify every number in this document against the raw evidence (146 checks; exit 1 on drift)
+# verify every number in this document against the raw evidence (176 checks; exit 1 on drift)
 node scripts/perf/verify-report.mjs
 
 # axe-core, WCAG 2.1 A/AA, 412x915
@@ -264,12 +282,16 @@ node scripts/perf/island-runtime.mjs --base http://127.0.0.1:18921 --out docs/ev
 | `docs/evidence/lh-summary-r1.json`, `docs/evidence/lh-summary-r2.json` | machine-readable extraction of every figure in §4, regenerated from the `.gz` reports above |
 | `docs/evidence/lh-r3-*.json.gz`, `docs/evidence/lh-r4-*.json.gz` | 16 raw Lighthouse reports behind §11: the same-posture before/after pair for the R15 first-load change (r3 pre-change control, r4 with §11.2 applied). Same format and same "nothing is stripped" rule as the r1/r2 set |
 | `docs/evidence/lh-summary-r3.json`, `docs/evidence/lh-summary-r4.json` | machine-readable extraction of every figure in §11, regenerated from the `.gz` reports above |
+| `docs/evidence/lh-r5-*.json.gz` | 8 raw Lighthouse reports behind §11.9's ladder row and §5's notes: the live round against the port-forward to the pod, taken by another lane. Same format and same "nothing is stripped" rule as the r1/r2 set |
+| `docs/evidence/lh-r6-*.json.gz`, `docs/evidence/lh-r7-*.json.gz`, `docs/evidence/lh-r8-*.json.gz` | 27 raw Lighthouse reports behind §5's notes and §11.9: r6/r8 the live posture through a local binary holding the pod's own artifacts, r7 the shipped fixture posture (`LOLSTATS_AGG_FIXTURES=only`, 11 routes, all five matchup roles). **Go-tier rounds, not edge rounds** — see §11.8 for the measurement that closes the traffic ceiling |
+| `docs/evidence/lh-summary-r5.json` … `docs/evidence/lh-summary-r8.json` | machine-readable extraction of every figure in §11.9 and §5's notes, regenerated from the `.gz` reports above with `scripts/perf/summarize-lh.mjs` |
 | `docs/evidence/axe-*.json`, `docs/evidence/axe-summary.json` | 9 raw axe-core results + summary |
 | `docs/evidence/tree-facts.json` | per-route bytes/lang/alt/ids/headings/islands/robots for all 1,058 routes |
 | `docs/evidence/island-runtime.json` | island boot evidence, console errors, script inventory |
 | `scripts/perf/lighthouse-routes.sh` | Lighthouse runner with the positive control |
 | `scripts/perf/extract-lh.mjs` | raw report → §7.4 budget verdicts |
 | `scripts/perf/verify-report.mjs` | re-derives every figure in this document from the raw evidence and exits non-zero on any disagreement |
+| `scripts/perf/summarize-lh.mjs` | wraps `extract-lh.mjs --json` into the `lh-summary-rN.json` schema (it adds the `file` field each record carries); reproduces the committed `lh-summary-r6.json` byte for byte and `lh-summary-r5.json` byte for byte apart from the `.gz` paths, which is why the later rounds were summarised with it rather than by hand |
 | `scripts/perf/axe-routes.mjs` | axe-core runner |
 | `scripts/perf/tree-facts.mjs` | browserless byte/structure crawler |
 | `scripts/perf/island-runtime.mjs` | island boot + console-error check |
@@ -441,14 +463,15 @@ removing it moves shared stylesheet bytes on 1,063 pages, and that is a design-l
 
 ### 11.6 What this does not fix, and what did not work
 
-- **`/matchups/mid/` 326.0 KiB and `/matchups/top/` 290.8 KiB are posture-dependent, and are not this
-  row, not this change, and not a defect in the served pages.** Both routes carry zero images, and both
-  measure identically before and after. In this local fixture posture the matchup board renders 160.6
-  KiB of HTML where the committed live run served 26.4 KiB (same route, `lh-r2-matchups-mid`), which is
-  what puts the pair over the first-load and 150 KiB HTML ceilings *here*; §5 records those routes at
-  187.3 KiB live with the HTML row passing at 65.4 KiB worst. Treat the local figure as a fixture
-  artifact: someone reading a fixture report later should not go hunting for an image or a markup
-  regression on those two routes, because there is none. This change neither causes nor closes them.
+- **`/matchups/{mid,top}/` were a real FAIL on the deployed tier, and this change did not fix them
+  then.** Both routes carry zero images, so §11.2's A/B left them byte-identical (r3 ≡ r4: 164,502 B
+  document, 14,919 B gzipped, 1,776 DOM elements, 12 requests — identical in both reports). That
+  identity is why this section originally read them as a fixture artifact and told later readers not
+  to chase them. **That reading was wrong and the coordinator withdrew it**: the Go tier is deployed
+  serving `LOLSTATS_AGG_FIXTURES=only`, so the fixture page is the shipped product, and the r5 round —
+  the same tier, now in the live posture — measured `/matchups/mid/` at 2,768,758 B of HTML and
+  2,938,099 B first-load. §11.9 fixes it and measures both postures. Nothing here depended on the old
+  reading: the four routes §11.2 does fix are fixed by removing images, which is orthogonal.
 - **Server-side pagination cannot keep the icons.** §7.5 paginates patch archives, not the live tier
   list, and the arithmetic forbids it anyway: §6.1 measures one champion image at 24,762 B, so a
   10-row page would still spend ~240 KiB on images alone against a floor (fonts + document + CSS) of
@@ -490,17 +513,197 @@ export CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 
 # BASE URL: https://lol.erik-schuetze.dev  (the site's own canonical origin: every canonical link,
 # sitemap.xml and robots.txt entry names it, which compliance gate check 8 asserts)
-# Lighthouse mobile preset, 9 routes; the script asserts 200 on / before it starts
-bash scripts/perf/lighthouse-routes.sh --round 5 --base https://lol.erik-schuetze.dev --out docs/evidence
+# Round 9 is the next free number, and taking a fresh one matters: r5 is another lane's live round
+# against the port-forward and r6-r8 are this lane's post-change rounds (r6/r8 live through a local
+# binary holding the pod's artifacts, r7 the shipped fixture posture), all cited as evidence in §5's
+# notes and §11.9's tables. Reusing a round number overwrites them.
+bash scripts/perf/lighthouse-routes.sh --round 9 --base https://lol.erik-schuetze.dev --out docs/evidence
 
-# extract every figure from the raw reports, and verify §1-§10 against them
-node scripts/perf/extract-lh.mjs --json docs/evidence/lh-r5-*.json.gz > docs/evidence/lh-summary-r5.json
-node scripts/perf/extract-lh.mjs docs/evidence/lh-r5-*.json.gz      # read the first-load column
-node scripts/perf/verify-report.mjs                                 # 146 checks, exit 1 on drift
+gzip -9 docs/evidence/lh-r9-*.json                        # archive the raw reports
+node scripts/perf/summarize-lh.mjs 9                      # -> docs/evidence/lh-summary-r9.json
+node scripts/perf/extract-lh.mjs docs/evidence/lh-r9-*.json.gz   # read the first-load column
+node scripts/perf/verify-report.mjs                       # 176 checks at this writing, exit 1 on drift
 ```
 
-Then read the r5 first-load column and **either** write it into §5's row **or** leave the row FAIL —
+Then read the r9 first-load column and **either** write it into §5's row **or** leave the row FAIL —
 whichever the measurement says, with no projection substituted for it. §11.3/§11.4 then become history
 rather than evidence, and the r3/r4 reports (and this section's arithmetic) can be pruned in the same
 commit. Nothing in `scripts/perf/` needs to change for the cutover: `--base` is the only input that
-moves, and all six scripts are present and syntax-clean at the time of writing.
+moves, and every script above is committed and syntax-clean. `summarize-lh.mjs` is the wrapper that
+gives the summaries their `file` field; it reproduces the committed `lh-summary-r6.json` byte for
+byte, which is why it — rather than a fresh reimplementation of the arithmetic — is the one the
+post-cutover run should use.
+
+### 11.9 `/matchups/*` is bounded by a window of the artifact's cells, not by its champion pool
+
+Added 2026-09-18 by the R15 lane, on the coordinator's correction in §11.6. Same lane, same budget row
+(HTML ≤150 KB, first-load ≤300 KB), different cause from §11.2's images: this one is markup volume, not
+asset volume.
+
+**The ladder, and why it is a ladder.** The same route, on the same tier, measured three different sizes
+with no change to the template between them:
+
+| round | posture | tier measured | `/matchups/mid/` document | cells | source |
+| --- | --- | --- | --- | --- | --- |
+| r1/r2 | live | deployed image, port-forward 18921 | 26.4 KiB | not counted | §4 |
+| r3/r4 | fixture (`LOLSTATS_AGG_FIXTURES=only`) | local binary, 18921 | 164,502 B | 784 | §11.3, `lh-r{3,4}-matchups-mid.json.gz` |
+| r5 | live | port-forward 18921 | **2,768,758 B** (first-load 2,938,099 B) | 26,896 | `lh-r5-matchups-mid.json.gz` |
+| r6 | live | local reconstruction, 18945 | 49,870 B | 4 | `lh-r6-matchups-mid.json.gz` |
+| r7 | fixture (the shipped posture) | local binary, 18946 | 75,166 B | 144 | `lh-r7-matchups-mid.json.gz` |
+| r8 | live | local reconstruction, 18945 | 49,870 B | 4 | `lh-r8-matchups-mid.json.gz` |
+
+r6-r8 carry this change; r1-r5 do not. **Every row was measured against the Go tier** — r1/r2/r5 through
+the coordinator's port-forward to the pod, r3/r4/r6/r7/r8 against a local binary holding the same
+artifacts — **none of them through the public edge.** The edge still dials the older static tier, so no
+row here is a production traffic measurement; §11.8 is where that measurement lives.
+
+**The cause, verified rather than inferred.** The artifact the pod serves today
+(`/agg/v1/p/16.18/EUW/420/all/matchups/mid.json`) lists **164 champions and stores 1 cell**
+(`min_cell_n` 100, `suppressed_cells` 521, `generated_at` 2026-09-18T00:17:29Z). The template sized its
+frame from that champion list, so it rendered `164 × 164 = 26,896` `<td>` elements — 26,895 of them the
+dash for a pair nobody measured — at 99 B each. That is the whole 2.8 MB; the cells are the page.
+Two checks separate "the pool did this" from "the markup is fat":
+
+1. **Pruning the pool shrinks the page by exactly the missing cells.** Cutting the live mid artifact's
+   champion list to 36 (keeping its 1 stored cell) rendered 784 cells in 180,839 B — the *same per-cell
+   cost* as the fixture posture — while the unpruned artifact renders 2,768,758 B. Nothing about the
+   markup changed; only the frame did.
+2. **Cell cost is posture-invariant.** Measured on both postures by summing the `<td>` markup:
+   a dash cell is **99 B**, a published cell **219-225 B** (`n`, a tone class and the `aria-label` that
+   spells the pairing out). The `<td class="cell missing" data-n="0" …>` string is byte-identical on
+   the live and fixture tiers.
+
+So the 26.4 KiB reading in r1/r2 was not a fixture artifact and not a measurement error: it was an
+**earlier artifact revision** whose champion list was small, on the same tier, with the same template.
+That is what makes this a budget defect rather than a data wobble — a page whose size is a function of
+the artifact's champion list has no size at all.
+
+**The change** (`internal/webtier/view_matchups.go`, `templates/pages/matchups.tmpl`,
+`templates/components_heatmap.tmpl`):
+
+| bound | value | why that value |
+| --- | --- | --- |
+| rows and columns | the champions the artifact's **cells** name (`matrixAxis`), not its champion list | the frame is the published data; a champion with no cell is a link, not a row |
+| window | **12** per axis (`DefaultMatrixPer`), `?per=` up to **30** (`MaxMatrixPer`) | 144 cells = 32 KB of cells at 225 B; measured default view 75,166 B on the shipped posture. 20 per axis (400 cells) measured 135,764 B on the fixture corpus and would leave 2,093 B of the 300 KiB first-load row on the heaviest role — see "what did not work" |
+| filtered pages | **276** cells (`MaxMatrixCells`), rows trimmed by `matrixFit` | the widest filter the shipped corpus can produce: `?q=a` matches 23 of the mid role's 28 champions, and 23 columns × 12 rows = 276. Verified by sweeping `?q=<a-z>` across all five roles: the widest match anywhere is that 23 |
+| the rest of the matrix | a pager (`?page=`, `nojsPager`) plus the champion links for the **whole pool**, and a note that says what was left out | windowing must not make a champion unreachable, and a bounded grid must not read as a complete one |
+
+Three disclosures were added to the note under the grid — how many of the role's pairings the artifact
+stores, that the rows and columns are the champions it stores a cell for, and how many of the pool's
+links are outside the window — because a windowed matrix with no note is a page that lies about being
+complete. `published` was also double-counting: it counted each published pair once per mirror cell, so
+it read as twice the artifact's stored pairs.
+
+**Measured, both postures** (raw HTML bytes, `curl --compressed`, document resource only; "before" = the
+tree as it stood when r3/r4 were taken, "after" = this change):
+
+| route | fixture before | fixture after | live before (pod) | live after |
+| --- | --- | --- | --- | --- |
+| `/matchups/mid/` | 171,383 B (784 cells) | **75,166 B** (144) | 2,768,758 B (26,896) | **49,870 B** (4) |
+| `/matchups/top/` | 135,291 B (484) | **74,797 B** (144) | 33,881 B (0) | 33,881 B (0) |
+| `/matchups/jungle/` | 216,183 B (1,089) | **75,693 B** (144) | 33,923 B (0) | 33,923 B (0) |
+| `/matchups/bottom/` | 243,111 B (1,156) | **75,888 B** (144) | 2,100,737 B (20,164) | **68,068 B** (100) |
+| `/matchups/support/` | 151,018 B (576) | **74,973 B** (144) | 2,609,770 B (25,281) | **56,527 B** (36) |
+| worst shape the URL can ask for | — | 101,564 B (`?per=200`, clamped to 276 cells) | — | 68,068 B |
+
+The fixture column is the shipped product wherever the tier runs `LOLSTATS_AGG_FIXTURES=only`, which is
+what `deploy/base/config.yaml:86` sets for the deployment the edge will dial. Worst default view after
+the change: **75,888 B (74.1 KiB)** against the 150 KiB row, and roughly 245 KB of first-load against the
+300 KB row (74.1 KiB of document + the 165.4 KiB of fonts, CSS and JS that every route carries, §11.3).
+The two rows this route was failing are the two rows it now passes with ~1.7-1.9× of margin.
+
+**The cross-check that makes the live column admissible.** The live "after" figures are from a local
+binary serving a copy of the pod's own artifacts (`LOLSTATS_AGG_ROOT`, recipe below). Before the change
+that copy rendered **byte for byte** what the pod served on all five roles (mid 2,768,758, bottom
+2,100,737, support 2,609,770, top 33,881, jungle 33,923), so the posture is the pod's posture and the
+after figures are the same measurement repeated with this change applied — not a reconstruction guess.
+
+**Lighthouse, measured on both postures after the change.** r7 is the first round this project has
+measured in the posture the deployment actually ships (`LOLSTATS_AGG_FIXTURES=only`), and the first to
+sample all five matchup roles; r8 repeats the live posture. Commands and targets in "Reproduce" below.
+**Both are Go-tier measurements — a local binary serving the same artifacts — not edge measurements.**
+Scores are `perf / a11y / bp / seo`.
+
+| route | r7 fixture: HTML raw | gz | first-load | scores | r7 verdict | r8 live: HTML raw | first-load | scores | r8 verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `/matchups/mid/` | **75,166 B (73.4 KiB)** | 12.1 KiB | **244,507 B (238.8 KiB)** | 99/100/100/100 | **PASS** | 49,870 B (48.7 KiB) | 219,211 B (214.1 KiB) | 99/100/100/100 | **PASS** |
+| `/matchups/top/` | 74,797 B (73.0 KiB) | 12.0 KiB | 244,138 B (238.4 KiB) | 99/100/100/100 | **PASS** | 33,881 B (33.1 KiB) | 198,660 B (194.0 KiB) | 99/100/100/100 | **PASS** |
+| `/matchups/jungle/` | 75,693 B (73.9 KiB) | 12.1 KiB | 245,034 B (239.3 KiB) | 99/100/100/100 | **PASS** | not sampled | — | — | — |
+| `/matchups/bottom/` | 75,888 B (74.1 KiB) | 12.1 KiB | 245,229 B (239.5 KiB) | 99/100/100/100 | **PASS** | not sampled | — | — | — |
+| `/matchups/support/` | 74,973 B (73.2 KiB) | 11.9 KiB | 244,314 B (238.6 KiB) | 99/100/100/100 | **PASS** | not sampled | — | — | — |
+| `/champions/ahri/mid/` | 34,592 B | 7.6 KiB | 227,882 B | 99/100/100/**69** | **FAIL** (SEO) | 34,660 B | 227,950 B | 99/100/100/**69** | **FAIL** (SEO) |
+| all other sampled routes | 42,362-64,345 B | 9.5-11.4 KiB | 207,141-231,036 B | 99/100/100/100 | PASS | 42,390-65,453 B | 207,169-232,144 B | 99/100/100/100 | PASS |
+
+**r7: 10 of 11 routes PASS. r8: 7 of 8 routes PASS.** The only failing route in either round is
+`/champions/ahri/mid/`, on the SEO row, `failingAudits: ["is-crawlable"]` — the defect §6.2 escalated and
+this lane was told to measure rather than fix. It is not a weight failure and this change did not touch
+it. Every matchup role now sits **19.7% under** the 300 KB first-load row (worst 245,229 B) and **50.6%
+under** the 150 KB HTML row (worst 75,888 B), on the posture the edge will dial, including the three
+roles (`jungle`, `support`, `bottom`) no earlier round had ever sampled.
+
+**Reproduce** (the exact commands behind the numbers above; ports are arbitrary, each server must be
+built from this tree):
+
+```bash
+go build -o bin/web-fixture ./cmd/webtier                     # fixture posture = shipped posture
+LOLSTATS_AGG_FIXTURES=only LOLSTATS_WEB_ADDR=127.0.0.1:18946 ./bin/web-fixture &
+curl -s --compressed http://127.0.0.1:18946/matchups/mid/ | wc -c                       # 75166
+scripts/perf/lighthouse-routes.sh --round 7 --base http://127.0.0.1:18946
+
+# live posture: the pod's own artifacts, copied out of the cluster (a live run cannot use the
+# fixtures tree — see "what did not work" 4). $AGG below is that copy.
+LOLSTATS_AGG_ROOT=$AGG LOLSTATS_WEB_ADDR=127.0.0.1:18945 ./bin/web-live &
+curl -s --compressed http://127.0.0.1:18945/matchups/mid/ | wc -c                       # 49870
+scripts/perf/lighthouse-routes.sh --round 8 --base http://127.0.0.1:18945
+
+# the bound, as a test rather than a comment: fetches 7 shapes and fails on bytes served
+go test -count=1 ./internal/webtier/ -run TestServedMatrixFitsThePlanBudgetByMeasurement -v
+```
+
+**The bound is enforced by a measurement, not by the comment above it.**
+`TestServedMatrixFitsThePlanBudgetByMeasurement` fetches `/matchups/{mid,bottom,top}/` plus
+`?q=a`, `?page=2`, `?per=30&page=2` and `?q=riven&page=2` from the fixture tier and fails if any
+served document exceeds **100,000 B** (default view) or **150,000 B** (a query that asks for the
+widest filter the URL can express). The measured worst of those seven shapes is 101,286 B. The unit
+costs the window is built on are measured too, not assumed: **225 B** for a published cell, **99 B**
+for a dash cell, **33,881-50,716 B** of page furniture (chrome, links, legend).
+
+**What did not work** (the useful part, and the reason several numbers above are what they are):
+
+1. **A window of 20 per axis (400 cells).** Computed from the first cell measurements, it looked
+   affordable. Measured, the heaviest fixture role rendered 135,764 B and its first-load would have
+   been 305,107 B against the 300 KiB (307,200 B) row — **2,093 B of headroom on the one role the
+   harness's route set does not sample.** That measurement, not taste, is why the default is 12.
+2. **`MaxMatrixCells = 240`.** This lane's own test caught it: `matrixFit(23, 12) = 10, want 12` — a
+   23-column filter cannot page 12 rows out of 240 cells, so a filtered page would have paged
+   differently from the grid it filters. 276 is the smallest value that keeps a complete row, and it
+   is also the corpus worst case (see the table above). The failing assertion is the evidence that the
+   value is derived rather than chosen.
+3. **`Query.Href` cannot address a page of this grid.** It emits `?page=` only when `?per=` is present,
+   so page 2's "Previous" link rendered `href=""`. Found by fetching the link and comparing it to the
+   page it claimed to be, not by reading the template; `matrixPageHref` builds the href explicitly.
+4. **A live-posture local run cannot use the fixtures tree.** `LOLSTATS_AGG_FIXTURES=only` forces the
+   demo posture, and a demo tree pointed at a live tier is refused with 503
+   (`internal/webtier/artifacts.go`). The honest live posture needs the pod's artifacts copied out
+   (`LOLSTATS_AGG_ROOT`), which is what r8 and the live column above did.
+5. **Dropping the `data-astro-cid-...` attributes** would have removed ~663 KB from the 2.8 MB page
+   (27 B per cell) — the single biggest byte win available on it. **Rejected**: those attributes are
+   the frozen layer's CSS selectors, and rewriting 189 + 200 selector sites to save bytes on a route
+   the window already fixes is a styling-contract change, not a budget fix.
+6. **`published` counted every published pair twice**, once per mirror cell, so the note under the grid
+   reported double what the artifact stores. Found by comparing the rendered note against the
+   artifact's own stored pairs, and fixed by counting the deduplicated pair set.
+7. **Two theories about the r5 measurement were wrong**, and are recorded as wrong: the 2,768,758 B
+   page was not a cached copy of a stale artifact (a fresh local fetch of the pod's artifacts
+   reproduced it byte for byte) and the fixtures tree had not been overwritten by another lane (its
+   sha256 and mtimes were unchanged; the "same timestamp" that suggested it was the demo tree's fixed
+   `generated_at` stamp). Both were settled by fetching and hashing, not by argument.
+8. **The r1/r2 26.4 KiB reading was never reproduced.** Three later rounds on the same route and tier
+   measured 164,502 B (r3/r4), 2,768,758 B (r5) and now 75,166/49,870 B. The number was real when
+   measured; it is not a property of the route, which is the whole point of this section.
+
+**What this section does NOT establish.** No row above is a production measurement. Every one was
+taken against the Go tier — r7/r8 against a local binary holding the same artifacts, r3/r4 the same,
+r1/r2/r5 through the coordinator's port-forward — and the public edge still dials the older static
+tier. The traffic ceiling §7.4 states is a *served-bytes* ceiling, so §11.8's post-cutover run against
+the real edge remains the measurement that closes it.
