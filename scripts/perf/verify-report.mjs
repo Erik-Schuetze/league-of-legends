@@ -853,14 +853,21 @@ const roundTimes = (round) => {
   if (!existsSync(p)) return [];
   return json(p).map((r) => json(r.file).fetchTime);
 };
-const newest = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
-  .flatMap((k) => roundTimes(k))
-  .sort()
-  .at(-1);
+// The round list is read from the evidence directory, never enumerated here. It used to be the literal
+// `['1' … '9']`, which asserted that the newest round opened inside r9's clock window and went on
+// passing after r10 landed — because r10 was not in the list. That is the same failure this whole block
+// exists to catch (a constant that outlives the round it was written for), so the list is derived and
+// the assertion is an equality against the round the rest of the gate has already selected.
+const roundTimesList = readdirSync(EV)
+  .filter((f) => /^lh-summary-r\d+\.json$/.test(f))
+  .map((f) => String(Number(/-r(\d+)\.json$/.exec(f)[1])))
+  .sort((a, b) => Number(a) - Number(b));
+const oldestRound = roundTimesList[0];
+const newest = roundTimesList.flatMap((k) => roundTimes(k)).sort().at(-1);
 checkTrue(
-  'the newest committed round by fetchTime is r9, which is what §5 calls the current state',
-  /^2026-09-18T02:4/.test(newest),
-  `${newest} (r1/r2 open at ${roundTimes('1').sort()[0]})`,
+  'the newest committed round by the reports\' own fetchTime is the round §5 calls the current state',
+  newest === NEWEST.fetchTime && newest > (roundTimes(oldestRound).sort()[0] ?? ''),
+  `reports say ${newest}, the gate's selection says r${NEWEST.round} (${NEWEST.fetchTime}); r${oldestRound} opens at ${roundTimes(oldestRound).sort()[0]}`,
 );
 checkTrue(
   '§5.2 states the round order by fetchTime and names the growth it is about',
