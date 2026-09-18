@@ -444,8 +444,12 @@ func (r *Renderer) ExplorePage(values url.Values, interactive bool) (*Page, erro
 	// judged against, so a floor above the snapshot's own is how a cell that is
 	// published becomes a cell this view may not print.
 	selected := exploreFilteredCells(measured, filter)
+	// The counts the view states about itself are counted over the selection it
+	// renders, not over the whole snapshot: "n = 166,917 games in Jungle" is a
+	// claim about the artifact that the artifact does not support when Jungle
+	// holds 33,898 of them.
 	published, cellGames := 0, 0
-	for _, cell := range measured {
+	for _, cell := range selected {
 		if CellAvailabilityOf(cell.N, filter.Floor) == AvailabilityPublished {
 			published++
 			cellGames += cell.N
@@ -461,6 +465,17 @@ func (r *Renderer) ExplorePage(values url.Values, interactive bool) (*Page, erro
 		}
 	}
 	hasSample := snap.HasSeg && len(measured) > 0
+
+	// The artifact's withheld count is a statement about the whole snapshot at
+	// the producer's own floor. It is rendered snapshot-wide in the metadata
+	// line below. A sentence that describes this view — its role and its floor —
+	// must not carry it, because "513 further cells below that threshold" is not
+	// true of a threshold this view invented or of a role this view narrowed to.
+	raised := snap.Partition != nil && filter.raised(snap.Partition)
+	withheld := suppressed
+	if raised || filter.Role != "" {
+		withheld = nil
+	}
 
 	rows := TierListRows(selected, site, filter.Floor, true)
 	columns := exploreColumns()
@@ -482,7 +497,7 @@ func (r *Renderer) ExplorePage(values url.Values, interactive bool) (*Page, erro
 		StatusText: statusText(len(window), len(ordered), ColumnLabel(columns, query.Sort), query.Dir),
 		Rows:       window,
 		ColCount:   len(columns),
-		Note:       trustedHTML(islandNote(filter.Floor, suppressed)),
+		Note:       trustedHTML(islandNote(filter.Floor, withheld)),
 	}
 	island.Caption = exploreCaption(snap, filter)
 
@@ -498,14 +513,14 @@ func (r *Renderer) ExplorePage(values url.Values, interactive bool) (*Page, erro
 		FloorText:    IntegerAny(float64(filter.Floor)),
 		MinCellN:     minCellN,
 		MinCellNText: IntegerAny(float64(minCellN)),
-		Raised:       snap.Partition != nil && filter.raised(snap.Partition),
+		Raised:       raised,
 		Notes:        notes,
 		HasRows:      len(window) > 0,
 		HasSample:    hasSample,
 		Island:       island,
 		ShowRole:     true,
-		Notice:       sampleNotice(cellGames, filter.Floor, suppressed, roleFor(filter.Role)),
-		Note:         trustedHTML(columnAvailabilityNote(filter.Floor, suppressed)),
+		Notice:       sampleNotice(cellGames, filter.Floor, withheld, roleFor(filter.Role)),
+		Note:         trustedHTML(columnAvailabilityNote(filter.Floor, withheld)),
 		Empty:        exploreEmpty(snap, filter, published),
 		Intro:        exploreIntro(snap),
 		Tail:         exploreTail(snap, filter),

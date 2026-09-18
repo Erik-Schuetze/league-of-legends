@@ -19,6 +19,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -409,6 +410,221 @@ func TestExploreWithNoSnapshotIsAFaultAndNotAnEmptyTable(t *testing.T) {
 		if strings.Contains(page, `data-v-champion=`) {
 			t.Errorf("GET %s with no snapshot rendered table cells anyway", path)
 		}
+	}
+}
+
+// TestExploreRendersAPublishedCellValueForValue is the test that would have
+// caught the honesty defect this project already shipped once: it does not
+// settle for a 200, a row count or a column name. It renders one cell of a
+// snapshot in the shape the producer actually writes — `source:
+// "riot-match-v5"`, `min_cell_n` of a hundred games, hundreds of suppressed
+// cells against a single published one — and asserts the exact string in every
+// column, the exact island attribute every column sorts on, the live data state
+// the source implies, and the withheld count the artifact declares.
+//
+// The snapshot is built by rewriting the checked-in demo tree rather than by
+// hand-writing a document, so a field the producer adds to the manifest or the
+// tier list is carried into the test instead of being silently dropped from it.
+func TestExploreRendersAPublishedCellValueForValue(t *testing.T) {
+	t.Parallel()
+	live := publishedTier(t)
+
+	resp := get(t, live, explorePath)
+	if resp.status != 200 {
+		t.Fatalf("GET %s over a published snapshot = %d, want 200", explorePath, resp.status)
+	}
+	page := resp.text()
+
+	// A snapshot whose source is Riot match data is live, and the page has to
+	// say so on the same element the banner and the fault pages use.
+	if !strings.Contains(page, `data-state="live"`) {
+		t.Errorf("the page does not declare a riot-match-v5 snapshot live")
+	}
+	if strings.Contains(page, `data-state="demo"`) {
+		t.Errorf("the page declares a riot-match-v5 snapshot as the demo fixture")
+	}
+
+	rows := exploreTableRows(t, page)
+	if len(rows) != 1 {
+		t.Fatalf("the snapshot publishes 1 cell and the explorer rendered %d rows", len(rows))
+	}
+	cells := exploreCellText(t, rows[0])
+	want := []string{"Kennen", "Top", "S+", "233", "55.79%", "1.19%", "1.00%", "+/- 6.42 pp"}
+	if len(cells) != len(want) {
+		t.Fatalf("the row holds %d cells, want %d: %q", len(cells), len(want), cells)
+	}
+	for index, expected := range want {
+		column := exploreRequiredColumns[index]
+		if index == 2 {
+			// The tier column carries a badge around the grade.
+			if !strings.Contains(cells[index], expected) {
+				t.Errorf("the %s cell reads %q, want it to carry %q as the artifact publishes it",
+					column, cells[index], expected)
+			}
+			continue
+		}
+		if cells[index] != expected {
+			t.Errorf("the %s cell reads %q, want %q as the artifact publishes it", column, cells[index], expected)
+		}
+	}
+
+	// The island re-sorts the table on these attributes, so a column that
+	// renders the artifact's number in text but a different number in markup
+	// would sort into a different table than the one that was sent.
+	for _, attribute := range []string{
+		`data-v-champion="Kennen"`,
+		`data-v-role="0"`, // the island sorts roles by their frozen order, not by label
+		`data-v-tier="6"`, // and tiers by grade rank: S+ is the sixth step
+		`data-v-n="233"`,
+		`data-v-win_rate="0.5579"`,
+		`data-v-pick_rate="0.0119"`,
+		`data-v-ban_rate="0.01"`,
+		`data-v-ci95="0.0642"`,
+	} {
+		if !strings.Contains(rows[0], attribute) {
+			t.Errorf("the published row carries no %s:\n%s", attribute, rows[0])
+		}
+	}
+	if !strings.Contains(rows[0], `href="/champions/kennen"`) {
+		t.Errorf("the champion cell does not link to the artifact's champion 85:\n%s", rows[0])
+	}
+
+	// Missing is not zero: the sample floor and the withheld count are both
+	// published, so the page cannot imply that a thin cell measured a zero.
+	for _, want := range []string{
+		"at least n = 100 games",
+		"532 further cells below that threshold are withheld from the artifact",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page does not carry %q", want)
+		}
+	}
+}
+
+// publishedTier serves a snapshot in the shape the producer writes: the checked
+// in demo tree with its manifest and its 16.18 tier list replaced by the one
+// cell a live publication of this shape holds. Everything else — the layout,
+// the static champion projection, the partition paths — stays as it is, so the
+// only difference between this tree and the demo one is the data.
+func publishedTier(t *testing.T) *httptest.Server {
+	t.Helper()
+	opts := OptionsFromEnv()
+	opts.AggRoot = publishedSnapshot(t)
+	opts.FixturesMode = FixturesOff
+	_, live := newTestServer(t, opts)
+	return live
+}
+
+func publishedSnapshot(t *testing.T) string {
+	t.Helper()
+	dst := filepath.Join(t.TempDir(), "agg")
+	copyTree(t, fixtureDir(), dst)
+
+	// The producer's first published cell, read off the live snapshot.
+	cell := map[string]any{
+		"champion_id":     85,
+		"role":            "TOP",
+		"n":               233,
+		"wins":            130,
+		"win_rate":        0.5579,
+		"pick_rate":       0.0119,
+		"ban_rate":        0.01,
+		"tier":            "S+",
+		"ci95_half_width": 0.0642,
+	}
+	window := map[string]any{"from": "2026-09-08", "to": "2026-09-14"}
+	partition := map[string]any{
+		"patch":            "16.18",
+		"region":           "EUW",
+		"queue":            420,
+		"bracket":          "all",
+		"generated_at":     "2026-09-15T04:10:00Z",
+		"source_window":    window,
+		"min_cell_n":       100,
+		"suppressed_cells": 532,
+		"cells_published":  1,
+		"build_run_id":     12,
+		"git_sha":          "0000000000000000000000000000000000000012",
+		"champions":        []int{85},
+		"matchup_roles":    []string{"TOP"},
+	}
+
+	tierList := filepath.Join(dst, "v1", "p", "16.18", "EUW", "420", "all", "tierlist.json")
+	document := readJSONDocument(t, tierList)
+	document["source"] = "riot-match-v5"
+	for key, value := range partition {
+		document[key] = value
+	}
+	document["cells"] = []any{cell}
+	writeJSONDocument(t, tierList, document)
+
+	manifest := filepath.Join(dst, "v1", "manifest.json")
+	document = readJSONDocument(t, manifest)
+	document["source"] = "riot-match-v5"
+	document["latest"] = partition
+	document["partitions"] = []any{partition}
+	writeJSONDocument(t, manifest, document)
+	return dst
+}
+
+// TestExploreScopesItsSampleSentenceToItsOwnView stops the page from stating a
+// number the artifact does not support. "Sample: n = 166,917 games in Jungle in
+// this snapshot" is false when Jungle holds 33,898 of them, and a withheld count
+// counted against the producer's floor is not a fact about a threshold this view
+// chose. Both numbers exist on the page; neither may be attached to the wrong
+// scope.
+func TestExploreScopesItsSampleSentenceToItsOwnView(t *testing.T) {
+	t.Parallel()
+	_, live := newTestServer(t, fixtureOptions())
+
+	artifact := exploreReadArtifact(t)
+	games := func(role aggmodel.Role) int {
+		total := 0
+		for _, cell := range artifact.Cells {
+			if role != "" && cell.Role != role {
+				continue
+			}
+			if CellAvailabilityOf(cell.N, artifact.MinCellN) == AvailabilityPublished {
+				total += cell.N
+			}
+		}
+		return total
+	}
+	all, jungle := games(""), games(aggmodel.RoleJungle)
+	if jungle == 0 || jungle == all {
+		t.Fatalf("the fixture cannot tell the two scopes apart: all %d, jungle %d", all, jungle)
+	}
+
+	every := get(t, live, explorePath).text()
+	if !strings.Contains(every, "n = "+IntegerAny(float64(all))+"</strong> games in this snapshot") {
+		t.Errorf("the snapshot notice does not report the snapshot's own sample")
+	}
+	if !strings.Contains(every, IntegerAny(float64(artifact.SuppressedCells))+
+		" further cells below that threshold are withheld from the artifact") {
+		t.Error("the snapshot notice does not report the cells the producer withheld")
+	}
+
+	narrowed := get(t, live, explorePath+"?role=jungle").text()
+	if !strings.Contains(narrowed, "n = "+IntegerAny(float64(jungle))+"</strong> games in Jungle in this snapshot") {
+		t.Errorf("the role view does not report its own sample; the artifact holds %d Jungle games of %d",
+			jungle, all)
+	}
+	if strings.Contains(narrowed, "further cells below that threshold are withheld from the artifact") {
+		t.Error("the role view repeats the producer's snapshot-wide withheld count as if it were counted in Jungle")
+	}
+	if !strings.Contains(narrowed, IntegerAny(float64(artifact.SuppressedCells))+
+		" cells below the snapshot threshold were withheld from the artifact") {
+		t.Error("the snapshot's own withheld count is no longer on the page")
+	}
+
+	floor := 2 * artifact.MinCellN
+	raised := get(t, live, explorePath+"?min_n="+strconv.Itoa(floor)).text()
+	if strings.Contains(raised, "further cells below that threshold are withheld from the artifact") {
+		t.Error("a raised floor attributes the producer's withheld count to the view's own threshold")
+	}
+	if !strings.Contains(raised, "only above n = "+IntegerAny(float64(floor))+" games, which is above the floor of "+
+		IntegerAny(float64(artifact.MinCellN))+" games the snapshot was filtered at") {
+		t.Error("a raised floor does not say which floor belongs to the snapshot and which to the view")
 	}
 }
 
