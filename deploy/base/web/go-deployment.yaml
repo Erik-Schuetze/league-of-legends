@@ -20,6 +20,24 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    # sha-4afb043: the revision that scopes the explorer's own numbers to the view
+    #   that states them.
+    #   - two sentences on /explore claimed figures the artifact does not support.
+    #     "Sample: n = ... games in <role>" counted every published cell while the
+    #     table rendered only that role's, so each role view attributed the whole
+    #     snapshot's games to itself; and the producer's withheld count was
+    #     appended to the floor sentence whenever a floor was printed, so a reader
+    #     who raised the floor, or narrowed to one role, read a count that was
+    #     never taken in that scope. Measured on the edge against the build of
+    #     sha-75ef944: /explore renders `513 further cells were withheld for being
+    #     below the threshold.` three times, and the sentence is identical on the
+    #     unfiltered view and on a role-narrowed one.
+    #   - the sample is now counted over the rows the view actually renders, and
+    #     the withheld count is stated snapshot-wide only, where it is true.
+    #     view_explore_test.go asserts both, and fails on the previous revision
+    #     with three messages naming the wrong scope. Page size moves with the
+    #     sentences; **no route, indexability or data changes**.
+    #
     # sha-75ef944: the revision that makes every URL the site advertises one shape.
     #   - the site named its URLs two ways while serving them: rel=canonical,
     #     og:url and the structured-data url node carried the trailing-slash form,
@@ -86,7 +104,7 @@ metadata:
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:7cbb40860341c728ee177612c78b153661528eeab82a5a0fbe4a96015aad33f7
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:5031f92f5523d2f6fbb76cebf5a94ae143a5acfb7fdde73f10911228dcefb6ff
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
