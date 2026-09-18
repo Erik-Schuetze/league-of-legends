@@ -27,6 +27,15 @@ short. "Breaking" means something that used to work no longer does.
 - `docs/architecture.md`, `docs/data-sources.md`, `docs/compliance.md`.
 - `docs/decisions/ADR-001` to `ADR-004`.
 - `fixtures/` - hand-authored sample payloads with their provenance.
+- `lolstats-aggregate build` gained a provenance gate
+  (`LOLSTATS_AGG_REQUIRE_PROVENANCE`, `-require-provenance`,
+  `internal/aggregate/provenance.go`). With it on, a build that cannot name the
+  revision it was built from and the `build_runs` row the run opened fails as
+  `unrecorded_provenance` before the extraction runs, instead of publishing
+  `build_run_id 0` and `git_sha "unknown"`. The default is `false` and nothing
+  in `deploy/` sets the variable, so the deployed nightly build still runs
+  without the gate; adding the key to `deploy/base/config.yaml` is what turns it
+  on. Fixture builds, offline verification and `demo` are unaffected either way.
 
 ### Removed
 

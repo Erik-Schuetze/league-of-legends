@@ -121,6 +121,30 @@ type GateConfig struct {
 	// fraction of the window, and a rate ceiling rejects that just as an
 	// absolute one did.
 	MaxRejectedRate float64
+
+	// RequireProvenance makes the build refuse to publish an artifact that
+	// names neither the revision it was built from nor the build_runs row the
+	// run was recorded in.
+	//
+	// It is a gate rather than a warning because the two values it guards are
+	// the only link between a published rate and the commit that produced it,
+	// and because the schema requires both keys: an unrecorded build publishes
+	// build_run_id 0 and git_sha "unknown" - values that cannot name a row or a
+	// revision, but that nothing in the artifact says are absent either. A
+	// zero that reads like data is worse than no artifact, so the gate exists
+	// to stop a run rather than let it publish one.
+	//
+	// The default is false, which keeps a fixture build, an offline
+	// verification and `lolstats-aggregate demo` working with no database and
+	// no image revision to name. Nothing in `deploy/` sets
+	// LOLSTATS_AGG_REQUIRE_PROVENANCE today, so the nightly build runs with
+	// that default and can publish build_run_id 0 and git_sha "unknown";
+	// setting the key in `deploy/base/config.yaml` is what turns the gate on.
+	//
+	// A record is only required, never invented: nothing here derives a
+	// revision from the tree, so the gate can fail a run but cannot make a
+	// published one plausible.
+	RequireProvenance bool
 }
 
 // DefaultGateConfig is what a build uses unless the operator overrides it.
@@ -306,6 +330,7 @@ var knownFailures = []struct {
 	{ErrArchiveEmpty, "archive_empty"},
 	{ErrMalformedArchive, "malformed_archive"},
 	{ErrEmptyWindow, "empty_window"},
+	{ErrUnrecordedProvenance, "unrecorded_provenance"},
 	{ErrRejectedRows, "rejected_rows"},
 	{ErrReconciliation, "reconciliation"},
 	{ErrSuppressionMajority, "suppression_majority"},

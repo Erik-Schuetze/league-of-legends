@@ -226,14 +226,15 @@ func crawlMaxAgeDefault(getenv config.Getenv) (time.Duration, error) {
 
 // gitSHA is the revision recorded in the manifest and the audit row so a
 // published number has a commit behind it. The image sets GIT_SHA at build
-// time; without it the value says so rather than pretending to be a revision.
+// time; without it the value says so rather than pretending to be a revision,
+// and a build that requires provenance refuses to publish it.
 func gitSHA(getenv config.Getenv) string {
 	for _, key := range []string{"GIT_SHA", "LOLSTATS_GIT_SHA"} {
 		if value, ok := getenv(key); ok && strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
 		}
 	}
-	return "unknown"
+	return aggregate.UnknownGitSHA
 }
 
 // auditor opens the build_runs recorder for one run.
