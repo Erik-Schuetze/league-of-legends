@@ -484,13 +484,14 @@ would be indistinguishable from real data afterwards.
 | staging, trash, raw scratch, `build-runs/` | `0o750` | `0o640` |
 
 The modes are named in `internal/aggregate/perms.go`, which carries the full
-argument; the short version is that the writer and the reader are different
+argument; the short version is that the writer and the reader used to be different
 uids with different groups. The aggregate job runs as `65532:65532` with
-`fsGroup: 65532` (`deploy/base/jobs/aggregate.yaml`), and the serving tier reads
+`fsGroup: 65532` (`deploy/base/jobs/aggregate.yaml`), and the Go serving tier read
 the same tree as the image's distroless nonroot uid, which is the same `65532`
-(`deploy/base/web/go-deployment.yaml`). Two other workloads used to read it - the
-`site-build` job (`1000:1000`) and the inner Caddy serving `/var/lib/lolstats/agg`
-with `file_server` - and both were deleted with the static tier.
+(`deploy/base/web/go-deployment.yaml`) - deleted on 2026-09-18, so the job is now
+the only reader. Two other workloads used to read it - the `site-build` job
+(`1000:1000`) and the inner Caddy serving `/var/lib/lolstats/agg` with
+`file_server` - and both were deleted with the static tier.
 The volume is the `nfs-client` StorageClass, and the kubelet cannot chown an NFS
 export, so `fsGroup` is not honoured there: the group on disk stays whatever the
 writer left and two workloads do not share one. That is why the pre-existing
@@ -561,8 +562,8 @@ generated population of 2000 matches on a fixed patch and window. Two runs in
 the same binary produce byte-identical files.
 
 It exists for exactly one reason: no Riot API key is available in the
-development and CI environments, and the frontend needs a shape-correct artifact
-set to render against. It is made impossible to mistake for real data:
+development and CI environments, and a reader needs a shape-correct artifact set
+to render against. It is made impossible to mistake for real data:
 
 - `manifest.json` and every envelope carry `"source": "demo"`; a real build
   always writes `"source": "riot-match-v5"`;
@@ -653,7 +654,7 @@ lolstats-aggregate verify --agg ./agg --strict --max-age 48h
 go run ./cmd/gen-types -out ./gen
 lolstats-aggregate verify --agg ./out --schema ./gen/agg.schema.json --source demo
 
-# a deterministic simulated set for frontend work
+# a deterministic simulated set for presentation work
 lolstats-aggregate demo --out ./out
 
 # re-index a tree whose manifest was lost, without rebuilding anything
@@ -714,7 +715,7 @@ an entry that was already in the manifest keeps the values it had.
   is not derived from it. Grading `(win_rate - baseline)` after shrinking
   towards the baseline by the half width would stop a 30-game wonder from
   outranking a 30,000-game staple. That is a scoring change, so it belongs in a
-  patch where the frontend can be diffed against the old ladder.
+  patch where two ladders can be diffed against each other.
 - **Suppress build rows below `min_cell_n`** the way matchup pairs already are,
   if review shows rare item sets with a loud win rate are being read as advice.
 - **A real rank bracket.** The path element is in place; attributing a rank to

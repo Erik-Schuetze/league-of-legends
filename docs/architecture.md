@@ -39,22 +39,22 @@ alternative behind them live in `docs/decisions/`; this page is the map.
                                 manifest.json (patches, n per cell, suppressed cells)
                                            |
                                            v
-                                +---------------------+      +---------------+
-                                |  lolstats-web       | ---> |  shared Caddy | --> users
-                                |  (Go tier, Deploy)  |      |  (ns `web`)   |
-                                |  renders every      |      |  TLS, proxy   |
-                                |  route from agg/v1  |      +---------------+
-                                +---------------------+
+                                           |
+                                           v
+                                   agg/v1/** is read from the
+                                   volume by whatever needs it
+                                 (no server in this repository)
 ```
 
 The two properties worth noticing:
 
 **Nothing leaves the origin at request time.** Every number and every sentence is
-derived inside the cluster: the Go tier renders a route from the artifacts on its
-volume and from nothing else. There is no request path to a database, no
-third-party call, no analytics and no font or CDN fetch from the browser, so there
-is no query to make slow, no connection pool to exhaust and no upstream that can
-rate-limit or observe a reader.
+derived inside the cluster from the artifacts on the volume and from nothing else.
+There is no request path to a database, no third-party call, no analytics and no
+font or CDN fetch from the browser, so there is no query to make slow, no
+connection pool to exhaust and no upstream that can rate-limit or observe a
+reader. Since 2026-09-18 there is also no renderer in this repository: the
+artifacts are the deliverable, and whoever displays them reads files.
 
 **There are exactly two stores, and they hold different kinds of thing.**
 Postgres holds control-plane state whose write volume is bounded by pipeline
@@ -142,9 +142,9 @@ control metadata. That is what makes a rebuild reproducible from a pinned image
 digest, and what makes "Riot changed the payload" an additive transform change
 rather than an emergency.
 
-**The frontend never computes a statistic.** Every number it renders arrives
-pre-computed, with its `n`. Suppression happens in the aggregate build, so a
-thin cell cannot reach a page even by accident.
+**No consumer computes a statistic.** Every number in the tree arrives
+pre-computed, with its `n`. Suppression happens in the aggregate build, so a thin
+cell cannot reach a reader even by accident.
 
 **The binaries never write to their own image.** Raw archive, aggregate output
 and the site volume are mounts. The runtime image is distroless and nonroot.

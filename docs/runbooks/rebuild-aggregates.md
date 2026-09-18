@@ -63,19 +63,21 @@ re-running it with better inputs.
 There is one revert that is not a re-run: `lolstats-aggregate manifest --agg
 /var/lib/lolstats/agg --source riot-match-v5 --patch <old-patch>` re-derives the
 manifest from the tree and repoints `latest` at the patch you name, rewriting no
-partition. The tier serves that patch's own bytes again within one cache key, and
-the patch you repointed away from stays on disk and stays addressable at
-`/patch/<it>/...` for inspection.
+partition. A reader that follows the manifest resolves that patch's own bytes
+again, and the patch you repointed away from stays on disk and stays addressable
+at `/patch/<it>/...` for inspection.
 
 What it cannot do is *remove* a partition. The manifest is a union of the disk
 manifest, a scan of the tree and the current build, so an entry that is already
 listed survives every re-index; a stale partition can only be repointed away from
 or overwritten in place. And a partition that is deleted while the manifest still
-advertises it makes the tier **fail closed**: every page route and `/readyz`
-answer `503` with `data-fault="artifact"` rather than serving the previous
-patch's numbers under the new one's label. The first is a property of
-`internal/aggregate`'s index; the second is asserted by
-`TestMissingArtifactIs503WithAPage` in `internal/webtier/server_test.go`.
+advertises it makes a **fail-closed** reader mandatory rather than optional: a
+reader must present an error, never the previous patch's numbers under the new
+one's label. The first is a property of `internal/aggregate`'s index. The second
+was asserted by `TestMissingArtifactIs503WithAPage` in `internal/webtier/server_test.go`
+until that package was deleted on 2026-09-18, so it is now a requirement written
+in `docs/contracts.md` section 4.4 with no test behind it - `docs/compliance.md`
+records the gap.
 
 ## Re-run the build
 
@@ -98,22 +100,30 @@ delete it when you are done, or let the TTL do it.
 Its log is the build's own output. The numbers it reports are also written to the
 `build_runs` table, which is what the alerts and the verification below read.
 
-## Then check that it is being served
+## Then check the tree
 
-There is nothing to rebuild after the aggregate job: the tier reads the tree it
-just published. What can still be wrong is the tier's own copy of a page, which
-it caches for up to 60 seconds.
+There is nothing to rebuild after the aggregate job and no renderer to warm: the
+tree the job published is the deliverable. Check the artifact rather than a page.
 
 ```
-sh scripts/verify-serving.sh https://lol.erik-schuetze.dev
+kubectl -n lolstats exec statefulset/lolstats-postgres -- ls -l /var/lib/lolstats/agg/v1
 ```
 
-The script reads the pages rather than the status line, and fails on the two
-things a `200` hides: a body that does not end in `</html>`, and a page missing
-the labelling its own data state declares. The tier caches a rendered page for up
-to 60 seconds and revalidates it on `ETag`, so a publish is visible after at most
-one `max-age` window. A `503` with a visible error page means the tree is missing
-or unreadable, not stale.
+Read the path the manifest names, and confirm the partition directory holds the
+cells and the labelling the build reported. Two things used to be checked here and
+cannot be any more, both because the tooling was deleted on 2026-09-18 with the
+web tier:
+
+- **that the tree is being served.** A serving script used to fetch each route
+  over HTTPS and fail on a `200` that hid a body not ending in `</html>` or a page
+  missing the labelling its own data state declared. Nothing of this project
+  answers a request now, so there is no page to fetch and no script to run.
+- **that a publish is visible.** A refresh was bounded by the reader's own cache
+  (`max-age=60` with an `ETag` revalidation), so a publish showed up within one
+  `max-age` window. That is now a requirement on a future reader rather than a
+  property of anything running: `docs/contracts.md` section 4.4.
+
+What is left is the tree's own self-check, in "How to tell it worked" below.
 
 ## How to tell it worked
 

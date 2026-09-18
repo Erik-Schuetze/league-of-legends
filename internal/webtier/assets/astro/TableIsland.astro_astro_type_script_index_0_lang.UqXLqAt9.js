@@ -1,1 +1,0 @@
-import{n as e,t}from"./preload-helper.DJSjwBkS.js";e(`[data-island="table"]`,()=>t(()=>import(`./table-island.client.6YN-J6Z7.js`),[]),e=>e.initTableIsland);

@@ -1,11 +1,23 @@
-# The only route into this namespace, and it is not public: this Service is
-# what the shared Caddy in namespace `web` proxies to for lol.erik-schuetze.dev.
-# No LoadBalancer and no Ingress, so the cluster keeps exactly one address and
-# one certificate for all of its sites.
+# The route into this namespace, and it is not public: this Service is what the
+# shared Caddy in namespace `web` proxies to for lol.erik-schuetze.dev. No
+# LoadBalancer and no Ingress, so the cluster keeps exactly one address and one
+# certificate for all of its sites.
 #
-# The port is named because the shared Caddy's upstream is written as
-# `lolstats-web.lolstats.svc.cluster.local:80`; this is port 80 on the Service
-# and 8080 in the container.
+# Nothing backs it. The web tier that made it the route to a running process was
+# retired on 2026-09-18 (docs/decisions/ADR-011); no pod in this namespace
+# carries `app.kubernetes.io/component: web-go` any more, so the Service has no
+# endpoints and the shared Caddy answers 503 on the public name. That is the
+# honest state rather than a bug to route around: the site is not served.
+#
+# It is kept, selector and all, because the name, the port and the selector are
+# the contract the shared Caddy's upstream is already written against
+# (`lolstats-web.lolstats.svc.cluster.local:80`). A future serving workload
+# reintroduced under this selector becomes reachable through the existing proxy
+# config with no change outside this repository, which is the whole reason not to
+# delete the name.
+#
+# The port is named `http` and forwards to the container port named `http`, so a
+# backing workload only has to name its container port `http`.
 apiVersion: v1
 kind: Service
 metadata:

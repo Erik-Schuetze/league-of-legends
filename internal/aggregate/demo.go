@@ -19,7 +19,7 @@ import (
 // writes: this repository is developed in an environment with no Riot API key
 // and no real match archive, so without it there is no way to run the publish
 // path end to end, show a reviewer what the frozen documents look like, or
-// exercise the frontend against plausible data.
+// exercise a reader against plausible data.
 //
 // What keeps it from being confused with a real build is not a naming
 // convention and not a comment:
@@ -167,10 +167,10 @@ func Demo(opts DemoOptions) (DemoResult, error) {
 		return DemoResult{}, err
 	}
 
-	// The demo root is served too - the point of the demo tree is that a
-	// frontend reads it exactly as it reads a published one - so it is created
+	// The demo root is readable too - the point of the demo tree is that a
+	// reader takes it exactly as it takes a published one - so it is created
 	// traversable, for the same reason build does it explicitly. See perms.go.
-	if err := os.MkdirAll(opts.OutDir, publishedDirPerm); err != nil { //nolint:gosec // G301: the demo tree is read by whatever uid serves or renders it, which is not necessarily the uid that wrote it; see perms.go.
+	if err := os.MkdirAll(opts.OutDir, publishedDirPerm); err != nil { //nolint:gosec // G301: the demo tree is read by whatever uid renders or serves it, which is not necessarily the uid that wrote it; see perms.go.
 		return DemoResult{}, fmt.Errorf("create demo root: %w", err)
 	}
 	staging := filepath.Join(opts.OutDir, fmt.Sprintf("%s%d-%d", stagingPrefix, os.Getpid(), generatedAt.UnixNano()))
@@ -321,7 +321,7 @@ type demoTallies struct {
 }
 
 // demoChampion is one entry of the simulated roster. The ids are real champion
-// ids because the frontend resolves them against the static dataset; everything
+// ids because a reader resolves them against the static dataset; everything
 // else about the roster is invented.
 type demoChampion struct {
 	ID        int
@@ -334,7 +334,7 @@ type demoChampion struct {
 // than one role, and a matchup matrix whose axis spans every role, are both
 // exercised by the demo rather than being dead code paths.
 //
-// The ids are real champion ids because the frontend resolves them against the
+// The ids are real champion ids because a reader resolves them against the
 // static dataset; everything else about the roster is invented.
 var demoRoster = []demoChampion{
 	{ID: 86, Primary: aggmodel.RoleTop},

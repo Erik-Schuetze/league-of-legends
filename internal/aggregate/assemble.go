@@ -188,8 +188,8 @@ func (s *buildState) publishLive(result *BuildResult) error {
 //
 // The aggregate build does not own the static dataset and must not invent a
 // slug: it reads whatever the static sync job has published, and a champion with
-// no entry gets an empty slug. An empty slug is a link the frontend can choose
-// not to render; a guessed slug is a link that 404s while looking correct.
+// no entry gets an empty slug. An empty slug is a link a reader can choose not
+// to render; a guessed slug is a link that 404s while looking correct.
 func loadChampionSlugs(aggRoot string, log *slog.Logger) map[int]string {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)

@@ -45,23 +45,32 @@ time is:
 3. Wait. The `lolstats` application then syncs itself, and keeps itself synced
    with prune and selfHeal.
 
-The public entry point is `https://lol.erik-schuetze.dev`, served by the shared
+The public entry point is `https://lol.erik-schuetze.dev`, routed by the shared
 Caddy in namespace `web` (see `homecluster/web/caddy/configmap.yaml`), which
 reverse-proxies to `lolstats-web.lolstats.svc.cluster.local:80`. The edge Caddy
 terminates TLS; everything behind that Service is in this namespace.
 
-That Service's selector is the whole cutover, and it is a separate one-line edit
-to `base/web/service.yaml`. Until 2026-09-17 it selected `component: web`, an
-inner Caddy Deployment that served a pre-rendered tree off the data volume with a
-response cache in front of it; both that Deployment and its Caddyfile ConfigMap
-(`lolstats-site-config`) were deleted rather than kept as a fallback, together
-with the two CronJobs that produced the tree. The surviving tier is
-`component: web-go`, the Go server-rendered tier, which answers from the published
-aggregate snapshot per request - so read the selector in `base/web/service.yaml`
-itself to see which of the two acts has landed in your checkout, because this
-deletion and that flip are deliberately not the same commit. There is no Caddy in
-this namespace any more and no rendered-site tree is written; `site/` on the
-volume is what the deleted tier left behind and nothing reads it.
+**Nothing answers on that name today.** The Service is still declared
+(`base/web/service.yaml`) and still carries the `component: web-go` selector the
+Caddy upstream is written against, but the Go tier that was the only workload
+matching it was retired on 2026-09-18 (`docs/decisions/ADR-011`), so the Service
+has no endpoints and a request to the public name gets a 503 from the shared
+Caddy. The Service and the selector were kept precisely so that this is the whole
+of the outage: reintroducing a serving workload under `component: web-go` makes
+the existing proxy config live again with no edit outside this repository.
+
+The history in one paragraph, because three tiers have now come and gone and the
+`site/` tree on the volume is the sediment of the first two. Until 2026-09-17
+this Service selected `component: web`, an inner Caddy Deployment that served a
+pre-rendered tree off the data volume with a response cache in front of it; that
+Deployment, its Caddyfile ConfigMap (`lolstats-site-config`) and the two CronJobs
+that produced the tree were deleted rather than kept as a fallback. The Go
+server-rendered tier (`component: web-go`, with its Service, Deployment and
+ingress policy) replaced it and answered from the published aggregate snapshot
+per request. It was deleted on 2026-09-18 with the compliance harness that gated
+it. There is no Caddy in this namespace any more, no rendered-site tree is
+written, and no pod serves HTTP: `site/` on the volume is what the deleted tiers
+left behind and nothing reads it.
 
 ### Secrets
 
@@ -249,9 +258,9 @@ Two things to know about the data volume before you touch it:
   `argocd.argoproj.io/sync-options: Delete=false` so that a stray sync cannot do
   it by accident.
 - The volume root has to be writable by uid 65532 (the Go workloads). It used to
-  be checked with a shell inside the web tier - the inner Caddy was the only
-  workload with one that mounts this volume - and that check has no direct
-  replacement now that the tier is distroless: run `ls -ldn` on a debug pod that
+  be checked with a shell inside the web tier - that container was the only
+  workload with a shell that mounted this volume - and the Go images are
+  distroless, so there is no direct replacement: run `ls -ldn` on a debug pod that
   mounts the claim, or read the ownership on the NFS host itself.
   The nfs-subdir provisioner creates the export directory as root, so on a fresh
   volume check it before trusting a green sync. If it is not writable, the fix is
@@ -282,11 +291,11 @@ frontier size, pipeline staleness, and build duration, cell and failure counts.
 kubectl kustomize deploy/overlays/homelab
 ```
 
-CI builds the one image and runs the Go, Astro-reference and compliance checks,
-including the DuckDB-dependent build tests (the `verify` job installs the pinned
-DuckDB client and runs `make test-build`, which fails on a skip), but it does not
-render these manifests, so this command - plus a read of the rendered output - is
-the check that matters before a change to this directory is pushed.
+CI builds the one image and runs the Go checks, including the DuckDB-dependent
+build tests (the `verify` job installs the pinned DuckDB client and runs
+`make test-build`, which fails on a skip), but it does not render these
+manifests, so this command - plus a read of the rendered output - is the check
+that matters before a change to this directory is pushed.
 
 ## Open TODOs
 
@@ -416,11 +425,12 @@ rule, for when media appears.
 kubectl -n lolstats create job backup-postgres-now --from=cronjob/backup-postgres
 kubectl -n lolstats logs -f job/backup-postgres-now
 
-# Look at the tree. This used to be an `exec` into lolstats-web, then into the
-# inner Caddy, because that Caddy was the only workload with a shell that mounted
-# the data volume. That Deployment was deleted with the static tier on
-# 2026-09-17 and the Go images are distroless, so there is no pod
-# left to exec into: use a throwaway pod that mounts the claim read-only, e.g.
+# Look at the tree. This used to be an `exec` into a running web workload -
+# first the inner Caddy, then the Go tier - because such a container was the only
+# workload with a shell that mounted the data volume. The Caddy Deployment was
+# deleted with the static tier on 2026-09-17, the Go tier on 2026-09-18, and the
+# Go images are distroless, so there is no pod left to exec into: use a throwaway
+# pod that mounts the claim read-only, e.g.
 #
 #   kubectl -n lolstats run pvc-ls --rm -it --restart=Never \
 #     --image=busybox --overrides='{"spec":{"containers":[{"name":"pvc-ls","image":"busybox","command":["ls","-l","/d/backups/postgres"],"volumeMounts":[{"name":"d","mountPath":"/d","readOnly":true}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"lolstats-data"}}]}}'

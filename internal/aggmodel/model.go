@@ -1,11 +1,15 @@
 // Package aggmodel is the frozen shape of everything the aggregate build
-// publishes and the site reads.
+// publishes and a reader of `agg/v1` reads.
 //
 // It is deliberately free of computation: it holds the artifact types, the
-// path builders that put them on disk, and the schema emitter the frontend
-// types are generated from. Producers (internal/aggregate) and consumers
-// (web/) both work from this package, so a shape change breaks the build in
-// one place instead of silently producing blanks in a browser.
+// path builders that put them on disk, and the schema emitter the published
+// declarations are generated from. It used to be shared with the presentation
+// tier - producers (internal/aggregate) and consumers (web/, then
+// internal/webtier) both worked from this package - so a shape change broke the
+// build in one place instead of silently producing blanks in a browser. That
+// tier was deleted on 2026-09-18 (docs/decisions/ADR-011-retire-the-web-tier.md)
+// and this package is now producer-only, but the property it bought is still
+// worth keeping: the artifact types are the artifact contract.
 //
 // Changing a JSON tag, an enum value or a path template here is a contract
 // change and requires an ADR. See docs/contracts.md.
@@ -88,7 +92,7 @@ func RoleFromRiotPosition(position string) (Role, bool) {
 // Tier is a letter grade. The set is closed and ordered: Tiers is best to
 // worst. The thresholds that turn a win rate into a grade are the aggregation
 // engineer's to choose and to document; what is frozen here is the vocabulary
-// the frontend styles, and that the label always accompanies any colour so
+// a reader styles, and that the label always accompanies any colour so
 // the grade does not depend on hue.
 type Tier string
 
@@ -191,7 +195,7 @@ type Cell struct {
 
 // TierList is agg/v1/p/<patch>/<region>/<queue>/<bracket>/tierlist.json: one
 // row per (champion, role) in the partition, including champions with no
-// games in the window so the frontend does not have to distinguish "absent"
+// games in the window so a reader does not have to distinguish "absent"
 // from "silent".
 type TierList struct {
 	Envelope
@@ -224,8 +228,8 @@ type ChampionRole struct {
 }
 
 // Build is one row of an item, rune or summoner-spell list. The three share a
-// shape so one frontend component renders all of them; the key is opaque to
-// the component and is rendered through the static dataset's id-to-name map.
+// shape so one reader component renders all of them; the key is opaque to the
+// component and is rendered through the static dataset's id-to-name map.
 type Build struct {
 	// Kind tells the component which static dataset resolves Key, and what
 	// the icons mean: "items" is ordered and may contain 0 for an empty slot;

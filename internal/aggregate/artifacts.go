@@ -86,7 +86,7 @@ func buildChampions(input artifactInput) map[int]aggmodel.Champion {
 				Spells: buildsOrEmpty(input.Spells[championID][role]),
 
 				// Skill orders need timelines, which this build never reads.
-				// The field stays an empty slice so the frontend omits the
+				// The field stays an empty slice so a reader omits the
 				// section instead of rendering an empty one.
 				SkillOrders: []aggmodel.SkillOrder{},
 			})

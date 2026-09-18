@@ -10,9 +10,10 @@ import "io/fs"
 // ## The served tree: 0o755 directories, 0o644 files
 //
 // The published tree is written by the aggregate job as 65532:65532 with fsGroup
-// 65532 (deploy/base/jobs/aggregate.yaml) and read by the Go serving tier, which
-// runs as the image's distroless nonroot uid - the same 65532
-// (deploy/base/web/go-deployment.yaml).
+// 65532 (deploy/base/jobs/aggregate.yaml). It used to be read by the Go serving
+// tier as well, which ran as the image's distroless nonroot uid - the same 65532
+// (deploy/base/web/go-deployment.yaml) - and that Deployment was deleted on
+// 2026-09-18, so the writer is the only reader left in the tree.
 //
 // The modes below predate that and are deliberately left alone in this pass.
 // Until 2026-09-17 the tree was also read by two processes that were *not* the

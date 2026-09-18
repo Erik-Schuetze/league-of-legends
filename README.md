@@ -173,6 +173,6 @@ make docker-build
 - `docs/contracts.md` - frozen interfaces. Read this before writing cross-component code.
 - `docs/architecture.md` - how the pieces fit, and what happens when one fails.
 - `docs/data-sources.md` - where every datum comes from, and the Phase 0 gate table.
-- `docs/compliance.md` - Riot policy conformance checklist and its evidence.
+- `docs/compliance.md` - the Riot obligations that survive, the approved
+  wording, and an honest account of what is no longer asserted.
 - `docs/decisions/` - the ADRs.
-- `AGENTS.md` - how changes are written down in this repository.

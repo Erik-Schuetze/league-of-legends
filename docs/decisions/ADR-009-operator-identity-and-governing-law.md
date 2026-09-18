@@ -24,7 +24,10 @@ reader would rely on if something went wrong.
 **Name the operator, publish a mailbox, and do not name a member state yet.**
 
 `web/src/lib/legal.ts` is the single source of truth for all of it, so the four
-compliance pages cannot disagree:
+compliance pages cannot disagree. That file was deleted with the Astro tree, then
+with the Go tier that ported it into `internal/webtier/brand.go`, and finally that
+tier went on 2026-09-18, so the constants below now live verbatim as the approved
+wording in `docs/compliance.md`, which is the single source of truth:
 
 - `OPERATOR_NAME = 'Erik Schuetze'` and `OPERATOR_IDENTITY = 'Erik Schuetze, a
   private individual resident in the European Union, who operates this site as a
@@ -48,8 +51,14 @@ compliance pages cannot disagree:
 
 The terms page states *why* the member state is unnamed, so the omission reads as
 a recorded open item rather than an oversight. `scripts/compliance-check.sh`
-check 7 requires the contact address to appear on all four compliance pages, so
+check 7 required the contact address to appear on all four compliance pages, so
 the route cannot quietly disappear.
+
+> **Note, 2026-09-18.** That script was deleted with the web tier
+> (`ADR-011-retire-the-web-tier.md`), so the requirement above has no check behind
+> it any more. The decision itself is unchanged: the operator identity and the
+> contact address are the approved wording in `docs/compliance.md`, and obligation
+> 7 there is what a future serving layer has to satisfy.
 
 ## Alternatives considered
 
