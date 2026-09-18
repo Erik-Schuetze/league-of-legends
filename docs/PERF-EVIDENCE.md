@@ -1,6 +1,7 @@
 # PERF-EVIDENCE — Go tier measured against the plan.md §7.4 budget
 
-Measured 2026-09-17 17:12–17:21 UTC by an independent measurement agent. Raw reports in
+Measured 2026-09-17 17:12–17:21 UTC by an independent measurement agent, and revised through
+**r9 (`fetchTime` 2026-09-18T02:45–02:47Z, the public edge)**. Raw reports in
 `docs/evidence/`; scripts in `scripts/perf/`.
 
 **Rounds were added later, so no figure in this document stands alone.** r1/r2 (2026-09-17T17:14–17:19Z)
@@ -120,14 +121,28 @@ because the namespace was shared with other agents' pods.
 and every round carries the `fetchTime` of its own reports, so a figure is only meaningful with its
 round. In order:
 
-| round | `fetchTime` (UTC) | what it measured |
-| --- | --- | --- |
-| **r1, r2** | 2026-09-17T17:14–17:19Z | the deployed tier through a port-forward, **before §11.2 removed the per-row images** — the "before" state, and the source of this table's FAILs |
-| r3, r4 | 2026-09-17T18:24–18:35Z | the same tier with `LOLSTATS_AGG_FIXTURES=only`: §11.3's A/B pair. **r4 (`fetchTime` 18:34Z) is the first round taken after the images were removed** |
-| r5 | 2026-09-17T23:53Z | live through a port-forward, before §11.9 bounded the matchup grid (note (b)) |
-| r6, r8 | 2026-09-18T00:15–00:23Z | live through a local binary holding the pod's artifacts |
-| r7 | 2026-09-18T00:20–00:22Z | the shipped fixture posture, 11 routes |
-| **r9** | **2026-09-18T02:45–02:47Z** | **the public edge itself — the newest round, and the only one taken against the edge (§5.1)** |
+| round | `fetchTime` (UTC) | instrument: the host each report was fetched from (`finalDisplayedUrl`) | what it measured |
+| --- | --- | --- | --- |
+| **r1, r2** | 2026-09-17T17:14–17:19Z | `http://127.0.0.1:18921/…` — port-forward to the pod | the deployed tier through a port-forward, **before §11.2 removed the per-row images** — the "before" state, and the source of this table's FAILs |
+| r3, r4 | 2026-09-17T18:24–18:35Z | `http://127.0.0.1:18921/…` (`LOLSTATS_AGG_FIXTURES=only`) | the same tier with `LOLSTATS_AGG_FIXTURES=only`: §11.3's A/B pair. **r4 (`fetchTime` 18:34Z) is the first round taken after the images were removed** |
+| r5 | 2026-09-17T23:53Z | `http://127.0.0.1:18921/…` — **port-forward, *not* the edge** | live through a port-forward, before §11.9 bounded the matchup grid (note (b)) |
+| r6, r8 | 2026-09-18T00:15–00:23Z | `http://127.0.0.1:18945/…` | live through a local binary holding the pod's artifacts |
+| r7 | 2026-09-18T00:20–00:22Z | `http://127.0.0.1:18946/…` | the shipped fixture posture, 11 routes |
+| **r9** | **2026-09-18T02:45–02:47Z** | **`https://lol.erik-schuetze.dev/…` — the only round fetched from the public origin** | **the public edge itself — the newest round, and the only one taken against the edge (§5.1)** |
+
+**Which tier a round measured is a field in the artifacts, not a reading of the prose.** Every raw
+report records the URL it was served from (`finalDisplayedUrl`), so **r9 is the only round in the series
+whose reports name a public host**: r1–r5 name `127.0.0.1:18921`, r6/r8 `127.0.0.1:18945`, r7
+`127.0.0.1:18946`. A port-forward to the pod is a measurement of the pod, not of the edge — the auth
+gate, the edge's own headers and the TLS hop are all absent from it — which is why r5's 2,768,758 B
+document is a *tier* measurement and §5.1 is the *traffic* one. `scripts/perf/verify-report.mjs` reads
+each round's host back out of its reports and fails if this table says otherwise.
+
+**Coverage, so an absent route cannot read as a passing one.** r1/r2 sample **9** routes, r3–r6 and r8
+sample **8**, r7 and r9 sample **11**; across the whole series `/explore/` and `/champions/kennen/` are
+sampled **only by r9**, and `/matchups/{jungle,support,bottom}/` by **r7 only** — so on the live edge
+those three matchup roles are **unmeasured, not passing**, and the harness's default route set is the
+8-route list above. A ceiling is graded on what was fetched; a route nobody fetched has no verdict.
 
 Cells that name no round are r1/r2: they are the **"before" state**, kept because the failure this
 document exists to record is real, and they are **not the current state**. The current state is **r9** —
@@ -151,13 +166,15 @@ deliberately not rewritten to any later round: the r1/r2 failures are kept as th
 §5.1 carries the "after". A projection that replaces a measurement would be a laundered pass; §11.4
 restates this on its own side.
 
-**Note (b) — `/matchups/*` is a real FAIL on the tier the edge will dial, not a fixture artifact.**
+**Note (b) — `/matchups/*` is a real FAIL on the posture the deployment ships, not a fixture artifact —
+and that posture is what the edge serves now (§5.1).**
 This document's own live r1/r2 run measured `/matchups/{mid,top}/` at 26.4 KiB of HTML and 187.3 KiB
 first-load, and that is why the 150 KiB HTML row passes above. **Later measurements of the same route
 on the Go tier did not reproduce it**: r3/r4 measured the document at 164,502 B and r5 at
 **2,768,758 B** with **2,938,099 B** first-load (the ladder in note (b) and §11.9, which has the cause). Both
 are over the 150 KiB ceiling, and the r5 figure is 9.8× the 300 KB first-load budget — on the live
-posture, which is the tier the cutover points at. The cause is a quadratic matrix, not markup: the
+posture, which is the posture the tier served before §11.9 bounded the grid. **The edge serves this
+route bounded today**: r9 measured it at 49,870 B (4 cells) and a re-read at 03:12Z at 49,846 B. The cause is a quadratic matrix, not markup: the
 grid rendered `pool × pool` cells (r5: 164 champions in the artifact, **1** published cell, 26,896
 `<td>`), because the frame was sized by the champion list rather than by the cells the artifact
 stores. §11.9 bounds the grid to a window of the pool and measures the result on both postures.
@@ -379,6 +396,18 @@ policy, and the budget breach is a **grading artefact**: a knowingly-`noindex` p
 SEO threshold (and record that exemption in §7.4), or run the SEO leg only over the 270 indexable
 routes. Do not "fix" this by making a no-data page indexable.
 
+**The predicate is shared with the sitemap, which is what makes this a documented policy rather than an
+accident.** `internal/webtier/view_champion.go` sets `Noindex: !championRoleIndexable(cells, artifact,
+*role)` — the route is indexable only when the tier-list cells or the champion's own detail artifact
+mention that role — and the sitemap's route list (`routeList`, in `internal/webtier/view_feeds.go`,
+**not** a `sitemap.go`, which does not exist) advertises a champion/role route only when the page behind
+it renders a sample. `internal/webtier/sitemap_invariant_test.go` pins the two together in **both**
+directions, for every served route, in every data posture, with controls that stop a sitemap which merely
+lists nothing from satisfying the equivalence. So "`/champions/ahri/top/` scores 69" and "`/champions/
+ahri/top/` is not in `/sitemap.xml`" are the same fact, and it is the correct one: the thin-content
+policy decides it from the data, and the data is why the failing role moves between rounds instead of
+closing (§5's SEO row).
+
 **Where the directive is, from the served markup (live edge, §5.1/r9).** Asked "is there a robots meta
 or an equivalent directive in the raw HTML?", the answer is yes, and `r9` captures it in the report
 rather than in a side note: `/champions/ahri/top/`'s `is-crawlable` audit scores **0** and its details
@@ -483,7 +512,7 @@ node scripts/perf/summarize-lh.mjs docs/evidence/lh-r9-*.json.gz > docs/evidence
 node scripts/perf/lh-requests.mjs docs/evidence/lh-r2-tier-list-top.json.gz
 node scripts/perf/lh-requests.mjs --class-only docs/evidence/lh-r9-explore.json.gz
 
-# verify every number in this document against the raw evidence (253 checks; exit 1 on drift)
+# verify every number in this document against the raw evidence (264 checks; exit 1 on drift)
 node scripts/perf/verify-report.mjs
 
 # axe-core, WCAG 2.1 A/AA, 412x915
@@ -496,6 +525,18 @@ node scripts/perf/tree-facts.mjs   --base http://127.0.0.1:18921 --out docs/evid
 node scripts/perf/island-runtime.mjs --base http://127.0.0.1:18921 --out docs/evidence \
   /tier-list/mid/ /tier-list/top/ /champions/ahri/mid/ /
 ```
+
+**The gate's size is a property of its revision, not a constant.** `verify-report.mjs` has been
+committed five times (`212b644`, `2f9206e`, `ac4bb35`, `dd2b210`, `616d6d1`), and running each committed
+revision counts a different number of assertions — 146, 176, 185, 241 and 253 respectively, against
+today's document, 264 at this writing — because most checks are emitted inside per-route, per-round and
+per-file loops while a minority are written out one by one. **A check count is therefore only meaningful
+with the revision it came from**: "146" is `212b644`'s runtime count, reproducible with
+`git show 212b644:scripts/perf/verify-report.mjs > .zz-gate.mjs && node .zz-gate.mjs`. That also means a
+count quoted without a revision cannot be compared with another, and a *lower* count is not evidence
+that something was added: the earlier revisions report failures against this document because they
+assert the older text. Reproduce the count the same way every time — run the committed revision, do not
+count call sites by hand (there are 123 of those against 264 emitted checks).
 
 ## 10. Evidence files
 
@@ -783,7 +824,7 @@ bash scripts/perf/lighthouse-routes.sh --round 9 --base https://lol.erik-schuetz
 gzip -9 docs/evidence/lh-r9-*.json                        # archive the raw reports (11 files, 5.3 MiB)
 node scripts/perf/summarize-lh.mjs docs/evidence/lh-r9-*.json.gz > docs/evidence/lh-summary-r9.json
 node scripts/perf/lh-requests.mjs --class-only docs/evidence/lh-r9-explore.json.gz
-node scripts/perf/verify-report.mjs                       # 253 checks at this writing, exit 1 on drift
+node scripts/perf/verify-report.mjs                       # 264 checks at this writing, exit 1 on drift
 ```
 
 `EDGE_AUTH` is the basic-auth credential, passed in the environment and deliberately absent from this
@@ -827,19 +868,32 @@ asset volume.
 **The ladder, and why it is a ladder.** The same route, on the same tier, measured three different sizes
 with no change to the template between them:
 
-| round | posture | tier measured | `/matchups/mid/` document | cells | source |
-| --- | --- | --- | --- | --- | --- |
-| r1/r2 | live | deployed image, port-forward 18921 | 26.4 KiB | not counted | §4 |
-| r3/r4 | fixture (`LOLSTATS_AGG_FIXTURES=only`) | local binary, 18921 | 164,502 B | 784 | §11.3, `lh-r{3,4}-matchups-mid.json.gz` |
-| r5 | live | port-forward 18921 | **2,768,758 B** (first-load 2,938,099 B) | 26,896 | `lh-r5-matchups-mid.json.gz` |
-| r6 | live | local reconstruction, 18945 | 49,870 B | 4 | `lh-r6-matchups-mid.json.gz` |
-| r7 | fixture (the shipped posture) | local binary, 18946 | 75,166 B | 144 | `lh-r7-matchups-mid.json.gz` |
-| r8 | live | local reconstruction, 18945 | 49,870 B | 4 | `lh-r8-matchups-mid.json.gz` |
+| round | `fetchTime` (UTC) | posture | tier measured | `/matchups/mid/` document | cells | source |
+| --- | --- | --- | --- | --- | --- | --- |
+| r1/r2 | 2026-09-17T17:14–17:19Z | live | deployed image, port-forward 18921 | 26.4 KiB | not counted | §4 |
+| r3/r4 | 2026-09-17T18:24–18:35Z | fixture (`LOLSTATS_AGG_FIXTURES=only`) | local binary through 18921 | 164,502 B | 784 | §11.3, `lh-r{3,4}-matchups-mid.json.gz` |
+| r5 | 2026-09-17T23:53:32Z | live | port-forward 18921 | **2,768,758 B** (first-load **2,938,099 B**, TBT **227.4 ms**) | 26,896 | `lh-r5-matchups-mid.json.gz` — **the measured FAIL this section exists to record**, and a real ceiling breach of **18×** the ≤150 KB HTML row, owned by lane M against `files/brief-matchups-weight.md`. Recorded, not smoothed and not fixed here |
+| r6 | 2026-09-18T00:15–00:16Z | live | local reconstruction, 18945 | 49,870 B | 4 | `lh-r6-matchups-mid.json.gz` |
+| r7 | 2026-09-18T00:20–00:22Z | fixture (the shipped posture) | local binary, 18946 | 75,166 B | 144 | `lh-r7-matchups-mid.json.gz` |
+| r8 | 2026-09-18T00:22–00:23Z | live | local reconstruction, 18945 | 49,870 B | 4 | `lh-r8-matchups-mid.json.gz` |
 
-r6-r8 carry this change; r1-r5 do not. **Every row was measured against the Go tier** — r1/r2/r5 through
-the coordinator's port-forward to the pod, r3/r4/r6/r7/r8 against a local binary holding the same
-artifacts — **none of them through the public edge.** The edge still dials the older static tier, so no
-row here is a production traffic measurement; §11.8 is where that measurement lives.
+r6-r8 carry this change; r1-r5 do not. **Every row above was measured against the Go tier** — r1/r2/r5
+through the coordinator's port-forward to the pod, r3/r4/r6/r7/r8 against a local binary holding the same
+artifacts. **r9 (§5.1, §11.8) is the row that is missing from this table on purpose: it is the only one
+taken through the public edge**, and it carries this change — `/matchups/mid/` **49,870 B, 4 cells**
+(`fetchTime` 2026-09-18T02:46Z, first-load 219,211 B), with `/matchups/top/` at 50,257 B. An earlier
+revision of this paragraph said "the edge still dials the older static tier"; that was true when it was
+written and is **false now**, and r9 is the record that supersedes it (§5.1).
+
+**The breach was public, not a port-forward artifact — and it is closed by measurement, not by prose.**
+r5's *reports* come from a port-forward, so the ladder above is a tier measurement; but the same
+2,768,758 B document was read **through the public edge** by the coordinator at 2026-09-17T23:57Z
+(`curl -u … $H/matchups/mid | wc -c`, with `/matchups/bottom/` at 2,100,737 B and 26,896/20,164 `<td>`),
+which is what `files/brief-matchups-weight.md` was written from — so the 18× breach was visible to
+users, not merely to the pod. It is now closed **on the edge**: r9 measured `/matchups/mid/` at
+**49,870 B** (4 cells), and a re-read of the edge from this lane at **2026-09-18T03:12Z** measured
+`/matchups/mid/` **49,846 B** (4 `<td>`) and `/matchups/bottom/` **69,490 B** (100 `<td>`), both inside
+the 150 KB row. The 24 B r9-to-now difference on `/matchups/mid/` is reported, not smoothed (§5.2).
 
 **The cause, verified rather than inferred.** The artifact the pod serves today
 (`/agg/v1/p/16.18/EUW/420/all/matchups/mid.json`) lists **164 champions and stores 1 cell**
@@ -891,7 +945,8 @@ tree as it stood when r3/r4 were taken, "after" = this change):
 | worst shape the URL can ask for | — | 101,564 B (`?per=200`, clamped to 276 cells) | — | 68,068 B |
 
 The fixture column is the shipped product wherever the tier runs `LOLSTATS_AGG_FIXTURES=only`, which is
-what `deploy/base/config.yaml:86` sets for the deployment the edge will dial. Worst default view after
+what `deploy/base/config.yaml:86` sets for the deployment the edge serves (§5.1: the cutover has
+happened and r9 is the edge round). Worst default view after
 the change: **75,888 B (74.1 KiB)** against the 150 KiB row, and roughly 245 KB of first-load against the
 300 KB row (74.1 KiB of document + the 165.4 KiB of fonts, CSS and JS that every route carries, §11.3).
 The two rows this route was failing are the two rows it now passes with ~1.7-1.9× of margin.
@@ -922,7 +977,7 @@ Scores are `perf / a11y / bp / seo`.
 `/champions/ahri/mid/`, on the SEO row, `failingAudits: ["is-crawlable"]` — the defect §6.2 escalated and
 this lane was told to measure rather than fix. It is not a weight failure and this change did not touch
 it. Every matchup role now sits **20.2% under** the 300 KB first-load row (worst 245,229 B) and **50.6%
-under** the 150 KB HTML row (worst 75,888 B), on the posture the edge will dial, including the three
+under** the 150 KB HTML row (worst 75,888 B), on the posture the edge serves (§5.1), including the three
 roles (`jungle`, `support`, `bottom`) no earlier round had ever sampled.
 
 **Reproduce** (the exact commands behind the numbers above; ports are arbitrary, each server must be

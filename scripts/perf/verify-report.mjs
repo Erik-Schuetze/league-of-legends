@@ -283,6 +283,30 @@ checkTrue(
   '§11.9 keeps the r1/r2 26.4 KiB reading as a real measurement',
   section119.includes('26.4 KiB') && section119.includes('was never reproduced'),
 );
+// The edge dialled the static tier when §11.9 was written and does not any more, so the claim had to go
+// rather than be reworded: r9 measures this section's own route on the edge, and the breach it records
+// was read through the edge by the coordinator before that. A retraction that reappears would restore a
+// false statement about the running tier.
+checkTrue(
+  '§11.9 retracts the "edge still dials the older static tier" claim and names r9 as the edge row',
+  section119.includes('is **false now**') &&
+    section119.includes('The breach was public, not a port-forward artifact') &&
+    !/(?<!said ")[Tt]he edge still dials the older static tier, so no/.test(section119),
+);
+checkTrue(
+  "§11.9 records r5's breach as a measured FAIL with its fetchTime and its owner",
+  section119.includes('2026-09-17T23:53:32Z') &&
+    section119.includes('2,938,099 B') &&
+    section119.includes('227.4 ms') &&
+    section119.includes('files/brief-matchups-weight.md') &&
+    /18\*?\*?×|18×/.test(section119),
+);
+const ladderRows = (section119.match(/^\| r[\w/,–-]+ \| 2026-09-1[78]T.*\|$/gm) ?? []).filter(Boolean);
+checkTrue(
+  "§11.9's ladder table carries a fetchTime on every measured round",
+  ladderRows.length === 6 && ladderRows.every((l) => /\| 2026-09-1[78]T[\d:–Z-]+ \|/.test(l)),
+  `${ladderRows.length} dated ladder rows`,
+);
 
 // --------------------------------------------- §5.1 / §11.8: the live-edge round (r9)
 // The 300 KB row is a ceiling on bytes a visitor receives, so the round that closes it has to be taken
@@ -784,6 +808,104 @@ for (const r of r4after) {
     `${r.count} image(s) / ${kib(r.imageBytes)} KiB / ${kib(r.total)} KiB total`,
   );
 }
+
+// ------------------------------- the instrument and the coverage: which tier each round measured
+// A round's tier is a field in its reports (`finalDisplayedUrl`), not a claim in the prose. This block
+// is why the round table cannot be edited into saying a port-forward round measured the edge: r5's
+// reports were fetched from 127.0.0.1:18921, and the table has to agree with the artifacts.
+const ROUNDS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const summaryOf = (k) => `${EV}/lh-summary-r${k}.json`;
+const reportOfRow = (row) => json(row.file);
+const roundHost = (k) => {
+  if (!existsSync(summaryOf(k))) return null;
+  const hosts = [
+    ...new Set(
+      json(summaryOf(k)).map((r) =>
+        (reportOfRow(r).finalDisplayedUrl ?? '')
+          .replace(/^https?:\/\//, '')
+          .split('/')[0]
+          .replace(/^.*@/, ''), // the archives redact the basic-auth userinfo as REDACTED@
+      ),
+    ),
+  ];
+  return hosts.length === 1 ? hosts[0] : hosts.join(',');
+};
+const roundTable = doc.slice(
+  doc.indexOf('| round | `fetchTime` (UTC) |'),
+  doc.indexOf('Cells that name no round'),
+);
+const roundRows = roundTable.split('\n').filter((l) => /^\|\s*\*{0,2}r[\d,]/.test(l));
+const rowForRound = (k) => roundRows.find((l) => new RegExp(`\\|\\s*\\*{0,2}[^|]*\\br${k}\\b`).test(l)) ?? '';
+const roundHosts = [...new Set(ROUNDS.map((k) => roundHost(k)))].filter(Boolean);
+checkTrue(
+  'each round\'s table row names its own instrument host and no other round\'s',
+  roundRows.length === 6 &&
+    ROUNDS.every((k) => {
+      const row = rowForRound(k);
+      const own = roundHost(k);
+      return row.includes(own) && !roundHosts.some((h) => h !== own && row.includes(h));
+    }),
+  ROUNDS.map((k) => `r${k}=${roundHost(k)}`).join(' ') + ` | rows=${roundRows.length}`,
+);
+const edgeRounds = ROUNDS.filter((k) => /lol\.erik-schuetze\.dev/.test(roundHost(k) ?? ''));
+checkTrue(
+  'r9 is the only round whose reports were fetched from the public origin',
+  edgeRounds.length === 1 && edgeRounds[0] === '9',
+  `rounds on the public origin: ${edgeRounds.join(',') || 'none'}`,
+);
+const livePortRounds = ROUNDS.filter((k) => roundHost(k) === '127.0.0.1:18921');
+checkTrue(
+  'the round table records r1-r5 as port-forward rounds on 127.0.0.1:18921 and says r5 is not the edge',
+  livePortRounds.join(',') === '1,2,3,4,5' && rowForRound('5').includes('not* the edge'),
+  `${livePortRounds.join(',')} | r5 row: ${rowForRound('5').slice(0, 60)}`,
+);
+// Coverage: route counts per round are derived, and an unsampled route must not read as a pass.
+const routesOf = (k) => (existsSync(summaryOf(k)) ? json(summaryOf(k)).length : NaN);
+checkTrue(
+  'the round table\'s route counts are the reports\' own route counts',
+  routesOf('1') === 9 &&
+    routesOf('2') === 9 &&
+    routesOf('3') === 8 &&
+    routesOf('7') === 11 &&
+    routesOf('9') === 11 &&
+    roundTable.includes('**9** routes') &&
+    roundTable.includes('**8**') &&
+    roundTable.includes('**11**'),
+  ROUNDS.map((k) => `${k}:${routesOf(k)}`).join(' '),
+);
+const sampledOnlyBy = (route) =>
+  ROUNDS.filter((k) => (json(summaryOf(k)) ?? []).some((r) => r.route === route)).join(',');
+checkTrue(
+  'the round table records which routes only one round sampled, as unmeasured rather than passing',
+  roundTable.includes('unmeasured, not passing') &&
+    sampledOnlyBy('/explore/') === '9' &&
+    sampledOnlyBy('/champions/kennen/') === '9' &&
+    sampledOnlyBy('/matchups/bottom/') === '7' &&
+    roundTable.includes('/matchups/{jungle,support,bottom}/'),
+  `/explore/=${sampledOnlyBy('/explore/')} /champions/kennen/=${sampledOnlyBy('/champions/kennen/')} /matchups/bottom/=${sampledOnlyBy('/matchups/bottom/')}`,
+);
+// The summaries are self-dating: every row's fetchTime must be its own report's.
+const stampMismatch = ROUNDS.flatMap((k) =>
+  existsSync(summaryOf(k))
+    ? json(summaryOf(k)).filter((r) => r.fetchTime !== reportOfRow(r).fetchTime).map((r) => `${k}:${r.route}`)
+    : [`${k}:no-summary`],
+);
+checkTrue(
+  'every summary row carries its raw report\'s own fetchTime (summaries are self-dating)',
+  stampMismatch.length === 0,
+  stampMismatch.join(' '),
+);
+
+// ------------------------------- §6.2's policy claim, attributed to the code that implements it
+const s62 = sectionOf('### 6.2 ');
+checkTrue(
+  '§6.2 records SEO 69 as the sitemap\'s own shared predicate, naming the real files',
+  s62.includes('championRoleIndexable') &&
+    s62.includes('routeList') &&
+    s62.includes('view_feeds.go') &&
+    s62.includes('sitemap_invariant_test.go') &&
+    s62.includes('documented policy'),
+);
 // §5's row now states a range per post-removal round instead of one blurred range, because the
 // rounds are not comparable: r4 and r5 still carried the pre-§11.9 grid. Each range is derived here.
 const rangeOf = (round) => {
@@ -811,6 +933,14 @@ checkTrue(
 // DoD is that `grep -n 'not superseded' docs/PERF-EVIDENCE.md` cannot find a stale present-tense
 // claim sitting next to the 1013.3 KiB figure.
 checkTrue('the retired "not superseded" framing is gone from the report', !/not\*\* superseded|not superseded/.test(doc));
+// The cutover has happened, so a future-tense claim about it is a false statement about the running
+// tier. Three of them survived the round-order correction because they read as posture notes rather
+// than as claims about the edge; the guard is here so the next one cannot.
+checkTrue(
+  'the report makes no future-tense claim that the edge has yet to dial this tier',
+  !/the edge will dial/.test(doc),
+  `${(doc.match(/the edge will dial/g) ?? []).length} occurrence(s) of "the edge will dial"`,
+);
 checkTrue(
   '§5 HTML row conditions its PASS on the deploying image, not on a projection',
   row('HTML ≤150 KB uncompressed').includes('once the image carrying §11.9 is deployed') &&

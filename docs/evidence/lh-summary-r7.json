@@ -1,6 +1,7 @@
 [
   {
     "file": "docs/evidence/lh-r7-about.json.gz",
+    "fetchTime": "2026-09-18T00:22:12.748Z",
     "route": "/about/",
     "scores": {
       "performance": 99,
@@ -43,6 +44,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-champions-ahri-mid.json.gz",
+    "fetchTime": "2026-09-18T00:20:58.886Z",
     "route": "/champions/ahri/mid/",
     "scores": {
       "performance": 99,
@@ -89,6 +91,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-champions-ahri-top.json.gz",
+    "fetchTime": "2026-09-18T00:21:09.309Z",
     "route": "/champions/ahri/top/",
     "scores": {
       "performance": 99,
@@ -133,6 +136,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-home.json.gz",
+    "fetchTime": "2026-09-18T00:20:27.431Z",
     "route": "/",
     "scores": {
       "performance": 99,
@@ -175,6 +179,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-matchups-bottom.json.gz",
+    "fetchTime": "2026-09-18T00:22:02.107Z",
     "route": "/matchups/bottom/",
     "scores": {
       "performance": 99,
@@ -217,6 +222,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-matchups-jungle.json.gz",
+    "fetchTime": "2026-09-18T00:21:40.783Z",
     "route": "/matchups/jungle/",
     "scores": {
       "performance": 99,
@@ -259,6 +265,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-matchups-mid.json.gz",
+    "fetchTime": "2026-09-18T00:21:19.621Z",
     "route": "/matchups/mid/",
     "scores": {
       "performance": 99,
@@ -301,6 +308,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-matchups-support.json.gz",
+    "fetchTime": "2026-09-18T00:21:51.327Z",
     "route": "/matchups/support/",
     "scores": {
       "performance": 99,
@@ -343,6 +351,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-matchups-top.json.gz",
+    "fetchTime": "2026-09-18T00:21:30.297Z",
     "route": "/matchups/top/",
     "scores": {
       "performance": 99,
@@ -385,6 +394,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-tier-list-mid.json.gz",
+    "fetchTime": "2026-09-18T00:20:38.036Z",
     "route": "/tier-list/mid/",
     "scores": {
       "performance": 99,
@@ -427,6 +437,7 @@
   },
   {
     "file": "docs/evidence/lh-r7-tier-list-top.json.gz",
+    "fetchTime": "2026-09-18T00:20:48.512Z",
     "route": "/tier-list/top/",
     "scores": {
       "performance": 99,

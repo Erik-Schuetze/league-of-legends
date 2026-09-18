@@ -12,7 +12,8 @@
 // round 6, which is why this is trusted for the later rounds rather than reimplementing the maths.
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 
 const round = process.argv[2];
 const dir = process.argv[3] ?? 'docs/evidence';
@@ -35,7 +36,17 @@ const stdout = execFileSync(
   { encoding: 'utf8', maxBuffer: 1 << 28 },
 );
 
-const records = JSON.parse(stdout).map((record, i) => ({ file: `${dir}/${files[i]}`, ...record }));
+// Each record is stamped with the raw report's own `fetchTime`, so a summary is self-dating and a
+// round's position in the series is readable from the summary alone. This matters because a round's
+// order was once read backwards (a newer measurement called a projection), and `fetchTime` is the only
+// field in the artifacts that settles it. Verified by regenerating rounds 1-9: the only diff against
+// the committed summaries is this added field.
+const reportOf = (path) =>
+  JSON.parse(path.endsWith('.gz') ? gunzipSync(readFileSync(path)) : readFileSync(path, 'utf8'));
+const records = JSON.parse(stdout).map((record, i) => {
+  const file = `${dir}/${files[i]}`;
+  return { file, fetchTime: reportOf(file).fetchTime, ...record };
+});
 const out = `${dir}/lh-summary-r${round}.json`;
 writeFileSync(out, `${JSON.stringify(records, null, 2)}\n`);
 

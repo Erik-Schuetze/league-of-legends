@@ -1,6 +1,7 @@
 [
   {
     "file": "docs/evidence/lh-r2-about.json.gz",
+    "fetchTime": "2026-09-17T17:18:28.165Z",
     "route": "/about/",
     "scores": {
       "performance": 100,
@@ -43,6 +44,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-champions-ahri-mid.json.gz",
+    "fetchTime": "2026-09-17T17:17:43.282Z",
     "route": "/champions/ahri/mid/",
     "scores": {
       "performance": 99,
@@ -87,6 +89,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-champions-ahri-top.json.gz",
+    "fetchTime": "2026-09-17T17:17:54.788Z",
     "route": "/champions/ahri/top/",
     "scores": {
       "performance": 100,
@@ -133,6 +136,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-champions-garen-top.json.gz",
+    "fetchTime": "2026-09-17T17:19:07.517Z",
     "route": "/champions/garen/top/",
     "scores": {
       "performance": 99,
@@ -177,6 +181,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-home.json.gz",
+    "fetchTime": "2026-09-17T17:17:08.979Z",
     "route": "/",
     "scores": {
       "performance": 100,
@@ -219,6 +224,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-matchups-mid.json.gz",
+    "fetchTime": "2026-09-17T17:18:05.852Z",
     "route": "/matchups/mid/",
     "scores": {
       "performance": 99,
@@ -261,6 +267,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-matchups-top.json.gz",
+    "fetchTime": "2026-09-17T17:18:16.864Z",
     "route": "/matchups/top/",
     "scores": {
       "performance": 100,
@@ -303,6 +310,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-tier-list-mid.json.gz",
+    "fetchTime": "2026-09-17T17:17:20.481Z",
     "route": "/tier-list/mid/",
     "scores": {
       "performance": 100,
@@ -347,6 +355,7 @@
   },
   {
     "file": "docs/evidence/lh-r2-tier-list-top.json.gz",
+    "fetchTime": "2026-09-17T17:17:31.829Z",
     "route": "/tier-list/top/",
     "scores": {
       "performance": 100,
