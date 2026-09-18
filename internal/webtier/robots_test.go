@@ -46,8 +46,20 @@ func TestRobotsStatesWhatTheSnapshotIs(t *testing.T) {
 		if !strings.Contains(body, `The manifest declares source "demo".`) {
 			t.Errorf("/robots.txt does not report the manifest's declared source: %s", body)
 		}
-		if !strings.Contains(body, "# Every page here is public and meant to be indexed.") {
-			t.Errorf("/robots.txt dropped the indexing statement the pages are checked against: %s", body)
+		// The indexing statement is the one the sitemap is held to, so amending
+		// it here and asserting the sitemap in sitemap_invariant_test.go are the
+		// same claim: every page is public, and the ones meant to be indexed are
+		// the ones the sitemap lists.
+		for _, want := range []string{
+			"# Every page here is public. The ones that are meant to be indexed are the ones",
+			"# /sitemap.xml lists",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("/robots.txt dropped the indexing statement the pages are checked against, %q: %s", want, body)
+			}
+		}
+		if strings.Contains(body, "Every page here is public and meant to be indexed") {
+			t.Errorf("/robots.txt claims every page is meant to be indexed while the sitemap lists only the ones that are: %s", body)
 		}
 		if strings.Contains(body, "public, static and meant to be indexed") {
 			t.Errorf("/robots.txt describes a per-request tier as static: %s", body)

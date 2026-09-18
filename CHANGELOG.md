@@ -322,6 +322,25 @@ short. "Breaking" means something that used to work no longer does.
   only starts after the connect returns, so the old budget would have killed the
   container as the retry succeeded.
 
+- `/sitemap.xml` and the served pages were computed from two different sources, so
+  they disagreed in both directions on the live edge. The page builders decide
+  indexability per page; the sitemap ignored them and enumerated its 1058 routes
+  from the manifest alone, advertising `/champions/ahri/top` (whose page renders
+  `noindex,follow`) and omitting `/explore` (whose page renders `index,follow`).
+  `routeList` now filters champion and role routes through the same predicate the
+  page builders use - `championOverviewIndexable` and `championRoleIndexable` in
+  `view_champion.go`, extracted behaviour-preserving - and appends `/explore`, and
+  the package doc comment that claimed the two "agree by construction" states what
+  actually holds. `sitemap_invariant_test.go` asserts `in_sitemap ==
+  page_is_indexable` in both directions over every route the tier can serve, with
+  `/explore` and `/champions/ahri/top` as positive controls; the test fails with
+  1707 violations against the old `routeList`. No page's rendered `robots` meta
+  changed (1063 routes compared before and after), while the local sitemap went
+  from 1063 routes to 247 and the compliance gate's corpus, which is built from
+  the sitemap, to 248 captured pages - above every floor. `/robots.txt`'s blanket
+  "every page here is public and meant to be indexed" and the 404's note both
+  described the unfiltered sitemap and now say what is true.
+
 ### Notes
 
 - The ingest `worker` subcommand starts, serves metrics and shuts down cleanly,

@@ -23,6 +23,58 @@ import (
 // DataTable, StatValue and TierBadge are the layouts/fallback ones. The scoped
 // stylesheet the shell inlines is chosen by Page.Champion for the same reason.
 
+// championCells is every tier list cell the snapshot published for one
+// champion. It is the fallback the champion routes render from when the
+// aggregator wrote no detail artifact for the champion, so it is also the
+// fallback the indexability predicates below read.
+func championCells(tierList *aggmodel.TierList, championID int) []aggmodel.Cell {
+	if tierList == nil {
+		return nil
+	}
+	var cells []aggmodel.Cell
+	for _, cell := range tierList.Cells {
+		if cell.ChampionID == championID {
+			cells = append(cells, cell)
+		}
+	}
+	return cells
+}
+
+// championOverviewIndexable reports whether /champions/<slug> is a page of
+// statistics rather than a URL that renders an explicit empty state and asks not
+// to be indexed. It is meaningful only when a snapshot exists: with none, every
+// champion page is the empty state the page was written for, and the sitemap
+// lists the prose routes only.
+//
+// It lives here, next to the page it describes, because the sitemap has to make
+// the same decision and a second copy of a decision is a second thing to keep
+// in step.
+func championOverviewIndexable(cells []aggmodel.Cell) bool {
+	return len(cells) > 0
+}
+
+// championRoleIndexable reports whether /champions/<slug>/<role> is a page of
+// statistics. The sources are the two the page renders from, in the order it
+// reads them: the champion's detail artifact first, then the tier list cells,
+// because a champion that appears in a tier list has a real sample even if no
+// detail artifact was written for it. A role neither source mentions is a URL
+// the site publishes and asks crawlers to ignore.
+func championRoleIndexable(cells []aggmodel.Cell, artifact *aggmodel.Champion, role aggmodel.Role) bool {
+	if artifact != nil {
+		for _, entry := range artifact.Roles {
+			if entry.Role == role {
+				return true
+			}
+		}
+	}
+	for _, cell := range cells {
+		if cell.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
 // statView is one fallback StatValue.
 type statView struct {
 	Label       string
@@ -148,14 +200,7 @@ func (r *Renderer) championPage(slug string, roleSlug string) (*Page, error) {
 		}
 		tierList = loaded
 	}
-	var cells []aggmodel.Cell
-	if tierList != nil {
-		for _, cell := range tierList.Cells {
-			if cell.ChampionID == champion.ID {
-				cells = append(cells, cell)
-			}
-		}
-	}
+	cells := championCells(tierList, champion.ID)
 
 	// The detail artifact is the rich source and the tier list cells are the
 	// fallback, so a missing detail artifact is not an error: it is the state
@@ -423,7 +468,7 @@ func (r *Renderer) championPage(slug string, roleSlug string) (*Page, error) {
 			page.Description = champion.Name + " win, pick and ban rates by role for League of Legends patch " +
 				partition.Patch + ", " + partition.Region + " ranked solo queue, each with the number of games behind it."
 		}
-		page.Noindex = len(cells) == 0
+		page.Noindex = !championOverviewIndexable(cells)
 	} else {
 		label := RoleLabel(*role)
 		slug := RoleSlugString(*role)
@@ -440,22 +485,9 @@ func (r *Renderer) championPage(slug string, roleSlug string) (*Page, error) {
 		}
 		// A role the artifact measured or the tier list published is a real page;
 		// one the snapshot says nothing about is a URL that exists but should not
-		// be indexed as a page of statistics.
-		hasStats := false
-		if artifact != nil {
-			for _, entry := range artifact.Roles {
-				if entry.Role == *role {
-					hasStats = true
-				}
-			}
-		}
-		hasCell := false
-		for _, cell := range cells {
-			if cell.Role == *role {
-				hasCell = true
-			}
-		}
-		page.Noindex = !hasStats && !hasCell
+		// be indexed as a page of statistics. The predicate is shared with the
+		// sitemap, which advertises exactly the routes this is true for.
+		page.Noindex = !championRoleIndexable(cells, artifact, *role)
 	}
 	if partition == nil {
 		page.PatchLabelValue = notPublishedLabel
