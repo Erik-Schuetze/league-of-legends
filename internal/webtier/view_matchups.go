@@ -277,34 +277,46 @@ func matchupDescription(label string, snap snapshotView) string {
 		"thin pairs withheld."
 }
 
-// matchupEmpty is MatchupBody.astro's EmptyState for this route. An artifact
-// that exists with no cell above the threshold is not a missing artifact, and
-// the empty state may not say it is: the count the artifact holds is the only
-// true description of why the grid is not drawn. Every role passes through this
-// state before its lane publishes, and /matchups/top served it at 33,881 B.
+// matchupEmpty is MatchupBody.astro's EmptyState for this route.
+//
+// An artifact that exists with no cell above the threshold is not a missing
+// artifact, and the empty state may not say it is: with a partition present the
+// role's artifact has been read (matchupsPage reads it through decodeArtifact,
+// which never hands back a nil artifact without an error, so a missing one is
+// the 503 this page cannot be). What the document holds is the only true
+// description of why no grid is drawn, so the body is built from the document:
+// the stored cells, all of which are under its own min_cell_n, and the pool of
+// champions its counted pairs name. The envelope's suppressed_cells is not one
+// of those facts - the aggregator copies the partition's tier-list suppression
+// count into every matchups document (internal/aggregate/assemble.go builds the
+// envelope once and internal/aggregate/artifacts.go reuses it per role), which
+// is why the live document for each of the five roles reports the same 513 - so
+// this route does not quote it as a matchup count. The tier-list routes, where
+// it belongs, still print it.
+//
+// Every role passes through this state before its lane publishes;
+// /matchups/jungle serves it live at 33,923 B with 0 cells for a lane that has
+// counted 135 champions.
 func matchupEmpty(label string, snap snapshotView, minCellN int, matchups *aggmodel.Matchups) emptyView {
 	if snap.Partition == nil {
 		return emptyFor("No sample yet", emptyReason(snap.Site), nil)
 	}
 	threshold := minCellN
-	body := "The snapshot for patch " + snap.Patch + " has no matchup artifact for this role, so no pair is shown " +
-		"rather than an estimate."
+	thresholdText := IntegerAny(float64(minCellN))
+	body := "The snapshot for patch " + snap.Patch + " publishes no pairing for this role at or above n = " +
+		thresholdText + " games, so no pair is shown rather than an estimate."
 	if matchups != nil {
-		thresholdText := IntegerAny(float64(minCellN))
-		if stored := len(cellsOf(matchups)); stored == 1 {
-			body = "The snapshot for patch " + snap.Patch + " stores one pairing for this role, and it is below n = " +
-				thresholdText + " games, so no pair is shown rather than an estimate" + suppressedClause(matchups) + "."
-		} else if stored > 1 {
-			body = "The snapshot for patch " + snap.Patch + " stores " + IntegerAny(float64(stored)) +
-				" pairings for this role, and every one of them is below n = " + thresholdText + " games, so no pair " +
-				"is shown rather than an estimate" + suppressedClause(matchups) + "."
-		} else if matchups.SuppressedCells > 0 {
-			body = "The snapshot for patch " + snap.Patch + " stores no pairing for this role: every pair it " +
-				"counted was withheld below n = " + thresholdText + " games" + suppressedClause(matchups) +
-				", so no pair is shown rather than an estimate."
-		} else {
-			body = "The snapshot for patch " + snap.Patch + " stores no pairing for this role and reports none " +
-				"withheld, so no pair is shown rather than an estimate."
+		switch stored := len(cellsOf(matchups)); {
+		case stored == 1:
+			body = "The snapshot for patch " + snap.Patch + " holds one stored pairing for this role, below the n = " +
+				thresholdText + " games floor, so no pair is shown rather than an estimate."
+		case stored > 1:
+			body = "The snapshot for patch " + snap.Patch + " holds " + IntegerAny(float64(stored)) +
+				" stored pairings for this role, all below the n = " + thresholdText +
+				" games floor, so no pair is shown rather than an estimate."
+		}
+		if pool := len(matchups.Champions); pool > 0 {
+			body += " " + IntegerAny(float64(pool)) + " champions appear in the pairings it counted."
 		}
 	}
 	return emptyFor("No "+strings.ToLower(label)+" matchup cells published", body, &threshold)
@@ -701,7 +713,7 @@ func buildHeatmap(matchups *aggmodel.Matchups, site *Site, role aggmodel.Role, m
 		IntegerAny(float64(minCellN)) + " games in this snapshot."
 	view.Note = trustedHTML(IntegerAny(float64(published)) + " of " + IntegerAny(float64(totalCells)) +
 		" pairings are published for this role. Cells withheld for being below the threshold are absent from the " +
-		"artifact and read as a dash here, never as zero" + suppressedClause(matchups) + "." +
+		"artifact and read as a dash here, never as zero." +
 		matrixScope{
 			Role:    role,
 			Pool:    champions,
@@ -713,15 +725,6 @@ func buildHeatmap(matchups *aggmodel.Matchups, site *Site, role aggmodel.Role, m
 			Filter:  query.Filter,
 		}.note())
 	return view, champions
-}
-
-// suppressedClause is the parenthesised withheld count the note carries when the
-// artifact reports one.
-func suppressedClause(matchups *aggmodel.Matchups) string {
-	if matchups.SuppressedCells <= 0 {
-		return ""
-	}
-	return " (" + IntegerAny(float64(matchups.SuppressedCells)) + " withheld in total)"
 }
 
 // pairKey is a directed pair, in the emitted order and never sorted, matching

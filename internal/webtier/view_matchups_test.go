@@ -157,10 +157,10 @@ func TestDenseMatrixStaysInsideTheBudget(t *testing.T) {
 
 // emptyMatrixSnapshot rewrites the demo tree's mid matrix into the shape a role
 // has before its lane publishes anything: the pool is listed, no cell is stored,
-// and the artifact reports the pairs it counted and withheld. It is the state
+// and the document's envelope carries a suppressed count. It is the state
 // /matchups/top served at 33,881 B until its lane filled in with two pairings,
-// and the state every role passes through, so it has to be an honest empty state
-// rather than a frame.
+// and the state /matchups/jungle serves live now, so it has to be an honest empty
+// state rather than a frame.
 func emptyMatrixSnapshot(t *testing.T) string {
 	t.Helper()
 	return matrixSnapshotWithCells(t, []any{}, 177)
@@ -181,14 +181,38 @@ func thinMatrixSnapshot(t *testing.T) string {
 	}}, 0)
 }
 
-func matrixSnapshotWithCells(t *testing.T, cells []any, suppressed int) string {
+// thinStoredMatrixSnapshot is the third shape: an artifact with three stored
+// pairs whose samples are below its own min_cell_n (500 in the demo tree), so the
+// artifact has cells and still has nothing to publish.
+func thinStoredMatrixSnapshot(t *testing.T) string {
+	t.Helper()
+	cells := make([]any, 0, 3)
+	for _, opponent := range []int{55, 77, 99} {
+		cells = append(cells, map[string]any{
+			"champion_id":     1,
+			"opponent_id":     opponent,
+			"n":               json.Number("50"),
+			"wins":            json.Number("26"),
+			"win_rate":        0.52,
+			"ci95_half_width": 0.14,
+		})
+	}
+	return matrixSnapshotWithCells(t, cells, 0)
+}
+
+// matrixSnapshotWithCells rewrites the stored cells and the envelope's suppressed
+// count, leaving the champion pool the fixture names so the pool clause the empty
+// state carries is checkable. The count is the document's own field, which the
+// live build copies from the partition's tier-list cells into every role, so the
+// body must not quote it as a matchup count.
+func matrixSnapshotWithCells(t *testing.T, cells []any, suppressedCells int) string {
 	t.Helper()
 	dst := filepath.Join(t.TempDir(), "agg")
 	copyTree(t, fixtureDir(), dst)
 	path := filepath.Join(dst, "v1", "p", "16.18", "EUW", "420", "all", "matchups", "mid.json")
 	document := readJSONDocument(t, path)
 	document["cells"] = cells
-	document["suppressed_cells"] = json.Number(IntegerAny(float64(suppressed)))
+	document["suppressed_cells"] = json.Number(IntegerAny(float64(suppressedCells)))
 	writeJSONDocument(t, path, document)
 	return dst
 }
@@ -197,13 +221,16 @@ func matrixSnapshotWithCells(t *testing.T, cells []any, suppressed int) string {
 // state. The defect these tests exist for was a frame sized to the pool, and the
 // frame is at its worst when nothing is stored: the pool's dashes with no data in
 // them at all. The live top role served this page at 33,881 B, which is the
-// measurement the frame would have replaced with 784 dashes.
+// measurement the frame would have replaced with 784 dashes, and /matchups/jungle
+// serves it live now.
 //
-// The empty state also has to be true about why it is empty. Both shapes here
-// carry an artifact: one with every pair withheld below the threshold, one with a
-// stored pair that is itself too thin. Neither is a missing artifact, and neither
-// may be described as one - the count the artifact holds is the only honest
-// reason the grid is not drawn.
+// The empty state also has to be true about why it is empty. Every shape here
+// carries an artifact - one with no stored cell at all, one with a stored pair
+// that is itself too thin, one with three - and none of them is a missing
+// artifact, so none may be described as one. Only the stored cells and the pool
+// the document names are quoted: the document's suppressed_cells is the
+// partition's tier-list suppression count copied into every role, and this route
+// may not present it as a count of matchup pairs.
 func TestEmptyMatrixSaysNothingIsPublishedInsteadOfDrawingTheFrame(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -212,14 +239,19 @@ func TestEmptyMatrixSaysNothingIsPublishedInsteadOfDrawingTheFrame(t *testing.T)
 		because string
 	}{
 		{
-			name:    "every pair withheld",
+			name:    "no stored cell",
 			root:    emptyMatrixSnapshot,
-			because: "every pair it counted was withheld below n = 500 games (177 withheld in total)",
+			because: "publishes no pairing for this role at or above n = 500 games",
 		},
 		{
 			name:    "a stored pair below the threshold",
 			root:    thinMatrixSnapshot,
-			because: "stores one pairing for this role, and it is below n = 500 games",
+			because: "holds one stored pairing for this role, below the n = 500 games floor",
+		},
+		{
+			name:    "stored pairs under the threshold",
+			root:    thinStoredMatrixSnapshot,
+			because: "holds 3 stored pairings for this role, all below the n = 500 games floor",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -244,6 +276,12 @@ func TestEmptyMatrixSaysNothingIsPublishedInsteadOfDrawingTheFrame(t *testing.T)
 			}
 			if strings.Contains(page, "has no matchup artifact for this role") {
 				t.Errorf("the empty state calls a present artifact a missing one:\n%s", emptyOf(page))
+			}
+			if strings.Contains(emptyOf(page), "withheld in total") {
+				t.Error("the empty state reads the document's partition-wide suppressed count as a count of matchup pairs")
+			}
+			if !strings.Contains(emptyOf(page), "champions appear in the pairings it counted") {
+				t.Errorf("the empty state does not report the pool the document counted:\n%s", emptyOf(page))
 			}
 			if !strings.Contains(page, "No mid matchup cells published") {
 				t.Error("the empty state does not say no cell is published")
