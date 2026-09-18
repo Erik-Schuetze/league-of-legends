@@ -5,7 +5,7 @@
 //
 //   node scripts/perf/verify-report.mjs
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const DOC = process.env.PERF_DOC ?? 'docs/PERF-EVIDENCE.md';
@@ -195,6 +195,7 @@ checkTrue('§7 every page reports data-state=live', pages.every((p) => p.dataSta
 // figures cannot drift from the reports they cite, and so nobody can replace §5's r1/r2 measurement
 // with a later round's better number without this failing.
 const thousands = (n) => n.toLocaleString('en-US');
+const kib = (n) => (n / 1024).toFixed(1);
 
 const section119 = (() => {
   const start = doc.indexOf('### 11.9 ');
@@ -259,11 +260,20 @@ for (const round of ['6', '7', '8']) {
     }
   }
 }
+// The headroom claims are arithmetic on the row and on the reports, so they are derived here. An
+// overage or a percentage that does not follow from the committed bytes fails this gate.
+const r7worst = json(`${EV}/lh-summary-r7.json`).reduce((a, b) =>
+  b.weight.firstLoadBytes > a.weight.firstLoadBytes ? b : a,
+);
+const r7worstDoc = json(`${EV}/lh-summary-r7.json`).reduce((a, b) => (b.weight.htmlRawBytes > a.weight.htmlRawBytes ? b : a));
+const pctUnder = (n, ceiling) => `${((1 - n / ceiling) * 100).toFixed(1)}% under`;
 checkTrue(
   '§11.9 names the worst HTML and first-load of the shipped posture',
-  section119.includes('74.1 KiB') &&
-    section119.includes('245,229 B (239.5 KiB)') &&
-    section119.includes('19.7% under'),
+  section119.includes(`${thousands(r7worstDoc.weight.htmlRawBytes)} B (${kib(r7worstDoc.weight.htmlRawBytes)} KiB)`) &&
+    section119.includes(`${thousands(r7worst.weight.firstLoadBytes)} B (${kib(r7worst.weight.firstLoadBytes)} KiB)`) &&
+    section119.replace(/\s+/g, ' ').includes(pctUnder(r7worst.weight.firstLoadBytes, 300 * 1024)) &&
+    section119.replace(/\s+/g, ' ').includes(pctUnder(r7worstDoc.weight.htmlRawBytes, 150 * 1024)),
+  `${pctUnder(r7worst.weight.firstLoadBytes, 300 * 1024)} / ${pctUnder(r7worstDoc.weight.htmlRawBytes, 150 * 1024)}`,
 );
 checkTrue(
   '§11.9 says its rounds are not edge measurements',
@@ -274,8 +284,393 @@ checkTrue(
   section119.includes('26.4 KiB') && section119.includes('was never reproduced'),
 );
 
+// --------------------------------------------- §5.1 / §11.8: the live-edge round (r9)
+// The 300 KB row is a ceiling on bytes a visitor receives, so the round that closes it has to be taken
+// against the public origin. These checks derive §5.1's table and §5's row from the reports, so the
+// live measurement cannot be softened, replaced by the §11 projection, or quietly deleted.
+const sectionOf = (heading, next = '\n## ') => {
+  const start = doc.indexOf(heading);
+  if (start === -1) return '';
+  const end = doc.indexOf(next, start + 1);
+  return doc.slice(start, end === -1 ? undefined : end);
+};
+const section51 = sectionOf('### 5.1 ');
+const section118 = sectionOf('### 11.8 ', '\n### ');
+const section61 = sectionOf('### 6.1 ', '\n### ');
+const section114 = sectionOf('### 11.4 ', '\n### ');
+
+checkTrue('§5.1 exists and is a measurement section', section51.length > 1500, `${section51.length} chars`);
+checkTrue('§11.8 is no longer a deferred run', section118.length > 800 && !/deferred to the coordinator/.test(section118));
+
+const r9path = `${EV}/lh-summary-r9.json`;
+checkTrue('§5.1 cites docs/evidence/lh-summary-r9.json', existsSync(r9path), r9path);
+const r9 = json(r9path);
+const r9raw = r9.map((r) => json(r.file));
+checkTrue('§5.1 r9 summarises 11 routes', r9.length === 11, `${r9.length}`);
+checkTrue(
+  '§5.1 r9 summary is self-consistent',
+  r9.every((r) => r.overall === (Object.values(r.grades).includes('FAIL') ? 'FAIL' : 'PASS')),
+);
+checkTrue(
+  '§5.1 r9 reports the raw files it summarises',
+  r9.every((r) => r.file.startsWith(`${EV}/lh-r9-`) && existsSync(r.file)),
+);
+// The whole point of the round: the bytes came from the public origin, not from a port-forward or a
+// local binary. If this ever fails, §5.1 is describing the wrong instrument.
+checkTrue(
+  '§5.1 r9 was taken against the public edge',
+  r9raw.every((x) => String(x.finalUrl ?? '').includes('lol.erik-schuetze.dev')),
+  r9raw.map((x) => String(x.finalUrl ?? '').slice(0, 40)).join(' '),
+);
+// The edge is behind basic auth and Lighthouse writes the credential into strings it does not mask.
+// Nothing committed may carry it: the runner redacts before writing, and this is the guard that says so.
+// The edge is behind basic auth and Lighthouse writes the credential into strings it does not mask.
+// Nothing committed may carry it: the runner redacts before writing, and this is the guard that says
+// so. The literal is assembled from parts so that this file is not itself the one file carrying it.
+const SECRET = new RegExp(['party', 'ampel'].join(''));
+const CREDENTIAL_URL = /\bhttps?:\/\/[^/@\s"']+:[^/@\s"']+@/;
+const committedReports = readdirSync(EV).filter((f) => /^lh-r\d+.*\.json(\.gz)?$/.test(f));
+checkTrue('the evidence directory holds the raw reports', committedReports.length >= 40, `${committedReports.length} files`);
+const redactionTargets = [
+  ...committedReports.map((f) => `${EV}/${f}`),
+  DOC,
+  ...readdirSync('scripts/perf').map((f) => `scripts/perf/${f}`),
+];
+checkTrue(
+  'no committed file carries the credential',
+  redactionTargets.every((f) => {
+    const text = read(f);
+    return !SECRET.test(text) && !CREDENTIAL_URL.test(text);
+  }),
+  redactionTargets.filter((f) => SECRET.test(read(f))).join(', '),
+);
+
+const r9failed = r9.filter((r) => r.overall !== 'PASS');
+checkTrue(
+  '§5.1 r9 fails on exactly the two recorded routes',
+  r9failed.length === 2 &&
+    r9failed.some((r) => r.route === '/champions/ahri/top/' && r.failingAudits.includes('is-crawlable')) &&
+    r9failed.some((r) => r.route === '/explore/' && r.grades.firstLoad === 'FAIL'),
+  r9failed.map((r) => `${r.route}:${Object.entries(r.grades).filter(([, g]) => g === 'FAIL').map(([k]) => k)}`).join(' '),
+);
+const explore = r9.find((r) => r.route === '/explore/');
+checkTrue(
+  '§5.1 the only weight failure is /explore/, and it is over the row',
+  r9.filter((r) => r.grades.firstLoad === 'FAIL').length === 1 &&
+    explore.grades.firstLoad === 'FAIL' &&
+    explore.weight.firstLoadBytes > 300 * 1024,
+  `${explore.route} ${explore.weight.firstLoadBytes} B`,
+);
+// Cell by cell: a §5.1 row may not disagree with the report it claims to summarise, and the CSS/JS/
+// font columns are derived too so the recurring 10,645 / 1,912 / 153,800 pattern cannot drift.
+const classTotals = (file) => {
+  const items = json(file).audits?.['network-requests']?.details?.items ?? [];
+  const t = { Document: 0, Stylesheet: 0, Script: 0, Font: 0, Image: 0 };
+  let imageCount = 0;
+  for (const i of items) {
+    const c = i.resourceType === 'Other' && i.mimeType === 'font' ? 'Font' : i.resourceType;
+    if (c === 'Image') imageCount += 1;
+    if (c in t) t[c] += i.resourceSize || 0;
+  }
+  return { ...t, imageCount };
+};
+const rows51 = section51
+  .split('\n')
+  .filter((l) => l.startsWith('| `'))
+  .map((l) => l.split('|').slice(1, -1).map((c) => c.trim()));
+checkTrue('§5.1 carries one table row per audited route', rows51.length === 11, `${rows51.length} rows`);
+for (const r of r9) {
+  const cells = rows51.find((c) => c[0] === `\`${r.route}\``);
+  const t = classTotals(r.file);
+  checkTrue(
+    `§5.1's row for ${r.route} matches its report`,
+    Boolean(cells) &&
+      cells[1].includes(thousands(r.weight.htmlRawBytes)) &&
+      cells[2].includes(thousands(t.Stylesheet)) &&
+      cells[3].includes(thousands(t.Script)) &&
+      cells[4].includes(thousands(t.Font)) &&
+      cells[5].startsWith(thousands(t.Image)) &&
+      cells[6].includes(thousands(r.weight.firstLoadBytes)) &&
+      cells[7].includes(kib(r.weight.firstLoadBytes)),
+    cells
+      ? `doc ${cells[1]}/${cells[2]}/${cells[3]}/${cells[4]}/${cells[5]}/${cells[6]}/${cells[7]} raw ${r.weight.htmlRawBytes}/${t.Stylesheet}/${t.Script}/${t.Font}/${t.Image}/${r.weight.firstLoadBytes}`
+      : 'row missing',
+  );
+}
+// The font share is the number the design lane will act on, so it is derived from the reports rather
+// than typed: the leanest audited route's first-load and the font class total of its own report.
+const r1records = json(`${EV}/lh-summary-r1.json`);
+const r1floor = r1records.reduce((a, b) => (b.weight.firstLoadBytes < a.weight.firstLoadBytes ? b : a));
+const floorFontShare = ((classTotals(r1floor.file).Font / r1floor.weight.firstLoadBytes) * 100).toFixed(1);
+const edgeFloor = r9.reduce((a, b) => (b.weight.firstLoadBytes < a.weight.firstLoadBytes ? b : a));
+const edgeFontShare = ((classTotals(edgeFloor.file).Font / edgeFloor.weight.firstLoadBytes) * 100).toFixed(1);
+checkTrue(
+  '§5 font residual states the derived share of the leanest route',
+  doc.replace(/\s+/g, ' ').includes(`**${floorFontShare}%** of the floor on the`) &&
+    doc.replace(/\s+/g, ' ').includes(`${edgeFontShare}%`) &&
+    [`${thousands(classTotals(r1floor.file).Font)} B in total`].every((x) => doc.includes(x)),
+  `${r1floor.route} ${floorFontShare}% / ${edgeFloor.route} ${edgeFontShare}%`,
+);
+
+checkTrue(
+  '§5.1 records the failing route the ceiling is now about',
+  section51.includes(thousands(explore.weight.firstLoadBytes)) && section51.includes(kib(explore.weight.firstLoadBytes)),
+);
+checkTrue(
+  '§5.1 states the ceiling is not moved for the failing route',
+  section51.includes('unchanged') && section51.includes('not moved'),
+);
+// §11.4's table is a projection and §5.1 is the measurement of the same four routes; the gap between
+// them is stated in two places, so it is derived once here from the projected column and the reports.
+const projected = section114
+  .split('\n')
+  .filter((l) => l.startsWith('| `'))
+  .map((l) => l.split('|').slice(1, -1).map((c) => c.trim()))
+  .flatMap(([route, r2, images, proj]) => {
+    const n = Number(images.replace(/[,_]/g, '').match(/\((\d+)\)/)?.[1] ?? 0);
+    const before = Number(r2.replace(/[,_]/g, '').match(/(\d+(?:\.\d+)?)\s*KiB/)?.[1] ?? 0);
+    const m = proj.replace(/[,_]/g, '').match(/(\d+(?:\.\d+)?)\s*KiB/);
+    // The four rows this sentence is about: the routes §5 failed on by image weight (over 300 KiB
+    // before the change). `/champions/ahri/top/` also carried one image but was never over the row.
+    return n > 0 && before > 300 && m ? [[route.replace(/`/g, ''), Number(m[1])]] : [];
+  });
+const optimism = projected
+  .map(([route, kib]) => {
+    const measured = r9.find((r) => r.route === route);
+    return measured ? Math.round((measured.weight.firstLoadBytes / 1024 - kib) * 10) / 10 : NaN;
+  })
+  .flatMap((d) => (Number.isNaN(d) ? [] : [Math.round(d)]));
+const optimismRange = `${Math.min(...optimism)}-${Math.max(...optimism)} KiB`;
+checkTrue(
+  '§11.4 and §11.8 state the same derived projection gap',
+  optimism.length === 4 &&
+    section114.includes(`${optimismRange} optimistic`) &&
+    section118.includes(`(${optimismRange})`),
+  `${optimismRange} from ${optimism.join(', ')}`,
+);
+
+// §5's row must carry the edge measurement *beside* the r1/r2 FAIL. Both halves are asserted here:
+// the old measurement has to stay (see the guards below) and the new one has to be present.
+const weightRow = doc.split('\n').find((l) => l.startsWith('| total first-load ≤300 KB uncompressed ')) ?? '';
+checkTrue(
+  '§5 first-load row carries the r9 edge measurement beside the r1/r2 FAIL',
+  weightRow.includes('/explore/') &&
+    weightRow.includes(thousands(explore.weight.firstLoadBytes)) &&
+    weightRow.includes(kib(explore.weight.firstLoadBytes)) &&
+    weightRow.includes('1 of 11'),
+);
+checkTrue(
+  '§5 first-load row still names the ceiling it exceeds without moving it',
+  weightRow.includes('300 KB') && weightRow.includes('not moved'),
+);
+// The overage is the difference between the measurement and the row, and it appears in four places
+// (§5's row, §5.1's row, §5.1's prose, §11.8). Derived once here so none of the four can drift.
+const overage = explore.weight.firstLoadBytes - 300 * 1024;
+checkTrue(
+  'every place that names the overage states the same derived figure',
+  overage > 0 &&
+    section51.includes(`${thousands(overage)} B over`) &&
+    weightRow.includes(`${thousands(overage)} B over`) &&
+    section118.includes(`${thousands(overage)} B over`),
+  `${thousands(overage)} B over (308,481 - 307,200)`,
+);
+// The HTML row is what §11.9 was for, so it carries the edge figure too: the worst document on the
+// edge is derived from r9 rather than typed, and it has to be the same route §5.1 fails on.
+const htmlRow = doc.split('\n').find((l) => l.startsWith('| HTML ≤150 KB uncompressed ')) ?? '';
+const worstDoc = r9.reduce((a, b) => (b.weight.htmlRawBytes > a.weight.htmlRawBytes ? b : a));
+checkTrue(
+  '§5 HTML row carries the r9 edge document figure for the worst route',
+  htmlRow.includes(thousands(worstDoc.weight.htmlRawBytes)) &&
+    htmlRow.includes(kib(worstDoc.weight.htmlRawBytes)) &&
+    htmlRow.includes(worstDoc.route.replace(/\/$/, '')) &&
+    htmlRow.includes(`${((150 * 1024 - worstDoc.weight.htmlRawBytes) / 1024).toFixed(1)} KiB to spare`),
+  `${worstDoc.route} ${worstDoc.weight.htmlRawBytes} B`,
+);
+// The two halves of the 760 KiB question, re-derived from the raw reports: reconciliation 1 from the
+// r2 tier-list report (the images the removal deleted) and reconciliation 2 from r9's own request
+// list (the requests a document grep cannot see). A swapped or invented byte here fails the gate.
+const r2top = `${EV}/lh-r2-tier-list-top.json.gz`;
+const r2totals = classTotals(r2top);
+const r2all = json(r2top).audits['network-requests'].details.items.reduce((n, i) => n + (i.resourceSize || 0), 0);
+checkTrue(
+  '§5.1 reconciliation 1 matches the r2 report it cites',
+  section51.includes(thousands(r2totals.Image)) &&
+    section51.includes(`${r2totals.imageCount} requests`) &&
+    section51.includes(thousands(r2all)) &&
+    section51.includes(kib(r2all)) &&
+    section51.includes(thousands(r2totals.Document)) &&
+    section51.includes(thousands(r2totals.Font)),
+  `images ${r2totals.imageCount}/${r2totals.Image} total ${r2all}/${kib(r2all)} doc ${r2totals.Document} font ${r2totals.Font}`,
+);
+// Third-party accounting is derived from the url fields rather than from a fixed host list, because a
+// report taken through the authenticated edge carries `//REDACTED@` in some url fields: a host test
+// that does not look past the userinfo counts the document, its CSS and the favicon as third-party.
+// An earlier revision of lh-requests.mjs printed exactly that on /explore/ ("3 request(s), 152,769 B").
+const hostOf = (u) => {
+  try {
+    return new URL(String(u ?? '').replace(/\/\/[^@/]*@/, '//')).host;
+  } catch {
+    return '';
+  }
+};
+const thirdPartyOf = (file) => {
+  const items = json(file).audits['network-requests'].details.items ?? [];
+  const origin = hostOf(items.find((i) => i.resourceType === 'Document')?.url ?? items[0]?.url);
+  const tp = items.filter((i) => hostOf(i.url) !== origin);
+  return {
+    count: tp.length,
+    bytes: tp.reduce((n, i) => n + (i.resourceSize || 0), 0),
+    hosts: [...new Set(tp.map((i) => hostOf(i.url).replace(/^www\./, '')))].sort().join(','),
+    images: items.filter((i) => i.resourceType === 'Image').length,
+  };
+};
+const r2third = thirdPartyOf(r2top);
+checkTrue(
+  '§5.1 reconciliation 1 third-party count is the 29 images, host Data Dragon',
+  r2third.count === 29 && r2third.bytes === r2totals.Image && r2third.hosts === 'ddragon.leagueoflegends.com',
+  `${r2third.count} request(s), ${r2third.bytes} B, ${r2third.hosts}`,
+);
+checkTrue(
+  'no r9 edge report counts a same-origin request as third-party',
+  r9.every((r) => {
+    const tp = thirdPartyOf(r.file);
+    if (tp.count !== tp.images) return false;
+    return tp.count === 0 ? tp.hosts === '' : tp.hosts === 'ddragon.leagueoflegends.com';
+  }),
+  r9
+    .map((r) => `${r.route} ${thirdPartyOf(r.file).count}/${thirdPartyOf(r.file).hosts || '-'}`)
+    .filter((x) => !/ 0\/-$| 1\/ddragon\.leagueoflegends\.com$/.test(x))
+    .join(' | ') || 'all 11 reports: third-party count == image count',
+);
+const missed = (json(explore.file).audits['network-requests'].details.items ?? []).filter((i) =>
+  /TableIsland|preload-helper|favicon\.svg/.test(i.url),
+);
+const missedTotal = missed.reduce((n, i) => n + (i.resourceSize || 0), 0);
+const sizeAfter = (needle) => {
+  const m = section51.match(new RegExp(`${needle}[^\\d]*(\\d[\\d,]*)\\s*B`));
+  return m ? Number(m[1].replace(/,/g, '')) : NaN;
+};
+checkTrue(
+  '§5.1 reconciliation 2 matches the r9 request list, size per module',
+  missed.length === 3 &&
+    section51.includes(thousands(missedTotal)) &&
+    sizeAfter('TableIsland') === (missed.find((i) => /TableIsland/.test(i.url))?.resourceSize ?? -1) &&
+    sizeAfter('preload-helper') === (missed.find((i) => /preload-helper/.test(i.url))?.resourceSize ?? -1),
+  missed.map((i) => `${i.url.split('/').pop()} ${i.resourceSize}`).join(' | '),
+);
+// The distinction the coordinator asked to be unmistakable to someone who reads only the table: §5's
+// own heading says which round is the edge round, and the §5.1 table is the one taken there.
+checkTrue(
+  '§5 states in-table that §5.1 is its only edge measurement',
+  doc.includes('§5.1\'s table is the only measurement in') &&
+    doc.includes('against the public edge') &&
+    doc.includes('not** superseded by them'),
+);
+
+// §11.8's invocation: the two inputs that make the round reproducible (the origin and the auth) and
+// the redaction requirement that makes its evidence publishable.
+checkTrue(
+  '§11.8 records the edge invocation, not a port-forward one',
+  section118.includes('https://lol.erik-schuetze.dev') &&
+    section118.includes('--auth') &&
+    section118.includes('--round 9') &&
+    section118.includes('--routes'),
+);
+checkTrue('§11.8 records why the report must be redacted', section118.includes('redact') && section118.includes('28'));
+checkTrue('§11.8 records the result of the run', section118.includes('9 PASS, 2 FAIL') && section118.includes('301.3 KiB'));
+
+// §6.1 states the image-free ceiling. Derive it from the raw r1 reports rather than trusting the
+// prose: the pre-correction sentence claimed the *minimum* of the range as if it were the maximum, and
+// a hand-copied table had given /tier-list/top/ its neighbour's image count.
+const imageFree = r1.map((r) => {
+  const t = classTotals(r.file);
+  return { route: r.route, count: t.imageCount, imageBytes: t.Image, free: r.weight.firstLoadBytes - t.Image };
+});
+// The range §6.1 states is over the four routes the row actually failed, which is the set its table
+// lists: the routes that carried no image (or a single champion portrait) were already inside the
+// budget, and their image-free value is just their first load.
+const bearing = imageFree.filter((x) => r1.find((r) => r.route === x.route).grades.firstLoad === 'FAIL');
+const maxFree = bearing.reduce((a, b) => (b.free > a.free ? b : a));
+const minFree = bearing.reduce((a, b) => (b.free < a.free ? b : a));
+checkTrue(
+  '§6.1 image-free ceiling derives from the raw reports (max 226.3, min 222.4 KiB)',
+  maxFree.route === '/champions/ahri/mid/' && kib(maxFree.free) === '226.3' && kib(minFree.free) === '222.4',
+  `${maxFree.route} ${kib(maxFree.free)} / ${minFree.route} ${kib(minFree.free)}`,
+);
+checkTrue(
+  '§6.1 states the corrected ceiling and not the minimum-as-maximum sentence it replaced',
+  section61.includes('exceeded 226.3 KiB') && !section61.includes('no route exceeds **222.4 KiB**'),
+);
+const rows61 = section61
+  .split('\n')
+  .filter((l) => l.startsWith('| `'))
+  .map((l) => l.split('|').slice(1, -1).map((c) => c.trim()));
+for (const cells of rows61) {
+  const r = imageFree.find((x) => cells[0] === `\`${x.route}\``);
+  checkTrue(
+    `§6.1's image column for ${cells[0]} matches its report`,
+    Boolean(r) && r.imageBytes > 0 && cells[1] === `${r.count}` && cells[2].includes(kib(r.imageBytes)),
+    r ? `${cells[1]}/${cells[2]} raw ${r.count}/${kib(r.imageBytes)}` : 'route not in r1',
+  );
+}
+// §6.1's table lists the routes that failed the row, so every one of its rows must be an image-bearing
+// r1 route and the four FAIL routes must all be there — no invented rows, no missing failure.
+checkTrue(
+  '§6.1 lists exactly the four r1 routes the row marked FAIL',
+  rows61.length === 4 &&
+    imageFree
+      .filter((x) => r1.find((r) => r.route === x.route).grades.firstLoad === 'FAIL')
+      .every((x) => rows61.some((c) => c[0] === `\`${x.route}\``)),
+  rows61.map((c) => c[0]).join(' '),
+);
+// §11.4 keeps its projection untouched, and labels the range's minimum as the minimum.
+checkTrue(
+  '§11.4 keeps its projection cell for /tier-list/top/ and labels 222.4 KiB as the minimum',
+  section114.includes('787.6 KiB (29)') && section114.includes('min 222.4 KiB') && section114.includes('max 226.3 KiB'),
+);
+checkTrue(
+  '§11.4 still refuses to replace §5 and records the gap the edge round found',
+  section114.includes('did not replace §5') && section114.includes('25-28 KiB'),
+);
+// §11.9's rows are Go-tier measurements; §5.1 is the edge round that supersedes them for the ceiling.
+const matchupsEdge = r9.filter((r) => r.route.startsWith('/matchups/'));
+checkTrue(
+  '§11.9 points at the edge round that measures its route',
+  section119.includes('219,211 B (214.1 KiB)') && section119.includes('219,598 B (214.5 KiB)'),
+);
+for (const r of matchupsEdge) {
+  checkTrue(
+    `§11.9's edge pointer matches r9 for ${r.route}`,
+    section119.includes(`${thousands(r.weight.firstLoadBytes)} B (${kib(r.weight.firstLoadBytes)} KiB)`),
+  );
+}
+// §6.2's directive is asserted from the served markup inside the r9 report, not from a side note: the
+// audit's own details carry the meta tag, and the control routes carry none.
+const section62 = sectionOf('### 6.2 ');
+const crawlableAudit = (r) => json(r.file).audits?.['is-crawlable'];
+const directive = crawlableAudit(r9.find((r) => r.route === '/champions/ahri/top/')).details.items[0].source.snippet;
+checkTrue(
+  '§6.2 quotes the served robots directive from the r9 report',
+  directive === '<meta name="robots" content="noindex,follow" />' && section62.includes(directive),
+  directive,
+);
+for (const route of ['/champions/ahri/mid/', '/champions/kennen/']) {
+  const a = crawlableAudit(r9.find((r) => r.route === route));
+  checkTrue(
+    `§6.2's control route ${route} is crawlable in r9 with no blocking item`,
+    a.score === 1 && a.details.items.length === 0 && section62.includes(`\`${route}\``),
+    `score ${a.score}, ${a.details.items.length} items`,
+  );
+}
+
+checkTrue(
+  '§10 lists the r9 reports and the request-list script',
+  doc.includes('lh-r9-*.json.gz') && doc.includes('scripts/perf/lh-requests.mjs'),
+);
+
 // §5 still carries the r1/r2 measurement in its cells, with the later rounds as annotation.
 const row = (label) => doc.split('\n').find((l) => l.startsWith(`| ${label} `)) ?? '';
+
 checkTrue(
   '§5 first-load row still measures FAIL with the r1/r2 worst value',
   row('total first-load ≤300 KB uncompressed').includes('**FAIL**') &&
@@ -302,7 +697,7 @@ checkTrue(
 // from the summaries, so the prose can only agree with them. Rounds whose summary has been pruned
 // drop out of the clause — pruning evidence means rewriting the row, which is the intent.
 const crawlable = new Map();
-for (const round of ['1', '2', '3', '4', '5', '6', '7', '8']) {
+for (const round of ['1', '2', '3', '4', '5', '6', '7', '8', '9']) {
   const p = `${EV}/lh-summary-r${round}.json`;
   if (!existsSync(p)) continue;
   const bad = json(p).filter((r) => r.failingAudits.includes('is-crawlable'));
@@ -328,7 +723,7 @@ checkTrue(
 
 checkTrue(
   'note (a) still states that a projection replacing a measurement would be a laundered pass',
-  doc.includes('A projection that replaces a measurement would be a\nlaundered pass'),
+  doc.replace(/\s+/g, ' ').includes('A projection that replaces a measurement would be a laundered pass'),
 );
 checkTrue(
   'note (b) still records the coordinator withdrawing the fixture-only instruction',

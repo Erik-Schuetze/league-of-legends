@@ -14,8 +14,8 @@ Measured 2026-09-17 17:12–17:21 UTC by an independent measurement agent. Raw r
 | Pod image measured | `ghcr.io/erik-schuetze/league-of-legends:latest` @ `sha256:d4e136ddda522238ddc1976afb713173b4c7a1a576a80f28edf3a0e150555f5f` |
 | Repo state | measurements are of the **deployed image**, not of repo HEAD. HEAD advanced to `8f3a2a1` mid-measurement (see §2) |
 | Corpus | 1,058 routes (origin `sitemap.xml`) |
-| Audited routes | 9 (the brief's mandated five, plus a second role for the same champion, a second indexable champion role, and a second tier-list/matchup role) |
-| Not measured | static Astro/Caddy tier, and production network latency (see §8) |
+| Audited routes | 9 (the brief's mandated five, plus a second role for the same champion, a second indexable champion role, and a second tier-list/matchup role) — **11 in §5.1's post-cutover edge round**, which adds `/explore/` and `/champions/kennen/` |
+| Not measured | static Astro/Caddy tier, and production network latency (see §8). The one exception is §5.1's r9 round, which was taken against `https://lol.erik-schuetze.dev` itself and therefore *is* a production-path measurement |
 
 ## 2. Instrument and positive control
 
@@ -94,26 +94,39 @@ because the namespace was shared with other agents' pods.
 | Performance ≥90 | 99–100, all 9 routes × 2 rounds | **PASS** (margin ≥9) |
 | Accessibility =100 | 100, all 9 routes × 2 rounds | **PASS** |
 | Best Practices ≥95 | 100, all 9 routes × 2 rounds | **PASS** |
-| SEO ≥95 | 100 on 8 of 9; **69** on `/champions/ahri/top/` | **FAIL** (1 route) — and it is the only row here that fails for a reason other than weight: **`/champions/ahri/top/` 69 in r1, r2 and r5; `/champions/ahri/mid/` 69 in r3, r4, r6, r7 and r8** (`failingAudits: ["is-crawlable"]` in every one of those rounds, and every other sampled route 100 in every one of them). Which of the two roles goes *noindex* follows the cells the served artifact stores rather than the route, so the failure **moves between the pair instead of closing**: `/champions/ahri/mid/` is a route r1/r2 measured at 100, and r5 measured *it* at 100 while failing the mirror. Compare the first-load row below, which fails for weight — this one fails with every byte under budget. See §6.2 (fix routed to another lane; measured here, not fixed here) |
+| SEO ≥95 | 100 on 8 of 9; **69** on `/champions/ahri/top/` | **FAIL** (1 route) — and it is the only row here that fails for a reason other than weight: **`/champions/ahri/top/` 69 in r1, r2, r5 and r9; `/champions/ahri/mid/` 69 in r3, r4, r6, r7 and r8** (`failingAudits: ["is-crawlable"]` in every one of those rounds, and every other sampled route 100 in every one of them). **r9 is the edge round (§5.1): the same single route fails there, on the same audit, with all 10 other routes at 100.** Which of the two roles goes *noindex* follows the cells the served artifact stores rather than the route, so the failure **moves between the pair instead of closing**: `/champions/ahri/mid/` is a route r1/r2 measured at 100, and r5 measured *it* at 100 while failing the mirror. Compare the first-load row below, which fails for weight — this one fails with every byte under budget. See §6.2 (fix routed to another lane; measured here, not fixed here) |
 | LCP ≤2.5 s | worst 1,849 ms | **PASS** (margin 651 ms) |
 | CLS ≤0.1 | worst 0.002 | **PASS** |
 | TBT ≤200 ms | 0 ms on every route and round | **PASS** |
 | INP ≤200 ms | not emitted by Lighthouse in navigation mode | **NOT MEASURED** |
-| HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** — of the r1/r2 revisions of those routes. Later rounds measured `/matchups/{mid,top}/` at **164,502 B** (r3/r4) and **2,768,758 B** (r5) on the same tier. **Measured after §11.9 bounded the grid** — worst **75,888 B / 74.1 KiB** (r7, shipped fixture posture, 11 routes) and **65,453 B / 63.9 KiB** (r8, live, 8 routes) — so the row holds on both postures **once the image carrying §11.9 is deployed**; it does not hold on the tier as it runs today. Measured, not projected. See note (b) |
+| HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** — of the r1/r2 revisions of those routes. Later rounds measured `/matchups/{mid,top}/` at **164,502 B** (r3/r4) and **2,768,758 B** (r5) on the same tier. **Measured after §11.9 bounded the grid** — worst **75,888 B / 74.1 KiB** (r7, shipped fixture posture, 11 routes) and **65,453 B / 63.9 KiB** (r8, live, 8 routes) — so the row holds on both postures **once the image carrying §11.9 is deployed**; it did not hold on the tier as it ran before that image. Measured, not projected. **On the edge itself (r9, §5.1) the worst document is 141,790 B / 138.5 KiB (`/explore/`) and the two `/matchups/*` routes are 49,870 / 50,257 B, so the row passes there too, with 11.5 KiB to spare on the worst route
+(`141,790` against `150 KiB = 153,600 B`).** See note (b) |
 | HTML ≤40 KB gzipped | worst as served on the wire 10.2 KiB (`/tier-list/top/`, Lighthouse); worst across all 1,058 routes 9.5 KiB (`/about/` = 9,731 B). The same page is 9.3 KiB when re-gzipped with zlib defaults, i.e. the origin's own gzip output runs ~8% larger than zlib — the audited on-wire figure is the conservative one | **PASS** |
 | islands ≤2/page, both deferred | max **1** island/page, on 10 of 1,058 pages; 0 blocking scripts | **PASS** |
-| total first-load ≤300 KB uncompressed | 187.3–199.4 KiB on 4 routes; **429.7 / 447.7 / 939.0 / 1013.3 KiB** on 5 routes | **FAIL** (4 routes) — this row is *measured live*; the lower §11 figures are a **projection**, and this row is **not** superseded by them. Measured (not projected) after §11.9 bounded the grid, on the same tier: worst **245,229 B / 239.5 KiB** (r7, shipped fixture posture, 11 routes) and **239,631 B / 234.0 KiB** (r8, live, 8 routes), i.e. 19.7% under the row — but still **not the edge**, so this row is not closed until §11.8's post-cutover run. See note (a), and note (b) for the two `/matchups/*` routes whose later revisions measured **2,938,099 B** before §11.9 bounded the grid |
+| total first-load ≤300 KB uncompressed | 187.3–199.4 KiB on 4 routes; **429.7 / 447.7 / 939.0 / 1013.3 KiB** on 5 routes | **FAIL** — **(4 routes) in r1/r2**; **FAIL on 1 of the 11 routes measured on the edge** (§5.1). This row is *measured live*; the lower §11 figures are a **projection**, and this row is **not** superseded by them. Measured (not projected) after §11.9 bounded the grid, on the same tier: worst **245,229 B / 239.5 KiB** (r7, shipped fixture posture, 11 routes) and **239,631 B / 234.0 KiB** (r8, live, 8 routes), i.e. 20.2% under the row — but still **not the edge**, so this row was not closed until §11.8's post-cutover run. **That run has now been taken** (§5.1, r9, 2026-09-18, against `https://lol.erik-schuetze.dev` itself, 11 routes): the row is **FAIL on 1 of 11 routes — `/explore/` at 308,481 B / 301.3 KiB, 1,281 B over** — and PASS on the other 10 (214.1–253.6 KiB). The one failing route is *not* one of the four above, and the ceiling is not moved for it. See §5.1, note (a), and note (b) for the two `/matchups/*` routes whose later revisions measured **2,938,099 B** before §11.9 bounded the grid |
 | zero axe serious+critical | 0 on all 9 routes (axe 4.13.0, 63 rules evaluated) | **PASS** |
+
+**How to read this table, if you read nothing else.** Every cell above except the two that name a later
+round is an **r1/r2 measurement of the deployed Go tier through a port-forward**. Where a cell carries a
+later round it says which one, and those rounds are labelled in place: **r3/r4** a fixture-posture A/B,
+**r5** live through a port-forward, **r6/r8** live through a local binary holding the pod's artifacts,
+**r7** the shipped fixture posture — all still *not* the edge. **§5.1's table is the only measurement in
+this document taken against the public edge**, and the cells below that cite **r9** are that round.
+Nothing in the lower §11 section is a measurement of anything: §11.3 is a fixture A/B and §11.4 is
+arithmetic on the r2 reports, and neither is written into this table.
 
 **Note (a) — every cell above is a measurement; §11's smaller numbers are arithmetic, not a re-measurement.**
 The figures in §5 and §6 come from the live r1/r2 runs in §4, taken through the deployed tier (§9).
 §11, a later lane's change, reports first-load figures of 218.9 / 213.6 / 228.7 KiB on the three
 affected routes and 222.4–226.3 KiB for the same routes projected from the committed baseline. Those
 are a fixture-posture A/B pair plus a subtraction of the image bytes from the r2 reports; **this table
-is deliberately not rewritten to them.** The §7.4 first-load budget therefore stands **FAIL** in its
-last live measurement (429.7–1013.3 KiB) and is **not known to hold in production** until the
-post-cutover run in §11.8 measures the real edge. A projection that replaces a measurement would be a
-laundered pass; §11.4 restates this on its own side.
+is deliberately not rewritten to them.** The §7.4 first-load budget therefore stood **FAIL** in its
+last live measurement at this tier (429.7–1013.3 KiB) and was **not known to hold in production** until
+§11.8's post-cutover run measured the real edge. **That run has now been taken (§5.1): the first-load
+row is FAIL on 1 of 11 routes — `/explore/`, 308,481 B — and PASS on the other 10, and its four
+r1/r2 failures are gone.** A projection that replaces a measurement would be a laundered pass; §11.4
+restates this on its own side. The r1/r2 FAIL figures above are kept as measured history and are *not*
+overwritten by either the projection or the later round.
 
 **Note (b) — `/matchups/*` is a real FAIL on the tier the edge will dial, not a fixture artifact.**
 This document's own live r1/r2 run measured `/matchups/{mid,top}/` at 26.4 KiB of HTML and 187.3 KiB
@@ -138,20 +151,99 @@ change on both postures: r7 — the shipped fixture posture, 11 routes, includin
 **10/11 PASS, worst matchup document 74.1 KiB and worst first-load 239.5 KiB**; r8 (live, 8 routes)
 **7/8 PASS, `/matchups/mid/` 49,870 B / 214.1 KiB first-load**. The single failing route in both rounds
 is `/champions/ahri/mid/` on the SEO row, which is the §6.2 defect, not weight. All of those are Go-tier
-measurements; the edge still dials the static tier, so §11.8 remains the measurement that closes the
-traffic ceiling.
+measurements; **r9 (§5.1) is the one taken against the edge itself, after the cutover, and it is the
+measurement that closes the traffic ceiling — see §11.8.** On the edge the two matchup routes are
+`/matchups/top/` 219,598 B and `/matchups/mid/` 219,211 B first-load, both PASS, with a document of
+50,257 / 49,870 B; **the 150 KiB HTML row and the 300 KB first-load row both hold on those routes as
+served**, and this note exists so that the pre-§11.9 ladder above is not mistaken for the current
+product.
 
 **Residual for the design lane (recorded, not actioned): the font payload.**
-150.2 KiB over 6 requests, incurred on **every** route, so it is ~78% of the 188–199 KiB image-free
-floor and the next reduction has to come from there. It is 6 self-hosted woff2 files in
+150.2 KiB over 6 requests, incurred on **every** route, so it is **80.2%** of the floor on the
+leanest audited route (`/matchups/mid/` at 187.3 KiB in r1/r2; on the edge's leanest, `/` at 202.3 KiB,
+it is 74.2%) and the next reduction has to come from there. It is 6 self-hosted woff2 files in
 `internal/webtier/assets/fonts/` — `inter-400/600/700` (35,056 / 36,384 / 36,300 B),
 `jetbrains-mono-400/700` (7,368 / 7,484 B) and `montserrat-700` (31,208 B), 153,800 B in total —
 declared by `@font-face` in the copied `internal/webtier/assets/astro/…css`. They are same-origin and
 compliant (gate check 3 passes); subsetting or dropping a weight is a design-lane call, not this row.
+The figure and where it is incurred are recorded here for that lane, together with the note that its
+scale is a *risk* argument against aggressive subsetting rather than for it: the champion names this
+site renders carry apostrophes and accents (K'Sante, Kai'Sa, Rek'Saí, Vel'Koz, Cho'Gath, Dr. Mundo,
+LeBlanc), so a subset that drops a glyph fails silently and data-dependently.
+
+### 5.1 The post-cutover run, measured on the real edge (r9, 2026-09-18)
+
+§11.8 deferred the definitive measurement of the 300 KB *traffic* ceiling until the edge dialled the Go
+tier, and refused to buy time with a fixture measurement instead. The cutover has happened, so that run
+has now been taken: **mobile preset, cold cache, 11 routes, against `https://lol.erik-schuetze.dev`
+itself** — the public origin, `data-state="live"`, basic auth, no port-forward, no fixtures, no local
+binary. Raw reports `docs/evidence/lh-r9-*.json.gz`, summary `docs/evidence/lh-summary-r9.json`,
+invocation in §9. The 300 KB ceiling is **unchanged** and is not moved for the route below.
+
+| route | document B | CSS B | JS B | fonts B | images B | first load B | KiB | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `/explore/` | 141,790 | 10,645 | 1,912 | 153,800 | 0 | **308,481** | **301.3** | **FAIL** (weight) — 1,281 B over |
+| `/champions/garen/top/` | 64,153 | 10,645 | 0 | 153,800 | 30,705 (1) | 259,637 | 253.6 | PASS |
+| `/tier-list/top/` | 91,139 | 10,645 | 1,912 | 153,800 | 0 | 257,830 | 251.8 | PASS |
+| `/champions/ahri/mid/` | 63,863 | 10,645 | 0 | 153,800 | 28,511 (1) | 257,153 | 251.1 | PASS |
+| `/tier-list/mid/` | 89,212 | 10,645 | 1,912 | 153,800 | 0 | 255,903 | 249.9 | PASS |
+| `/champions/ahri/top/` | 34,603 | 10,645 | 0 | 153,800 | 28,511 (1) | 227,893 | 222.6 | PASS (weight); SEO 69, §6.2 |
+| `/champions/kennen/` | 35,601 | 10,645 | 0 | 153,800 | 26,105 (1) | 226,485 | 221.2 | PASS |
+| `/matchups/top/` | 50,257 | 10,645 | 4,562 | 153,800 | 0 | 219,598 | 214.5 | PASS |
+| `/matchups/mid/` | 49,870 | 10,645 | 4,562 | 153,800 | 0 | 219,211 | 214.1 | PASS |
+| `/about/` | 46,287 | 10,645 | 0 | 153,800 | 0 | 211,066 | 206.1 | PASS |
+| `/` | 42,390 | 10,645 | 0 | 153,800 | 0 | 207,169 | 202.3 | PASS |
+
+**11 routes: 9 PASS, 2 FAIL** (`docs/evidence/lh-summary-r9.json`). One failure is §6.2's SEO 69 on
+`/champions/ahri/top/`, which is not a weight failure. The other is new and is a weight failure:
+**`/explore/` is 1,281 B over the ceiling**, because its *document* is 141,790 B — the largest audited
+HTML in this document (138.5 KiB against the 150 KB row, 19.0 KiB gzipped against the 40 KB row, so
+both HTML rows still hold, but the first-load row does not). `/explore/`'s overage is HTML volume, not
+images and not fonts: images are 0 there and fonts are the same 150.2 KiB every route carries.
+
+Everything the R15 change was for holds on the edge: the four routes §5 records as **FAIL** for
+1013.3 / 939.0 / 447.7 / 429.7 KiB now measure 251.8 / 249.9 / 253.6 / 251.1 KiB, and the eight
+routes that carried no per-row image are unchanged in kind. **R15 remains an owner-decision item and
+this section changes no delivery** (per the coordinator's standing decision); `/explore/` is recorded
+as a measured FAIL, not fixed here.
+
+**Reconciliation 1 — where §5's pre-removal totals went, request by request.** The gap between §5's
+1,013.3 KiB and any measurement of the page after §11.2 is the **29 Data Dragon champion PNGs** that
+the removed row `<img>` used to fetch. `node scripts/perf/lh-requests.mjs
+docs/evidence/lh-r2-tier-list-top.json.gz` prints the whole list; the largest and the class totals are:
+
+```
+40550  Image  https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zaahen.png
+36384  Font   http://127.0.0.1:18921/fonts/inter-600.woff2
+35056  Font   http://127.0.0.1:18921/fonts/inter-400.woff2
+ 64417  Document  http://127.0.0.1:18921/tier-list/top/
+ 10649  Stylesheet http://127.0.0.1:18921/_astro/JsonLd.BEq7AnVK.css
+  ...
+Document  64,417 B  62.9 KiB      Image   806,467 B  787.6 KiB (29 requests, all third-party)
+Stylesheet 10,649 B  10.4 KiB     Font    153,800 B  150.2 KiB (6 requests)
+Script      1,912 B   1.9 KiB     Other       334 B    0.3 KiB
+                                  total 1,037,579 B  1013.3 KiB
+```
+
+So the route was never "unaccounted": 787.6 KiB of it was third-party art, 150.2 KiB was fonts, and
+62.9 KiB was the document — and §11.2 removed exactly the first of those three.
+
+**Reconciliation 2 — what a hand-rolled sum of the live page misses (2,246 B on every route).** A sum
+built by fetching the document and grepping it for subresources misses three requests that are real
+bytes: `/explore/`'s `<script type="module" src="/_astro/TableIsland….js">` (157 B), the
+`preload-helper` module that shim *imports* (1,755 B, which appears in no HTML at all), and
+`/favicon.svg` (334 B, the document's own icon) — 2,246 B in total. Which of the two modules the
+document itself names was checked against the served markup rather than assumed: `TableIsland….js`
+appears in a `<script src>`, and `preload-helper….js` appears nowhere in the document. That 2,246 B is the
+whole difference between a 299.2 KiB reading of `/explore/` (PASS) and this run's 301.3 KiB (**FAIL**):
+the route is over the line by less than the bytes the shortcut drops, which is why §9 uses
+`network-requests` and `scripts/perf/lh-requests.mjs` prints the list rather than a `url()` grep. The
+same shortcut also misses the six `@font-face` targets, because they are declared inside the copied CSS
+rather than in the document (150.2 KiB).
 
 ## 6. The two failures, with causes
 
-### 6.1 First-load transfer exceeds 300 KB on every route that shows a champion image
+### 6.1 First-load transfer exceeded 300 KB on every route that showed a champion image (r1/r2, before §11.2)
 
 Baseline on every page (fonts + CSS + HTML, no images): **195.6 KiB** at `/`. The two image-bearing
 templates then add third-party champion images that are hotlinked from
@@ -159,23 +251,39 @@ templates then add third-party champion images that are hotlinked from
 
 | route | images loaded | image bytes | + fonts | + document | = first load |
 | --- | --- | --- | --- | --- | --- |
-| `/tier-list/top/` | 26 | 716.6 KiB (transfer 733.3 KiB) | 150.2 KiB | 62.9 KiB | **1013.3 KiB** |
+| `/tier-list/top/` | 29 | 787.6 KiB (transfer 806.1 KiB) | 150.2 KiB | 62.9 KiB | **1013.3 KiB** |
 | `/tier-list/mid/` | 26 | 716.6 KiB (transfer 733.3 KiB) | 150.2 KiB | 59.6 KiB | **939.0 KiB** |
 | `/champions/garen/top/` | 26 | 222.5 KiB (transfer 239.1 KiB) | 150.2 KiB | 64.3 KiB | **447.7 KiB** |
 | `/champions/ahri/mid/` | 22 | 203.4 KiB | 150.2 KiB | 65.4 KiB | **429.7 KiB** |
 
-Excluding third-party images, no route exceeds **222.4 KiB** and the budget would pass everywhere.
-The failure is therefore **entirely third-party image weight**, in two compounding parts:
+(The first revision of this table copied `/tier-list/mid/`'s image count and bytes onto
+`/tier-list/top/`, which really carries 29 images and 787.6 KiB — both are the same defect at different
+table lengths. §11.4's arithmetic and `scripts/perf/lh-requests.mjs` show the corrected pair, and
+`verify-report.mjs` now derives the image-free ceiling from the raw reports rather than trusting this
+table.)
+
+Excluding third-party images, **none of the four routes above exceeded 226.3 KiB**: the range across
+those four is 222.4 KiB (`/tier-list/mid/`, the minimum) to **226.3 KiB** (`/champions/ahri/mid/`, the
+maximum), and the routes that carried no image at all measured 187.3–199.4 KiB to begin with. The
+failure is therefore **entirely third-party image weight**, in two compounding parts:
 
 1. **Hotlinking** (`F-P3`): images are fetched from a third-party CDN rather than the origin, so
    they are outside any origin-side byte control and outside the tier's own caching.
 2. **Wrong rendition** (`F-P3`): the page asks for `.../img/champion/Diana.png`, a 128×128 PNG of
    24,762 B, and renders it in a **24×24** box (`width="24" height="24"`). That is 16,384 source
-   pixels to fill 576 display pixels — about **28× more pixels than the layout uses**, ~717 KiB
-   for 26 rows. A 24–48 px asset (or a sprite) would make this budget pass on its own.
+   pixels to fill 576 display pixels — about **28× more pixels than the layout uses**, ≈ 787 KiB
+   across the 29 rows `/tier-list/top/` renders. A 24–48 px asset (or a sprite) would make this
+   budget pass on its own.
 
 `loading="lazy"` and `alt=""` (decorative, name is adjacent text) are already correct; laziness
 does not help because these images are inside/near the viewport at 412×915.
+
+**Measured after §11.2 removed the per-row images** (§5.1, r9 on the live edge): the list routes carry
+**0 images**, a champion route carries exactly **one** — its own portrait, 26,105 B for Kennen, 28,511 B
+for Ahri, 30,705 B for Garen — and the four routes this table shows over the line measure **251.8 /
+249.9 / 253.6 / 251.1 KiB**, all PASS. So this failure is closed by measurement, not by projection. The
+first-load row still carries one FAIL on the edge, and it is a *different* defect in a *different*
+place: `/explore/`'s document volume (138.5 KiB), not an image. See §5.1.
 
 ### 6.2 SEO 69 on `/champions/ahri/top/` is an intentional `noindex`, not a broken page
 
@@ -195,6 +303,23 @@ policy, and the budget breach is a **grading artefact**: a knowingly-`noindex` p
 **Escalation for the coordinator:** either exempt routes the tier itself marks `noindex` from the
 SEO threshold (and record that exemption in §7.4), or run the SEO leg only over the 270 indexable
 routes. Do not "fix" this by making a no-data page indexable.
+
+**Where the directive is, from the served markup (live edge, §5.1/r9).** Asked "is there a robots meta
+or an equivalent directive in the raw HTML?", the answer is yes, and `r9` captures it in the report
+rather than in a side note: `/champions/ahri/top/`'s `is-crawlable` audit scores **0** and its details
+table has exactly one item, a `head > meta` node whose snippet is the served string
+
+```
+<meta name="robots" content="noindex,follow" />
+```
+
+(details path `1,HTML,0,HEAD,5,META`; the audit lists it as the *Blocking Directive Source*). The two
+control routes in the same round are the counter-example: `/champions/ahri/mid/` and
+`/champions/kennen/` each score `is-crawlable` **1** with **0** blocking items and SEO **100**. So the
+failure is one meta tag the tier emits on purpose, measured on the edge, and not a missing or malformed
+document. `robots-txt` scores 1 with 0 errors in the same report, so nothing in `robots.txt` is
+involved. This is a **measurement handed to the lane that owns the SEO row** (§6.2's fix is not this
+lane's), and it is recorded here because it has been invisible to everyone reading byte columns.
 
 ## 7. Deterministic facts from the built tree (no browser)
 
@@ -237,6 +362,11 @@ errors. This contradicts the earlier static-tier finding that islands were dead
 * **Third-party image bytes depend on ddragon's CDN** at measurement time; the origin bytes do not.
 * **Namespace contention**: the `lolstats` namespace hosted other agents' short-lived pods
   throughout, which is one reason two rounds are reported rather than one.
+* **This list applied to §1–§7, which were taken through a port-forward.** §5.1's r9 round was taken
+  against `https://lol.erik-schuetze.dev` itself, so for that round the latency bullet above does not
+  apply and the first bullet is *replaced* by the opposite: the numbers include the real edge, the real
+  Caddy hop and the site's own TLS. `Lab INP`, the manual a11y audits and axe's `color-contrast`
+  `incomplete` findings are unaffected — they are properties of the audits, not of the origin.
 
 ## 9. Reproduce
 
@@ -260,7 +390,25 @@ gunzip -c docs/evidence/lh-r1-home.json.gz | jq '.categories.performance.score'
 node scripts/perf/extract-lh.mjs docs/evidence/lh-r1-*.json.gz
 node scripts/perf/extract-lh.mjs --json docs/evidence/lh-r1-*.json.gz > docs/evidence/lh-summary-r1.json
 
-# verify every number in this document against the raw evidence (185 checks; exit 1 on drift)
+# §5.1: the same 9 routes PLUS /explore/ and /champions/kennen/, against the public edge itself,
+# after the cutover — no port-forward, no fixtures, no local binary. The credential is required:
+# the tier sits behind basic auth and every subresource request needs it too, so --base carries it
+# and the runner redacts it from every report before writing (see §10). The credential is supplied
+# in the environment — `EDGE_AUTH="<user>:<pass>"` — and is never written into this document or into
+# any committed file: §10's last row is the check that proves no committed report carries it.
+CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" PERF_TOOLS_DIR=/tmp/a11y-tools \
+bash scripts/perf/lighthouse-routes.sh --round 9 --base https://lol.erik-schuetze.dev \
+  --auth "$EDGE_AUTH" --out docs/evidence --tools /tmp/a11y-tools \
+  --routes "/ /tier-list/mid/ /tier-list/top/ /champions/ahri/mid/ /champions/ahri/top/ \
+            /champions/garen/top/ /matchups/mid/ /matchups/top/ /about/ /explore/ /champions/kennen/"
+node scripts/perf/summarize-lh.mjs docs/evidence/lh-r9-*.json.gz > docs/evidence/lh-summary-r9.json
+
+# name every request a round counted, and split it by byte class — this is the answer to
+# "which requests is your sum missing?" (see §5.1 and §6.1)
+node scripts/perf/lh-requests.mjs docs/evidence/lh-r2-tier-list-top.json.gz
+node scripts/perf/lh-requests.mjs --class-only docs/evidence/lh-r9-explore.json.gz
+
+# verify every number in this document against the raw evidence (241 checks; exit 1 on drift)
 node scripts/perf/verify-report.mjs
 
 # axe-core, WCAG 2.1 A/AA, 412x915
@@ -285,24 +433,32 @@ node scripts/perf/island-runtime.mjs --base http://127.0.0.1:18921 --out docs/ev
 | `docs/evidence/lh-r5-*.json.gz` | 8 raw Lighthouse reports behind §11.9's ladder row and §5's notes: the live round against the port-forward to the pod, taken by another lane. Same format and same "nothing is stripped" rule as the r1/r2 set |
 | `docs/evidence/lh-r6-*.json.gz`, `docs/evidence/lh-r7-*.json.gz`, `docs/evidence/lh-r8-*.json.gz` | 27 raw Lighthouse reports behind §5's notes and §11.9: r6/r8 the live posture through a local binary holding the pod's own artifacts, r7 the shipped fixture posture (`LOLSTATS_AGG_FIXTURES=only`, 11 routes, all five matchup roles). **Go-tier rounds, not edge rounds** — see §11.8 for the measurement that closes the traffic ceiling |
 | `docs/evidence/lh-summary-r5.json` … `docs/evidence/lh-summary-r8.json` | machine-readable extraction of every figure in §11.9 and §5's notes, regenerated from the `.gz` reports above with `scripts/perf/summarize-lh.mjs` |
+| `docs/evidence/lh-r9-*.json.gz` | **11 raw Lighthouse reports from the only round taken against the live edge itself**, `https://lol.erik-schuetze.dev`, after the cutover: the 9 routes above plus `/explore/` and `/champions/kennen/`. Same format and same "nothing is stripped" rule as the r1/r2 set, **with one addition — the report is written credential-free**: the edge is behind basic auth, Lighthouse writes the credential into strings of its own JSON that it does not mask, so `lighthouse-routes.sh` strips it before the file is written and this lane verified 0 occurrences across all 11 files (§10's last row). These are the figures in §5.1 |
+| `docs/evidence/lh-summary-r9.json` | machine-readable extraction of §5.1, regenerated from the `.gz` reports above with `scripts/perf/summarize-lh.mjs` |
 | `docs/evidence/axe-*.json`, `docs/evidence/axe-summary.json` | 9 raw axe-core results + summary |
 | `docs/evidence/tree-facts.json` | per-route bytes/lang/alt/ids/headings/islands/robots for all 1,058 routes |
 | `docs/evidence/island-runtime.json` | island boot evidence, console errors, script inventory |
-| `scripts/perf/lighthouse-routes.sh` | Lighthouse runner with the positive control |
+| `scripts/perf/lighthouse-routes.sh` | Lighthouse runner with the positive control. `--base`/`--auth` let it target the authenticated live edge (§5.1) as well as a port-forward; when `--auth` is given the credential is stripped from every report before it is written |
+| `scripts/perf/lh-requests.mjs` | prints the request-by-request list a round counted, with per-class byte splits (`--class-only`) — how §5.1's and §6.1's byte accounting was derived, and how anyone can re-derive it. It classifies by host *after* stripping the `//REDACTED@` userinfo the redactor leaves in some url fields, so a report taken through the authenticated edge does not report its own document, CSS and favicon as third-party |
 | `scripts/perf/extract-lh.mjs` | raw report → §7.4 budget verdicts |
 | `scripts/perf/verify-report.mjs` | re-derives every figure in this document from the raw evidence and exits non-zero on any disagreement |
 | `scripts/perf/summarize-lh.mjs` | wraps `extract-lh.mjs --json` into the `lh-summary-rN.json` schema (it adds the `file` field each record carries); reproduces the committed `lh-summary-r6.json` byte for byte and `lh-summary-r5.json` byte for byte apart from the `.gz` paths, which is why the later rounds were summarised with it rather than by hand |
 | `scripts/perf/axe-routes.mjs` | axe-core runner |
 | `scripts/perf/tree-facts.mjs` | browserless byte/structure crawler |
 | `scripts/perf/island-runtime.mjs` | island boot + console-error check |
+| *no credential in committed evidence* | `verify-report.mjs` gunzips every committed report and fails if any contains a `user:pass@` credential. The check exists because the live edge is authenticated and an early unredacted test report carried the password in 28 places; the runner redacts before writing, and the gate now proves it stayed that way |
 
 ## 11. R15: the first-load row, closed without copying Riot art
 
-Added 2026-09-17 by the R15 lane. §1-§10 are the measurement lane's findings. The only edits this lane
-has made inside them are **note (a), note (b) and the font residual directly under §5's table** — added
-on the coordinator's instruction so no reader can mistake this section's projections for a
-measurement — plus the renumbering of the citations in §11.1. **No measured figure in §5 or §6 was
-changed.**
+Added 2026-09-17 by the R15 lane. §1-§10 are the measurement lane's findings. The edits this lane has
+made inside them are: **note (a), note (b) and the font residual directly under §5's table** — added on
+the coordinator's instruction so no reader can mistake this section's projections for a measurement —
+the renumbering of the citations in §11.1, and, on 2026-09-18, **§5.1 and the corrections it names**:
+the post-cutover live-edge round that §11.8 deferred, `/tier-list/top/`'s image row in §6.1 (29 images /
+787.6 KiB, previously a copy of `/tier-list/mid/`'s figures), and §6.1's image-free ceiling (226.3 KiB
+maximum, 222.4 KiB minimum — the sentence it replaced said "no route exceeds 222.4 KiB", which §11.4's
+own next sentence already contradicted). **The measured r1/r2 FAILs in §5 and §6.1 are unchanged and
+still on the page**: §5.1 adds a later measurement beside them rather than over them.
 
 §6.1 states the fix for the failing first-load row as "a 24-48 px asset (or a sprite)". Both are Riot
 champion art **served from this origin**, and the compliance material forbids that, so the fix had to
@@ -414,19 +570,28 @@ the image column, nothing else:
 | `/matchups/mid/` | 187.3 KiB | 0 (0) | 187.3 KiB |
 | `/matchups/top/` | 187.3 KiB | 0 (0) | 187.3 KiB |
 
-Maximum 226.3 KiB against a 300 KiB ceiling, and this reproduces §6.1's own "no route exceeds
-222.4 KiB" figure from the same raw reports.
+Maximum 226.3 KiB against a 300 KiB ceiling, and the image-free range this table derives — **max 226.3 KiB**
+on `/champions/ahri/mid/`, **min 222.4 KiB** on `/tier-list/mid/` — is the same range §6.1
+states. §6.1's first revision said "no route exceeds **222.4 KiB**": the *minimum* of that range,
+stated as though it were the maximum, which is what this paragraph used to reproduce. §6.1 now carries
+the corrected ceiling.
 
-**Read this as arithmetic, not as the budget's verdict.** It does not replace §5 (see note (a) there):
-§5's first-load row is the last live measurement and stays **FAIL**, and the budget is not known to
-hold in production until the post-cutover run in §11.8 replaces the row with an r5 measurement. What
-this section establishes is narrower and sufficient for the decision it was taken for: on these routes
-the third-party images were the *whole* of the overage, so the compliant fix addresses all of it.
+**Read this as arithmetic, not as the budget's verdict.** It did not replace §5 (see note (a) there):
+§5's first-load row was the last live measurement and stayed **FAIL** until §11.8's post-cutover run
+added a live measurement beside it. What this section establishes is narrower and sufficient for the
+decision it was taken for: on these routes the third-party images were the *whole* of the overage, so
+the compliant fix addresses all of it. **§11.8 has now run and confirms that shape, while showing this
+table to be 25-28 KiB optimistic**: the four routes above measure 251.8 / 249.9 / 253.6 / 251.1 KiB on
+the edge against the 225.7 / 222.4 / 225.2 / 226.3 KiB projected here, because a projection of "r2
+minus its images" cannot see the document growth and the new live route set.
 
 The residual is the baseline every route shares: fonts (150.2 KiB, 6 requests) plus document plus CSS.
-That is ~78% of the 188-199 KiB image-free floor, which leaves roughly 110 KB of headroom under a
-300 KiB ceiling and puts the next reduction squarely in the font payload — recorded for the design lane
-under §5 note on fonts, not actioned here. The images are no longer part of the problem.
+That is 80.2% of the floor on the leanest audited route (74.2% of the edge's leanest, `/`), and it is
+the whole of the headroom question on the one route still over the line: on the edge, `/tier-list/*`
+hold about 48 KiB of headroom under the 300 KiB ceiling while `/explore/` sits **1,281 B past it** —
+the only route with negative headroom, and the reason this section's own verdict is a FAIL rather than a
+pass. Recorded for the design lane under
+§5's font residual, not actioned here. The images are no longer part of the problem.
 
 ### 11.5 The parity pin is why both renderers moved, and what that cost
 
@@ -501,38 +666,65 @@ node scripts/perf/verify-report.mjs                                   # §1-§10
 The r3/r4 raw reports are committed for the same reason r1/r2 are (see §10) and can be pruned once a
 cutover measurement supersedes them.
 
-### 11.8 The deferred live run: the exact invocation, post-cutover
+### 11.8 The live run, taken: 11 routes against the real edge after the cutover (r9, 2026-09-18)
 
-**Not run by this lane, and deliberately not bought with a fixture measurement.** The definitive
-instrument for a 300 KB *traffic* ceiling is the real edge after the cutover, so the live run is
-deferred to the coordinator who schedules it, not dropped. When the edge dials the Go tier, this is
-the mechanical invocation — no port-forward, no fixtures, no local binary, just the public origin:
+**Run, by this lane, against the public origin — and deliberately not bought with a fixture
+measurement.** The definitive instrument for a 300 KB *traffic* ceiling is the real edge after the
+cutover, so the run waited for the cutover rather than for a simulation of it: r5 is another lane's live
+round against a port-forward, r6/r8 are live rounds through a local binary holding the pod's own
+artifacts, and r7 is the shipped *fixture* posture — none of those is the edge. This is the edge: no
+port-forward, no fixtures, no local binary, just the public origin
+`https://lol.erik-schuetze.dev` (the site's own canonical origin — every canonical link, `sitemap.xml`
+and `robots.txt` entry names it, which compliance gate check 8 asserts).
 
 ```bash
 export CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
-# BASE URL: https://lol.erik-schuetze.dev  (the site's own canonical origin: every canonical link,
-# sitemap.xml and robots.txt entry names it, which compliance gate check 8 asserts)
-# Round 9 is the next free number, and taking a fresh one matters: r5 is another lane's live round
-# against the port-forward and r6-r8 are this lane's post-change rounds (r6/r8 live through a local
-# binary holding the pod's artifacts, r7 the shipped fixture posture), all cited as evidence in §5's
-# notes and §11.9's tables. Reusing a round number overwrites them.
-bash scripts/perf/lighthouse-routes.sh --round 9 --base https://lol.erik-schuetze.dev --out docs/evidence
+# Round 9 is the next free number, and taking a fresh one mattered: reusing a number would overwrite
+# the reports §5's notes and §11.9's tables cite.
+CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" PERF_TOOLS_DIR=/tmp/a11y-tools \
+bash scripts/perf/lighthouse-routes.sh --round 9 --base https://lol.erik-schuetze.dev \
+  --auth "$EDGE_AUTH" --out docs/evidence --tools /tmp/a11y-tools \
+  --routes "/ /tier-list/mid/ /tier-list/top/ /champions/ahri/mid/ /champions/ahri/top/ \
+            /champions/garen/top/ /matchups/mid/ /matchups/top/ /about/ /explore/ /champions/kennen/"
 
-gzip -9 docs/evidence/lh-r9-*.json                        # archive the raw reports
-node scripts/perf/summarize-lh.mjs 9                      # -> docs/evidence/lh-summary-r9.json
-node scripts/perf/extract-lh.mjs docs/evidence/lh-r9-*.json.gz   # read the first-load column
-node scripts/perf/verify-report.mjs                       # 185 checks at this writing, exit 1 on drift
+gzip -9 docs/evidence/lh-r9-*.json                        # archive the raw reports (11 files, 5.3 MiB)
+node scripts/perf/summarize-lh.mjs docs/evidence/lh-r9-*.json.gz > docs/evidence/lh-summary-r9.json
+node scripts/perf/lh-requests.mjs --class-only docs/evidence/lh-r9-explore.json.gz
+node scripts/perf/verify-report.mjs                       # 241 checks at this writing, exit 1 on drift
 ```
 
-Then read the r9 first-load column and **either** write it into §5's row **or** leave the row FAIL —
-whichever the measurement says, with no projection substituted for it. §11.3/§11.4 then become history
-rather than evidence, and the r3/r4 reports (and this section's arithmetic) can be pruned in the same
-commit. Nothing in `scripts/perf/` needs to change for the cutover: `--base` is the only input that
-moves, and every script above is committed and syntax-clean. `summarize-lh.mjs` is the wrapper that
-gives the summaries their `file` field; it reproduces the committed `lh-summary-r6.json` byte for
-byte, which is why it — rather than a fresh reimplementation of the arithmetic — is the one the
-post-cutover run should use.
+`EDGE_AUTH` is the basic-auth credential, passed in the environment and deliberately absent from this
+document and from every committed file — the reports it produces are redacted before they are written,
+and the gate fails if any committed file carries the credential.
+
+Three things this invocation carries that the pre-cutover draft of it could not:
+
+- **`--auth USER:PASS`.** The edge sits behind basic auth and the gate covers every subresource, so the
+  credential has to ride inside the URL Chrome is handed. It is the one new input of this budget, and
+  it is hostile to evidence: Lighthouse masks the credential in its own `url` fields but **not**
+  everywhere in the JSON, so `lighthouse-routes.sh` strips it from every report before writing. An
+  unredacted test report carried the password in **28** places before that was added; `verify-report.mjs`
+  now fails if any committed report ever contains a credential again.
+- **`--routes`**, because the canonical route set does not include `/explore/` — the route the
+  coordinator's own hand measurement flagged as the new worst case — or `/champions/kennen/`, the one
+  route still emitting exactly one ddragon image after §11.2.
+- **`--base` pointing at the public origin** rather than `127.0.0.1:18921`, which is the whole point of
+  the round: the traffic ceiling can only be judged on the bytes a visitor actually receives.
+
+**Result: 11 routes — 9 PASS, 2 FAIL.** One failure is §6.2's known, intentional, data-driven
+`noindex` on `/champions/ahri/top/` (SEO 69, not a weight failure). The other is a **weight** failure
+and a new one: **`/explore/` at 308,481 B / 301.3 KiB, 1,281 B over the 300 KB ceiling**, which is
+**not** moved for it. §5's first-load row now carries those measured values **beside** the r1/r2 FAIL,
+not over it, and §5.1 holds the per-route table. The four routes the row recorded as failing —
+429.7 / 447.7 / 939.0 / 1013.3 KiB — measure 251.1-253.6 KiB on the edge, and the row is
+**FAIL (1 route)** there.
+
+§11.3/§11.4 are kept rather than pruned: they are the history of how the change was justified, and the
+gap between their projections and this measurement (25-28 KiB) is itself worth keeping visible.
+`summarize-lh.mjs` is the wrapper that gives the summaries their `file` field; it reproduces the
+committed `lh-summary-r6.json` byte for byte, which is why it — rather than a fresh reimplementation of
+the arithmetic — is the one the live run used.
 
 ### 11.9 `/matchups/*` is bounded by a window of the artifact's cells, not by its champion pool
 
@@ -637,7 +829,7 @@ Scores are `perf / a11y / bp / seo`.
 **r7: 10 of 11 routes PASS. r8: 7 of 8 routes PASS.** The only failing route in either round is
 `/champions/ahri/mid/`, on the SEO row, `failingAudits: ["is-crawlable"]` — the defect §6.2 escalated and
 this lane was told to measure rather than fix. It is not a weight failure and this change did not touch
-it. Every matchup role now sits **19.7% under** the 300 KB first-load row (worst 245,229 B) and **50.6%
+it. Every matchup role now sits **20.2% under** the 300 KB first-load row (worst 245,229 B) and **50.6%
 under** the 150 KB HTML row (worst 75,888 B), on the posture the edge will dial, including the three
 roles (`jungle`, `support`, `bottom`) no earlier round had ever sampled.
 
@@ -704,6 +896,9 @@ for a dash cell, **33,881-50,716 B** of page furniture (chrome, links, legend).
 
 **What this section does NOT establish.** No row above is a production measurement. Every one was
 taken against the Go tier — r7/r8 against a local binary holding the same artifacts, r3/r4 the same,
-r1/r2/r5 through the coordinator's port-forward — and the public edge still dials the older static
-tier. The traffic ceiling §7.4 states is a *served-bytes* ceiling, so §11.8's post-cutover run against
-the real edge remains the measurement that closes it.
+r1/r2/r5 through the coordinator's port-forward — and the public edge still dialled the older static
+tier at the time. The traffic ceiling §7.4 states is a *served-bytes* ceiling, so it is §11.8's
+post-cutover run against the real edge that closes it, **and that run has since been taken**: on the
+edge (`https://lol.erik-schuetze.dev`, §5.1) `/matchups/mid/` measures **219,211 B (214.1 KiB)** and
+`/matchups/top/` **219,598 B (214.5 KiB)**, both PASS. The rows above remain the ladder that got there,
+and they are the reason the bounded grid — not a weight change — is what fixed the route.
