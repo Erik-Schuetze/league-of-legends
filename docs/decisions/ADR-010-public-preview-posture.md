@@ -8,6 +8,14 @@
 > what held until that date; it is no longer the posture the site deploys. The
 > value that now holds is in `deploy/base/web/go-deployment.yaml`. Register
 > entries: `docs/compliance.md`, checkpoint 1 next step and gap 6.
+>
+> **And the site itself was retired on 2026-09-18**
+> (`ADR-011-retire-the-web-tier.md`): the Deployment named just above,
+> `web/src/lib/legal.ts`, the served templates and `scripts/compliance-check.sh`
+> are all deleted, so every path and target the text below cites points into
+> something that no longer exists, and nothing serves anything today. What
+> survives this record is the wording and the requirement it protected, both of
+> which are in `docs/compliance.md`.
 
 - Status: Superseded (2026-09-17)
 - Date: 2026-09-17

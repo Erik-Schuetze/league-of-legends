@@ -1,28 +1,28 @@
 # Runbook: rebuild the aggregates
 
 Covers the derived tree on the `lolstats-data` volume: `LOLSTATS_AGG_ROOT`
-(`/var/lib/lolstats/agg`). There is no second tree - the tier renders pages from
-this one at request time, so a build that publishes is a build that is served.
-The control plane has its own runbook (`restore-postgres.md`) and the archive has
-its own (`restore-raw.md`).
+(`/var/lib/lolstats/agg`). There is no second tree, and since the web tier was
+retired on 2026-09-18 (`docs/decisions/ADR-011-retire-the-web-tier.md`) nothing
+in this repository reads it either - the published tree is the end of the
+pipeline. The control plane has its own runbook (`restore-postgres.md`) and the
+archive has its own (`restore-raw.md`).
 
 The chain is one step and no workflow engine:
 
 | when | job | reads | writes |
 | --- | --- | --- | --- |
 | 01:00 | `lolstats-aggregate` (`lolstats-aggregate build`) | `raw/` | `agg/v1/**`, `agg/v1/manifest.json` |
-| always | `lolstats-web` | `agg/v1` | pages, rendered per request |
 
-Nothing renders ahead of the request. The tier reads the manifest and the
-partition it names on each request, so the number a reader sees is the number the
-last successful build published, and a build that fails to publish changes
-nothing.
+Nothing renders ahead of anything, because nothing renders. A reader of the tree
+resolves the manifest and the partition it names at the moment it reads, so the
+number it sees is the number the last successful build published, and a build that
+fails to publish changes nothing.
 
 ## When to use it
 
 - `LolstatsBuildJobFailed` or `LolstatsBuildNotScheduled` fired.
-- The site is serving yesterday's numbers, or a patch that exists in the archive
-  has no pages.
+- A consumer is showing yesterday's numbers, or a patch that exists in the
+  archive has no artifacts.
 - You restored the raw archive (`restore-raw.md`). Nothing derived from it is
   valid any more.
 - You changed a build input (`LOLSTATS_AGG_PATCH`, `LOLSTATS_AGG_QUEUE_ID`,
@@ -49,7 +49,7 @@ only repair tool you need:
 - a partition is swapped in by `rename(2)` from a directory that is already
   complete, and the live directory it displaces is held in `.trash-<pid>-<nanos>`
   until the whole publish succeeds;
-- `manifest.json` is swapped in **last**, so the landing page never advertises a
+- `manifest.json` is swapped in **last**, so no reader is ever pointed at a
   partition whose files are not in place yet;
 - any error after the first swap restores everything it displaced before
   returning. A failed build leaves the tree exactly as it was.
@@ -63,19 +63,21 @@ re-running it with better inputs.
 There is one revert that is not a re-run: `lolstats-aggregate manifest --agg
 /var/lib/lolstats/agg --source riot-match-v5 --patch <old-patch>` re-derives the
 manifest from the tree and repoints `latest` at the patch you name, rewriting no
-partition. The tier serves that patch's own bytes again within one cache key, and
-the patch you repointed away from stays on disk and stays addressable at
-`/patch/<it>/...` for inspection.
+partition. A reader that follows the manifest resolves that patch's own bytes
+again, and the patch you repointed away from stays on disk and stays addressable
+at `/patch/<it>/...` for inspection.
 
 What it cannot do is *remove* a partition. The manifest is a union of the disk
 manifest, a scan of the tree and the current build, so an entry that is already
 listed survives every re-index; a stale partition can only be repointed away from
 or overwritten in place. And a partition that is deleted while the manifest still
-advertises it makes the tier **fail closed**: every page route and `/readyz`
-answer `503` with `data-fault="artifact"` rather than serving the previous
-patch's numbers under the new one's label. The first is a property of
-`internal/aggregate`'s index; the second is asserted by
-`TestMissingArtifactIs503WithAPage` in `internal/webtier/server_test.go`.
+advertises it makes a **fail-closed** reader mandatory rather than optional: a
+reader must present an error, never the previous patch's numbers under the new
+one's label. The first is a property of `internal/aggregate`'s index. The second
+was asserted by `TestMissingArtifactIs503WithAPage` in `internal/webtier/server_test.go`
+until that package was deleted on 2026-09-18, so it is now a requirement written
+in `docs/contracts.md` section 4.4 with no test behind it - `docs/compliance.md`
+records the gap.
 
 ## Re-run the build
 
@@ -98,22 +100,30 @@ delete it when you are done, or let the TTL do it.
 Its log is the build's own output. The numbers it reports are also written to the
 `build_runs` table, which is what the alerts and the verification below read.
 
-## Then check that it is being served
+## Then check the tree
 
-There is nothing to rebuild after the aggregate job: the tier reads the tree it
-just published. What can still be wrong is the tier's own copy of a page, which
-it caches for up to 60 seconds.
+There is nothing to rebuild after the aggregate job and no renderer to warm: the
+tree the job published is the deliverable. Check the artifact rather than a page.
 
 ```
-sh scripts/verify-serving.sh https://lol.erik-schuetze.dev
+kubectl -n lolstats exec statefulset/lolstats-postgres -- ls -l /var/lib/lolstats/agg/v1
 ```
 
-The script reads the pages rather than the status line, and fails on the two
-things a `200` hides: a body that does not end in `</html>`, and a page missing
-the labelling its own data state declares. The tier caches a rendered page for up
-to 60 seconds and revalidates it on `ETag`, so a publish is visible after at most
-one `max-age` window. A `503` with a visible error page means the tree is missing
-or unreadable, not stale.
+Read the path the manifest names, and confirm the partition directory holds the
+cells and the labelling the build reported. Two things used to be checked here and
+cannot be any more, both because the tooling was deleted on 2026-09-18 with the
+web tier:
+
+- **that the tree is being served.** A serving script used to fetch each route
+  over HTTPS and fail on a `200` that hid a body not ending in `</html>` or a page
+  missing the labelling its own data state declared. Nothing of this project
+  answers a request now, so there is no page to fetch and no script to run.
+- **that a publish is visible.** A refresh was bounded by the reader's own cache
+  (`max-age=60` with an `ETag` revalidation), so a publish showed up within one
+  `max-age` window. That is now a requirement on a future reader rather than a
+  property of anything running: `docs/contracts.md` section 4.4.
+
+What is left is the tree's own self-check, in "How to tell it worked" below.
 
 ## How to tell it worked
 
@@ -129,8 +139,8 @@ kubectl -n lolstats exec statefulset/lolstats-postgres -- psql -U lolstats -d lo
 kubectl -n lolstats apply -f aggregate-verify.job.yaml   # template below
 kubectl -n lolstats logs job/aggregate-verify
 
-# 3. the site (see "Then check that it is being served" above)
-sh scripts/verify-serving.sh https://lol.erik-schuetze.dev
+# 3. the tree on disk (see "Then check the tree" above)
+kubectl -n lolstats exec statefulset/lolstats-postgres -- ls -l /var/lib/lolstats/agg/v1
 ```
 
 `cells_suppressed` is normal and not a fault: it is the count of cells too thin to
@@ -209,18 +219,18 @@ does not validate, and on a manifest that disagrees with the tree. Adding
   `deploy/base/config.yaml` (owned by the deployment workstream) or the run will
   silently use the old value. A build is deterministic given its inputs and the
   archive, so the second run produces the tree the first one should have.
-- **A tree that was published and then damaged.** Nothing to roll back to: the
-  tier renders whatever is on disk, so a partition deleted or truncated under
-  `v1/` is served as a fault - a page route and `/readyz` answer `503` with
-  `data-fault="artifact"` rather than the previous patch's numbers under the new
-  one's label. Re-run the build.
+- **A tree that was published and then damaged.** Nothing to roll back to: a
+  reader gets whatever is on disk, so a partition deleted or truncated under `v1/`
+  is a fault - the requirement is an error rather than the previous patch's
+  numbers under the new one's label (`docs/contracts.md` section 4.4). Re-run the
+  build.
 
 ## Debris
 
 A build that was killed between its two renames can leave `.staging-<pid>-<nanos>`
 or `.trash-<pid>-<nanos>` under `/var/lib/lolstats/agg`. Both sit **beside** `v1/`,
-never under it, so the tier never resolves a path into them and they cannot break
-the site. They
+never under it, so nothing resolves a published path into them and they cannot
+break a reader. They
 are safe to delete once `kubectl -n lolstats get jobs -l
 app.kubernetes.io/component=aggregate` shows nothing running - and a leftover
 trash directory is the fingerprint of a build that died mid-publish, which is
@@ -228,10 +238,10 @@ worth a line in the incident notes.
 
 ## What is destructive here
 
-- `rm -rf /var/lib/lolstats/agg/v1/...` deletes published pages. The tier answers
-  `503` with a visible error page (and `data-fault="artifact"`), not a `404` and
-  not the previous patch's numbers; the raw archive is untouched, so it is
-  recoverable by re-running, at the cost of a full pass.
+- `rm -rf /var/lib/lolstats/agg/v1/...` deletes published artifacts. A conforming
+  reader answers an error rather than a `404` and never the previous patch's
+  numbers; the raw archive is untouched, so it is recoverable by re-running, at
+  the cost of a full pass.
 - Deleting a running Job (`kubectl -n lolstats delete job aggregate-manual`)
   SIGKILLs the build mid-pass. Survivable thanks to the staging/trash discipline,
   but it wastes the work and leaves debris.

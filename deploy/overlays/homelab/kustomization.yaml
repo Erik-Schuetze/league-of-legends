@@ -23,56 +23,25 @@ resources:
 # because a tag can be re-pushed while a digest cannot.
 # See deploy/README.md for the full TODO list; there is a matching TODO on each
 # image reference in the base.
+#
+# One image, two binaries: /lolstats-ingest and /lolstats-aggregate. This pin
+# covers every workload that runs them, the ingest Deployment and all four
+# scheduled jobs. The third binary this comment used to name, /lolstats-web,
+# went with the retired web tier on 2026-09-18 (docs/decisions/ADR-011), and the
+# `replacements` block that pinned its Deployment by digest went with it, since
+# there is no longer a workload that needs a different pin from the rest.
 images:
-  # One image, three binaries: /lolstats-ingest, /lolstats-aggregate and
-  # /lolstats-web. The Go web tier (deploy/base/web/go-deployment.yaml) selects
-  # the third with `command`, so this pin covers ingest and the jobs. The tier
-  # itself is pinned by digest in the `replacements` block below instead, and
-  # that block is where its pin is bumped.
   - name: ghcr.io/erik-schuetze/league-of-legends
     newTag: latest
 
-replacements:
-  # The Go tier's image is pinned by digest, not by tag, for a reason that
-  # showed up on the first deploy: `latest` on this cluster already named a build
-  # from before the tier was written, a node that has a tag cached does not
-  # re-resolve it, and a Deployment whose spec does not change is not rolled out
-  # when the tag moves - so the pods restarted into a crash loop on a binary
-  # (/lolstats-web) that image did not contain, and stayed there. A digest is
-  # immutable, is a diff ArgoCD can see, and is the same fact in the manifest as
-  # in the cluster. The value comes from the annotated field in
-  # deploy/base/web/go-deployment.yaml rather than from this file, because the
-  # base describes *what* the tier is and only the pin is environment-specific.
-  #
-  # A replacement is used rather than a patch because the `images` transformer
-  # above matches every workload that names the shared repository - the ingest
-  # Deployment, the Go tier and all four scheduled jobs - and this must move the
-  # Go tier's own container to a digest while leaving the tag on the rest. A
-  # replacement runs after the image transformers, so the digest survives.
-  #
-  # sha-8739aa8 is the published image tag for the tier's first green CI run;
-  # bump the annotation when the tier changes.
-  - source:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: lolstats-go-web
-      fieldPath: metadata.annotations.[lolstats.dev/pinned-image]
-    targets:
-      - select:
-          group: apps
-          version: v1
-          kind: Deployment
-          name: lolstats-go-web
-        fieldPaths:
-          - spec.template.spec.containers.[name=web].image
-
 patches:
   # Tier 2 (ZFS-backed NFS) for the raw archive and the published aggregates:
-  # ReadWriteMany, because the worker, several jobs and two web replicas all
-  # mount it, and the bytes are large and cold. The `site/` tree the deleted
-  # static tier rendered into is no longer written; `raw/` and `agg/` are what
-  # this volume is for now. See homecluster/docs/architecture.md section 3.
+  # ReadWriteMany, because the worker and several jobs mount it, and the bytes
+  # are large and cold. Since the web tier was retired there is nothing that
+  # reads this volume per request; it is written and maintained, not served. The
+  # `site/` tree two earlier tiers rendered into is no longer written at all;
+  # `raw/` and `agg/` are what this volume is for now. See
+  # homecluster/docs/architecture.md section 3.
   - target:
       kind: PersistentVolumeClaim
       name: lolstats-data

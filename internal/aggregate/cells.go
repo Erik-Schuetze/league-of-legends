@@ -279,7 +279,7 @@ const MaxBuildsPerRole = 10
 // for each of its roles, and the tier list shows none of them.
 //
 // kind must be one of the BuildKind values the contract documents; the label is
-// the key rendered as a compact, stable string, which the frontend replaces with
+// the key rendered as a compact, stable string, which a reader replaces with
 // names from the static dataset when it has them.
 func computeBuilds(kind string, counts []BuildCount) map[int]map[aggmodel.Role][]aggmodel.Build {
 	out := map[int]map[aggmodel.Role][]aggmodel.Build{}

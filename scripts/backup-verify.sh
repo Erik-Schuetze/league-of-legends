@@ -489,10 +489,11 @@ if [ "${lost:-0}" -gt 0 ]; then
 else
     # A drill that compared nothing is not a passed drill. This used to be a
     # warning that still exited 0, so `make backup-verify` could report success
-    # over an archive with no matches rows at all - the same defect shape as the
-    # `skipped: docker is not installed` this workstream removed from
-    # `make compliance-gnu`: the precondition is absent, so the check does not
-    # happen, and the run says it was fine.
+    # over an archive with no matches rows at all - the same defect shape the
+    # retired compliance gate had, where `make compliance-gnu` was removed from
+    # the workflow and a run then reported a pass it had not earned: the
+    # precondition is absent, so the check does not happen, and the run says it
+    # was fine.
     fail "no matches rows exist to delete, so the negative control cannot run and the dump/restore comparison above proves nothing about loss detection."
     note "persist some matches, then re-run (see docs/runbooks/rebuild-aggregates.md)"
 fi

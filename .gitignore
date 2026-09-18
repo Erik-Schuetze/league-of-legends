@@ -29,11 +29,6 @@ deploy/secret.yaml
 # Local planning notes, never shared/committed
 /backlog.local.md
 
-# The served corpus the compliance gate reads, captured from a running tier by
-# `make capture-served-pages`. It is a build artifact of a live process, in
-# /bin/ above, and is never committed.
-/bin/served-pages/
-
 # IDE / OS
 .idea/
 .vscode/
@@ -45,7 +40,7 @@ deploy/secret.yaml
 # static tier was deleted on 2026-09-17. This rule stays because a
 # binary dropped there would sit in a directory that any future image context
 # added back would send to the builder and bake into an image; a hand-rolled
-# `go build -o build/lolstats-web` did exactly that once.
+# `go build` into that directory did exactly that once.
 /build/lolstats-*
 
 # `web/` was the retired Astro tree, deleted outright on 2026-09-18. These four

@@ -181,18 +181,19 @@ enablement checkpoint in `docs/compliance.md`, trigger 2.
 Data Dragon is fetched **at build time**, not
 at request time and not by the crawler. It used to be a build step of the Astro
 site (`web/scripts/fetch-ddragon.mjs`, deleted with `web/` on 2026-09-18); the
-fetch is now a manual one whose result is committed in two byte-identical copies,
-`projection/*.json` and `internal/webtier/data/*.json`. Nothing tests that they
-stay in step - the drift test an earlier comment named does not exist, and
-`docs/compliance.md` records the absence - so an update has to correct both.
-Updating it needs
-network access; the served site does not, and a visitor's page view never causes
-a Riot request.
+fetch is a manual one whose result is committed once, in `projection/*.json`. It
+used to be committed twice, the second copy being the Go tier's embedded fallback
+(`internal/webtier/data/*.json`, deleted with the tier on 2026-09-18), and a
+drift test between the two copies was named in a comment and never existed. With
+the tier gone there is one copy and the drift risk is gone with it. Updating it
+needs
+network access; nothing in the deployed pipeline does, and a reader's page view
+never causes a Riot request.
 The fetched data is Riot's permitted static data only - champion, item, rune and
 summoner-spell names, icons and numeric ids, plus the patch version list. No
 champion art, splash art, loading screen or Riot mark is fetched or shipped;
-`scripts/compliance-check.sh` check 2 fails the build if an image from any origin
-other than `ddragon.leagueoflegends.com/cdn/` appears in the output.
+obligation 2 of `docs/compliance.md` is the standing rule that no image reference
+may name an origin other than `ddragon.leagueoflegends.com/cdn/`.
 
 ## Attribution and disclosure
 
@@ -204,17 +205,19 @@ other than `ddragon.leagueoflegends.com/cdn/` appears in the output.
   `min_cell_n` are suppressed and counted rather than shown. See
   `docs/contracts.md` section 1.
 - **No MMR, ELO or skill-rating calculator.** Not in v1 and not on the roadmap.
-  It is a hard Riot prohibition, and `scripts/compliance-check.sh` check 1 fails
-  the gate if one appears in Go, SQL, TS, JSON, HTML or CSS.
+  It is a hard Riot prohibition, and obligation 1 of `docs/compliance.md` is the
+  standing rule: a rating-like identifier, key, column or displayed value must not
+  appear in Go, SQL, TS, JSON, HTML or CSS.
 - **The free tier is free and ungated.** No account, no paywall, no data
   brokerage.
-- **Riot does not endorse this project.** The non-endorsement notice is composed
-  into the footer of every served page, and it is the approved sentence itself
-  rather than a paraphrase of it, because the footer and the legal pages both
-  render the `NonEndorsementText` constant in `internal/webtier/brand.go` - the
-  one copy of the wording, and the string the compliance gate reads. Check 6
-  fails on a page that states the notice in any other wording. See
-  `docs/compliance.md` for the exact coverage rather than a summary of it.
+- **Riot does not endorse this project.** The non-endorsement notice is the
+  approved sentence itself rather than a paraphrase of it. It used to be one
+  constant, `NonEndorsementText` in `internal/webtier/brand.go`, rendered by the
+  footer and the legal pages and read by the compliance gate; the tier and the
+  gate were deleted on 2026-09-18, so the sentence now lives as the approved
+  wording in `docs/compliance.md`, which is the authority on when it has to
+  appear and in what words. See that page for the exact coverage rather than a
+  summary of it.
 - **The data state is stated on the page.** Every page discloses its patch,
   region, queue, bracket and the aggregate manifest's `source` - `demo`,
   `riot-match-v5`, or no data - so a reader is never told that preview numbers
@@ -469,14 +472,15 @@ against the real image (`build/caddy/Dockerfile`: Caddy 2.10.2 built with
 of the real `web/dist` build, 1063 pages, over local HTTP.
 
 > **Retired 2026-09-18.** The Astro build, `web/`, `build/caddy/Dockerfile` and the
-> inner Caddy were deleted that day and the Go tier serves the artifact tree itself,
-> so **every path cited in this subsection points into a tree that no longer
-> exists**. The measurements below stand as the record of what was run on
-> 2026-09-17; they are not a description of the deployed tier. What survived the
-> deletion is the conclusion, and it is the reason the tier answers from disk with
-> no cache in front of it: the storage module returned a byte-exact *prefix* of a
-> cached page, so a cache that can serve a truncated page is worse than no cache.
-> `sh scripts/verify-serving.sh` still runs, against the Go tier.
+> inner Caddy were deleted on 2026-09-17, and the Go tier that replaced them went on
+> 2026-09-18 (`docs/decisions/ADR-011-retire-the-web-tier.md`), so **every path
+> cited in this subsection points into a tree that no longer exists and nothing
+> serves anything at all**. The measurements below stand as the record of what was
+> run on 2026-09-17; they are not a description of anything deployed. What survived
+> the deletion is the conclusion: the storage module returned a byte-exact *prefix*
+> of a cached page, so a cache that can serve a truncated page is worse than no
+> cache. The serving script that used to be run against the tier is gone too, so
+> none of this is asserted by anything now.
 
 - **Cache hit.** Two identical requests: `Cache-Status: Souin; fwd=uri-miss; stored`,
   then `Cache-Status: Souin; hit; ttl=59; ... detail=OTTER`.
@@ -514,7 +518,8 @@ of the real `web/dist` build, 1063 pages, over local HTTP.
   storage module, reached at a different page size only by chance. **The
   shipped 2048-byte cap is load-bearing**: it is what keeps HTML out of a cache that
   would return damaged pages, and raising it would need the storage defect fixed first.
-- `sh scripts/verify-serving.sh http://127.0.0.1:8095` exits 0 against this image.
+- The serving script of the day, pointed at that image on `127.0.0.1:8095`, exited
+  0. Both the script and the image were deleted on 2026-09-18.
 
 **G0.7 Legal posture - pass.** Every artefact the pass condition names exists, line by
 line:
@@ -522,12 +527,14 @@ line:
 - the source register with a legal basis per source - this page, above;
 - the compliance checklist - `docs/compliance.md`, whose checkpoint register
   covers all seven plan triggers with a status, a reason and an artifact each;
-- the disclaimer text - rendered by both footers on all 1063 built pages, and
-  required word for word on `/disclaimer` by `scripts/compliance-check.sh` check 6,
-  which scans the served corpus for the marker `not endorsed by Riot Games`. The
-  wording now lives in the served templates
-  (`internal/webtier/templates/pages/disclaimer.tmpl` and the footer partials);
-  when this pass ran, it was the constant `web/src/lib/legal.ts` held.
+- the disclaimer text - rendered by both footers on all 1063 built pages when this
+  pass ran, and required word for word on `/disclaimer` by the compliance gate of
+  the day, which scanned the served corpus for the marker `not endorsed by Riot
+  Games`. That gate was deleted on 2026-09-18 and the pages it scanned were deleted
+  with the tier, so the requirement now lives as approved wording plus obligation 6
+  in `docs/compliance.md`. The text has moved twice: at the time of this pass it
+  was the constant `web/src/lib/legal.ts` held, then the Go tier's
+  `internal/webtier/brand.go`, and now `docs/compliance.md`.
 - the `review_due_at` field on the scrape toggle -
   `sql/migrations/0001_init.up.sql:122`, upserted and read by
   `internal/store/runs.go:124` and `:158`.
@@ -550,11 +557,14 @@ page) are tracked as checkpoint 1 in `docs/compliance.md` and are pending there.
 recorded as weeks to months (`docs/decisions/ADR-010-public-preview-posture.md:11-12`; that ADR is
 superseded 2026-09-17 by **D-1**/**D-4**, but the application-timing estimate it records is not the
 part that changed - the key is still an application and still takes that long).
-`riot.txt` is "planned" in the only sense that is honest: the tier publishes
-`/riot.txt` when and only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set
+`riot.txt` is "planned" in the only sense that is honest: the tier used to
+publish `/riot.txt` when and only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set
 (`internal/webtier/brand.go:44`, served from `cmd/lolstats-web/main.go`; before
-2026-09-18 it was `web/astro.config.mjs`), and the served disclaimer and terms
-templates record why absence is the correct state - Riot's
+2026-09-18 it was `web/astro.config.mjs`), and both that binary and the tier were
+deleted on 2026-09-18, so **nothing publishes it today and no code would**. What
+that mechanism enforced is preserved as obligation 5 of `docs/compliance.md` - a
+page may claim Riot reviewed or endorsed the site only when the claim is true. The
+disclaimer and terms wording recorded why absence is the correct state - Riot's
 check reads that URL for the token and nothing else, so a placeholder is a false claim
 of verification while an absent file is an honest "not verified yet". The token is
 issued to the domain owner once a production application is under way, so publishing
@@ -621,10 +631,12 @@ this list. Per gate, with the authority named:
   half, needs a key. Authority: the gate's own fallback - "publish no per-rank pages in
   v1; ship a single rank-aggregated view" - with ADR-010 (superseded) and risk R2
   (accepted). The wording half
-  is drafted: `internal/webtier/prose.go` writes the sentence a rate-bearing page
-  appends when its rates are not measurements of real games
-  (`dataSourceSentence`, rendered as `SourceSentence`), and every page already
-  discloses the manifest's `source` as described above. Drafted wording is not a working
+  was drafted in the deleted tier: `internal/webtier/prose.go` wrote the sentence a
+  rate-bearing page appended when its rates were not measurements of real games
+  (`dataSourceSentence`, rendered as `SourceSentence`), and the artifacts it read
+  still disclose the manifest's `source` as described above. That Go file went with
+  the tier on 2026-09-18, so the wording is now a requirement of a future reader
+  rather than a thing that exists. Drafted wording is not a working
   seeding path, so the gate is waived.
 
 One further gate is waived on a different basis, and it is the only one in this document
@@ -647,9 +659,12 @@ than as the agent that measured the failure. Date: 2026-09-17.
 
 Riot production rate limits (read from response headers, never hardcoded - the
 published changelog is stale), the Postgres major version, the DuckDB release to
-pin, TimescaleDB's licence split if it is ever reconsidered, the Astro major
-version, and every third-party bundle-size comparison that influenced a frontend
-decision.
+pin, Riot's plugin policy, and TimescaleDB's licence split if it is ever
+reconsidered. Three entries were dropped on 2026-09-18 when the web tier was
+retired (`docs/decisions/ADR-011-retire-the-web-tier.md`): the Astro major
+version, the inner Caddy release, and every third-party bundle-size comparison
+that influenced a frontend decision. None of them has a consumer in this
+repository any more.
 
 ## Primary sources
 

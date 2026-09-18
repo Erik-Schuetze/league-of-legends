@@ -1,8 +1,7 @@
 MODULE  := github.com/Erik-Schuetze/league-of-legends
-# lolstats-web is the server-rendered web tier: it renders the published
-# aggregates with Go templates instead of a Node build step, so it is a third
-# binary in the same image (see Dockerfile) and is built by the same target.
-BINARIES := lolstats-ingest lolstats-aggregate lolstats-web
+# The two data-layer binaries. The web tier was retired on 2026-09-18
+# (docs/decisions/ADR-011); the image carries only these two.
+BINARIES := lolstats-ingest lolstats-aggregate
 IMAGE   := lolstats:latest
 ENV     ?= dev
 
@@ -61,9 +60,12 @@ lint:
 vuln:
 	$(GOVULNCHECK) ./...
 
-# Regenerates the JSON Schema and TypeScript declaration the frontend consumes.
-# The generated output is checked in, so a schema change that was not
-# regenerated is caught by `git diff --exit-code` in CI.
+# Regenerates the JSON Schema and TypeScript declaration for the agg/v1
+# artifacts. The presentation tier that used to consume them was deleted on
+# 2026-09-18 (docs/decisions/ADR-011-retire-the-web-tier.md), and they are kept
+# because the artifact contract still publishes a machine-readable shape to
+# whatever reads `agg/v1`. The generated output is checked in, so a schema change
+# that was not regenerated is caught by `git diff --exit-code` in CI.
 types:
 	go run ./cmd/gen-types -out schema
 
@@ -260,31 +262,6 @@ test-build: duckdb
 
 # ---- end additions: DuckDB-engine CI gate ----
 
-# ---- additions: compliance workstream (launch-blocking gate) ----
-# Declared on its own .PHONY line so this addition stays append-only.
-
-.PHONY: compliance
-
-# The launch-blocking compliance gate (docs/compliance.md). It reads the source
-# tree, the shared wording in internal/webtier, and the corpus of pages a running
-# tier served - so `served-pages` captures that corpus first: several checks are
-# about what the deployment actually serves rather than about what the source
-# intends, and four of them read the deployment's own output. It needs no network
-# and no package manager, and it fails when a scan reads so little that its result
-# would be meaningless - a check that passes because it scanned nothing is worse
-# than no check at all.
-compliance: served-pages
-	sh scripts/compliance-check.sh
-
-# Kept as an alias, because it used to be a second corpus: the target scanned the
-# pages a running tier served while `compliance` scanned web/dist. The Astro tree
-# was deleted on 2026-09-18 and there is only one corpus left, so this runs the
-# same gate over the same pages rather than being dropped from the CI job list.
-.PHONY: compliance-served
-compliance-served: compliance
-
-# ---- end additions: compliance workstream ----
-
 # ---- additions: deploy-time migration (the PreSync hook) ----
 # Declared on its own .PHONY line so this addition stays append-only, like the
 # blocks above it.
@@ -318,218 +295,3 @@ migrate:
 	kubectl -n lolstats wait --for=condition=Complete job/lolstats-migrate --timeout=300s
 
 # ---- end additions: deploy-time migration ----
-
-# ---- additions: gates lane (serving and compliance gates) ----
-# Appended at the end, and declared on its own .PHONY line, so this addition
-# stays append-only like the blocks above it.
-.PHONY: served-pages verify-serving verify-serving-local compliance-negative-control compliance-gnu capture-served-pages
-.PHONY: require-docker serving-static-control precondition-failclosed-control gate-controls
-.PHONY: compliance-live-control compliance-live-preconditions
-
-# Captures what a running tier serves into bin/served-pages, by starting the tier
-# on loopback over the checked-in fixture artifact tree (no cluster, no PVC, no
-# network) and reading its own /sitemap.xml. That capture is the corpus the
-# launch-blocking gate scans, and the reason it replaced the retired Astro tree
-# in web/dist: it is the deployment's own output rather than a pre-rendered
-# stand-in, it carries the no-JS filter bar that tree left to a client island,
-# and it is what the amended checks 3 and 4 were written for. The tier is an
-# ephemeral process on 127.0.0.1 and nothing here touches the cluster.
-served-pages: build
-	@port=$${LOLSTATS_SERVED_PORT:-18097}; pid=""; \
-	cleanup() { [ -n "$$pid" ] && kill "$$pid" 2>/dev/null; }; \
-	trap cleanup EXIT INT TERM; \
-	( export LOLSTATS_AGG_FIXTURES=only; \
-	  export LOLSTATS_WEB_ADDR="127.0.0.1:$$port"; \
-	  [ -n "$$LOLSTATS_SITE_URL" ] && export LOLSTATS_SITE_URL; \
-	  exec ./bin/lolstats-web ) >bin/served-pages.log 2>&1 & \
-	pid=$$!; \
-	i=0; \
-	while [ $$i -lt 40 ]; do \
-		if curl -fsS "http://127.0.0.1:$$port/healthz" >/dev/null 2>&1; then break; fi; \
-		kill -0 "$$pid" 2>/dev/null || break; \
-		i=$$((i+1)); sleep 0.5; \
-	done; \
-	if ! curl -fsS "http://127.0.0.1:$$port/healthz" >/dev/null 2>&1; then \
-		echo "FAIL: bin/lolstats-web did not answer /healthz on 127.0.0.1:$$port; see bin/served-pages.log" >&2; \
-		exit 1; \
-	fi; \
-	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" \
-		LOLSTATS_SERVED_DIST="$(CURDIR)/bin/served-pages" \
-		sh scripts/capture-served-pages.sh || exit 1; \
-	echo "ok: the pages the tier serves are captured in bin/served-pages ($$(find bin/served-pages -name '*.html' | wc -l | tr -d ' ') page(s))"
-
-# The serving-contract gate for the deployed tier: /healthz, /metrics, the HTML
-# cache/ETag/304 policy, the Data Dragon static policy and the 503 + visible
-# error page for a missing agg/v1. It needs a reachable tier, so it is what CI
-# runs against a locally started `bin/lolstats-web` (verify-serving-local) and
-# what an operator runs against the cluster through
-#   kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80
-verify-serving:
-	@LOLSTATS_SERVE_URL="$${LOLSTATS_SERVE_URL:-http://127.0.0.1:18099}" \
-		sh scripts/verify-serving.sh
-
-# Starts the tier on a loopback port with the checked-in fixture artifact tree
-# (no cluster, no PVC, no network) and runs the same gate against it, including
-# the 503 path with LOLSTATS_EXPECT_NO_AGG=1 - the tier is started a second time
-# with a deliberately corrupt aggregate root, because a corrupt artifact must
-# produce a visible error page rather than a truncated 200. Nothing here touches
-# the cluster: it is an ephemeral process on 127.0.0.1.
-#
-# A third run covers the other state the served contract has to allow: the same
-# tree with `v1/static` removed, where the reserved Data Dragon prefix must
-# answer 404 with no-store and the gate must still pass by naming that state
-# (docs/contracts.md section 4, the static-projection amendment). Both states are
-# exercised here rather than described, because the check used to report the
-# absent state as a WARN and exit 0 - a frozen contract outliving the served
-# reality it described.
-verify-serving-local: build
-	@port=$${LOLSTATS_LOCAL_PORT:-18098}; pid=""; \
-	cleanup() { [ -n "$$pid" ] && kill "$$pid" 2>/dev/null; }; \
-	trap cleanup EXIT INT TERM; \
-	start() { \
-		( export LOLSTATS_AGG_FIXTURES="$$1"; \
-		  [ -n "$$2" ] && export LOLSTATS_AGG_ROOT="$$2"; \
-		  export LOLSTATS_WEB_ADDR="127.0.0.1:$$port"; \
-		  [ -n "$$LOLSTATS_SITE_URL" ] && export LOLSTATS_SITE_URL; \
-		  exec ./bin/lolstats-web ) >bin/verify-serving-local.log 2>&1 & \
-		pid=$$!; \
-		i=0; \
-		while [ $$i -lt 40 ]; do \
-			if curl -fsS "http://127.0.0.1:$$port/healthz" >/dev/null 2>&1; then return 0; fi; \
-			kill -0 "$$pid" 2>/dev/null || break; \
-			i=$$((i+1)); sleep 0.5; \
-		done; \
-		echo "FAIL: bin/lolstats-web did not answer /healthz within 20s; see bin/verify-serving-local.log" >&2; \
-		return 1; \
-	}; \
-	corrupt="$(CURDIR)/bin/verify-serving-corrupt-agg"; \
-	rm -rf "$$corrupt"; mkdir -p "$$corrupt/v1"; \
-	printf '{"schema": 1, "source": "broken-fixture"' > "$$corrupt/v1/manifest.json"; \
-	nostatic="$(CURDIR)/bin/verify-serving-no-static-agg"; \
-	rm -rf "$$nostatic"; mkdir -p "$$nostatic"; \
-	cp -R "$(CURDIR)/fixtures/site/v1" "$$nostatic/v1" || exit 1; \
-	rm -rf "$$nostatic/v1/static"; \
-	echo "== tier over the checked-in fixture artifact tree =="; \
-	start only "" || exit 1; \
-	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" sh scripts/verify-serving.sh || exit 1; \
-	kill "$$pid" 2>/dev/null; wait "$$pid" 2>/dev/null; pid=""; \
-	echo "== tier over a corrupt artifact root (must answer 503, never a truncated 200) =="; \
-	start off "$$corrupt" || exit 1; \
-	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" LOLSTATS_EXPECT_NO_AGG=1 LOLSTATS_AGG_ROOT="$$corrupt" sh scripts/verify-serving.sh || exit 1; \
-	kill "$$pid" 2>/dev/null; wait "$$pid" 2>/dev/null; pid=""; \
-	echo "== tier over the fixture tree with the Data Dragon projection removed (the reserved prefix must answer 404 + no-store) =="; \
-	start off "$$nostatic" || exit 1; \
-	LOLSTATS_SERVE_URL="http://127.0.0.1:$$port" sh scripts/verify-serving.sh || exit 1; \
-	kill "$$pid" 2>/dev/null; wait "$$pid" 2>/dev/null; pid=""; \
-	echo "ok: the serving contract holds over the fixtures, a missing agg/v1 is a visible 503, and an unpublished Data Dragon projection is an honest 404 + no-store"
-
-# The negative control for the amended compliance gate (scripts/compliance-check.sh,
-# amendment of 2026-09-17, docs/compliance.md). Checks 3 and 4 were failing a
-# legitimate server-rendered page - a page may load no <script> at all, and a
-# no-JS sort/filter/pagination form is a <form> - so their rules were replaced by
-# the invariant they were standing in for: no third-party script that phones
-# home, and every form submits through an on-origin GET that the server can
-# answer. This target is what keeps that amendment honest: it plants one
-# violation at a time into a scratch copy of the served capture and fails unless
-# the gate rejects each of them, with a page stripped of every <script> passing.
-compliance-negative-control: served-pages
-	sh scripts/compliance-negative-control.sh
-
-# Capture the HTML a running tier serves into bin/served-pages. Point it at the
-# cluster through the same port-forward the serving contract uses:
-#   kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80 &
-#   make capture-served-pages
-capture-served-pages:
-	@LOLSTATS_SERVE_URL="$${LOLSTATS_SERVE_URL:-http://127.0.0.1:18099}" \
-		sh scripts/capture-served-pages.sh
-
-# The compliance gate under GNU userland, which is what the CI runner has and
-# what this machine is not. The gate's scans hand a NUL-delimited list of paths
-# to grep, and an empty list is answered differently by the two implementations:
-# GNU xargs still runs the command when the list is empty, and grep then reads its
-# own standard input, so two phantom "(standard input)" pages were reported as
-# missing their banner and CI went red on a tree that passes here. That is a
-# class of defect a green local run cannot show, so this target re-runs the same
-# script in debian:12-slim with a non-empty stdin. It is the local half of the
-# portability control; the half that runs everywhere, including CI, is check 12
-# inside the gate, which asserts the empty-list behaviour directly.
-#
-# It used to print "skipped: docker is not installed" and exit 0 when it could
-# not run, which is a green light wired to nothing: the CI step that runs this
-# target would stay green if the container runtime disappeared, and the half of
-# the control this machine cannot run would go missing silently. The prerequisite
-# require-docker below fails closed instead, and
-# scripts/precondition-failclosed-control.sh proves that failure direction by
-# running this target with docker removed from PATH.
-compliance-gnu: require-docker served-pages
-	@echo "== the compliance gate under GNU userland (debian:12-slim) =="; \
-	echo "     over the served corpus at bin/served-pages: $$(find bin/served-pages -name '*.html' | wc -l | tr -d ' ') page(s)"; \
-	cat scripts/compliance-check.sh | docker run --rm -i --user "$$(id -u):$$(id -g)" \
-		-v "$(CURDIR):/w" -w /w debian:12-slim \
-		sh -c 'grep --version | head -1; sh /w/scripts/compliance-check.sh' || exit 1
-
-# The precondition guard for compliance-gnu, and the shape every gate in this
-# lane is expected to have: absent prerequisite is a failure with a reason, not a
-# notice that still exits 0.
-require-docker:
-	@command -v docker >/dev/null 2>&1 || { \
-		echo "FAIL: docker is not installed, so the GNU-userland half of the compliance gate cannot run." >&2; \
-		echo "      This is a failure and not a skip: the portability defect this target exists for is" >&2; \
-		echo "      invisible under $(uname -s) grep, and a green run would claim a check that did not happen." >&2; \
-		exit 1; \
-	}
-	@docker info >/dev/null 2>&1 || { \
-		echo "FAIL: the container runtime is not answering (docker info failed), so the GNU-userland half" >&2; \
-		echo "      of the compliance gate cannot run; start the runtime and re-run." >&2; \
-		exit 1; \
-	}
-	@echo "ok: docker is available: $$(docker --version)"
-
-# The negative control for the serving contract's Data Dragon check (check 5 of
-# scripts/verify-serving.sh, amended 2026-09-17): one bad origin at a time, each
-# of which the amended check has to fail on. It stands in its own origin rather
-# than stubbing the gate, and it fails closed when python3 is absent, because the
-# control is only worth its failure direction.
-serving-static-control:
-	sh scripts/serving-static-control.sh
-
-# The control for the class of defect that left CI green over a check that never
-# ran: a gate whose precondition is missing. It hides docker from PATH for real
-# and requires `make compliance-gnu` to fail and say which tool is missing, then
-# requires the same guard to succeed with docker present.
-precondition-failclosed-control:
-	sh scripts/precondition-failclosed-control.sh docker compliance-gnu require-docker
-
-# The control for the half of check 11 that CI never ran. The corpus the gate
-# scans is a capture of the checked-in fixture tree, whose manifest declares a
-# demo source, so every page in it is `demo` and the live-state scan sees an
-# empty list. That is precisely the shape that produced the defect that made CI
-# red on 2026-09-17: `xargs -0 grep -L` with an empty list still runs grep, grep
-# reads its own standard input, and the runner reported a phantom page named
-# "(standard input)" as a live page with no live banner (commit `28c2b7b`, and
-# the before/after pair in the commit's evidence).
-#
-# This target renders a live posture instead of describing one: it rewrites only
-# the `source` field of a copy of fixtures/site/v1 under bin/, starts
-# bin/lolstats-web on loopback over it (no cluster, no PVC, no network), captures
-# that tier's own pages, and requires (1) the gate to pass while saying it
-# scanned the live pages - a run that scanned 0 live pages proves nothing - and
-# (2) one live page stripped of its live banner to fail the gate by its real
-# path, never as a pseudo-file. Every precondition is fail-closed: an unbuilt
-# tier or a tier that stays in the demo posture fails this target with the reason
-# by name, which scripts/compliance-live-preconditions.sh proves.
-compliance-live-control: build
-	sh scripts/compliance-live-control.sh
-
-# The fail-closed direction of the target above: absent tier, and tier in the
-# demo posture, both have to fail and say which precondition was missing. The
-# passing direction is `make compliance-live-control` itself.
-compliance-live-preconditions:
-	sh scripts/compliance-live-preconditions.sh
-
-# All four controls, in the order CI runs them: the serving contract's Data
-# Dragon check, the docker precondition of the GNU-userland run, and the two
-# directions of the live-posture control for check 11.
-gate-controls: precondition-failclosed-control serving-static-control compliance-live-control compliance-live-preconditions
-
-# ---- end additions: gates lane ----

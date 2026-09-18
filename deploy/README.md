@@ -22,7 +22,8 @@ base/                     what the service is
   postgres/               independent Postgres: StatefulSet, Service, PVC
   ingest/                 the long-running worker
   jobs/                   the scheduled jobs, and the PreSync migration hook
-  web/                    the Go serving tier: Deployments, Services, policy
+  web/                    the ClusterIP Service the shared Caddy proxies to
+                          (currently with no workload behind it)
   network/                default-deny and the exceptions to it
 overlays/homelab/         what is different about this cluster
   kustomization.yaml      storage classes, node exclusion, image tags
@@ -45,23 +46,32 @@ time is:
 3. Wait. The `lolstats` application then syncs itself, and keeps itself synced
    with prune and selfHeal.
 
-The public entry point is `https://lol.erik-schuetze.dev`, served by the shared
+The public entry point is `https://lol.erik-schuetze.dev`, routed by the shared
 Caddy in namespace `web` (see `homecluster/web/caddy/configmap.yaml`), which
 reverse-proxies to `lolstats-web.lolstats.svc.cluster.local:80`. The edge Caddy
 terminates TLS; everything behind that Service is in this namespace.
 
-That Service's selector is the whole cutover, and it is a separate one-line edit
-to `base/web/service.yaml`. Until 2026-09-17 it selected `component: web`, an
-inner Caddy Deployment that served a pre-rendered tree off the data volume with a
-response cache in front of it; both that Deployment and its Caddyfile ConfigMap
-(`lolstats-site-config`) were deleted rather than kept as a fallback, together
-with the two CronJobs that produced the tree. The surviving tier is
-`component: web-go`, the Go server-rendered tier, which answers from the published
-aggregate snapshot per request - so read the selector in `base/web/service.yaml`
-itself to see which of the two acts has landed in your checkout, because this
-deletion and that flip are deliberately not the same commit. There is no Caddy in
-this namespace any more and no rendered-site tree is written; `site/` on the
-volume is what the deleted tier left behind and nothing reads it.
+**Nothing answers on that name today.** The Service is still declared
+(`base/web/service.yaml`) and still carries the `component: web-go` selector the
+Caddy upstream is written against, but the Go tier that was the only workload
+matching it was retired on 2026-09-18 (`docs/decisions/ADR-011`), so the Service
+has no endpoints and a request to the public name gets a 503 from the shared
+Caddy. The Service and the selector were kept precisely so that this is the whole
+of the outage: reintroducing a serving workload under `component: web-go` makes
+the existing proxy config live again with no edit outside this repository.
+
+The history in one paragraph, because three tiers have now come and gone and the
+`site/` tree on the volume is the sediment of the first two. Until 2026-09-17
+this Service selected `component: web`, an inner Caddy Deployment that served a
+pre-rendered tree off the data volume with a response cache in front of it; that
+Deployment, its Caddyfile ConfigMap (`lolstats-site-config`) and the two CronJobs
+that produced the tree were deleted rather than kept as a fallback. The Go
+server-rendered tier (`component: web-go`, with its Service, Deployment and
+ingress policy) replaced it and answered from the published aggregate snapshot
+per request. It was deleted on 2026-09-18 with the compliance harness that gated
+it. There is no Caddy in this namespace any more, no rendered-site tree is
+written, and no pod serves HTTP: `site/` on the volume is what the deleted tiers
+left behind and nothing reads it.
 
 ### Secrets
 
@@ -89,9 +99,8 @@ file never breaks `kubectl kustomize` or an ArgoCD sync.
 
 What "no Riot key" actually means, because the answer is not uniform:
 
-- **The stack comes up without it.** Postgres, `lolstats-go-web` (the Go serving
-  tier), `lolstats-aggregate`, `maintain` and `backup-postgres` never read the
-  Riot key.
+- **The stack comes up without it.** Postgres, `lolstats-aggregate`, `maintain`
+  and `backup-postgres` never read the Riot key.
 - **The Riot consumers do not.** `lolstats-ingest worker`, `discover-seeds` and
   the `backfill` re-fetch path call `require(cfg.Riot, ...)` and exit non-zero
   with `RIOT_API_KEY is required` when it is unset. The key is an optional env
@@ -101,22 +110,14 @@ What "no Riot key" actually means, because the answer is not uniform:
   and `discover-seeds` failing nightly until the Secret exists. Nothing else
   depends on either of them, and installing the Secret - with no manifest change
   and no restart of anything - is the fix.
-- **And the public site serves the published snapshot, not a preview.** The
-  owner's 2026-09-17 decisions (D-1/D-4, recorded in `docs/decisions` as commit
-  `b262dcd`) answered §15 question 6 in favour of publishing real Riot-derived
-  aggregates and waived the compliance workstream, superseding
-  `docs/decisions/ADR-010-public-preview-posture.md`. The posture is one env var,
-  `LOLSTATS_AGG_FIXTURES`: `base/config.yaml` still carries `"only"` for the
-  workloads that read the shared ConfigMap, and `base/web/go-deployment.yaml`
-  declares `"off"` on its own container so what the public tier serves does not
-  depend on a shared key another lane is free to move. `"off"` means "render
-  `LOLSTATS_AGG_ROOT` and never substitute fixtures" - a snapshot with no
-  manifest is a loud 503, not a table of demo rows.
-  `TestDeployedPostureRendersRealData` in `internal/webtier` resolves every
-  active `LOLSTATS_AGG_FIXTURES` under `base/web/` through the tier's own root
-  selection and fails if the demo tree can be reached. Fixing the key gap below
-  no longer changes what the public site serves; it resumes crawl into a
-  snapshot that is already published.
+- **And nothing is published while it is missing.** The owner's 2026-09-17
+  decisions (D-1/D-4, recorded in `docs/decisions` as commit `b262dcd`) answered
+  §15 question 6 in favour of publishing real Riot-derived aggregates, and they
+  were the reason a serving tier existed at all rather than a preview. That tier
+  is gone as of 2026-09-18: fixing the key gap below resumes the crawl, and the
+  aggregate job will publish real snapshots to `agg/`, but no process in this
+  cluster reads them, so the public name answers 503 either way. What the key
+  buys today is an archive that is being filled rather than frozen.
 - The `backfill` job is suspended and stays that way; it is a manual tool, so a
   missing key only matters on the day someone runs it.
 - `static-sync`, which mirrored the public Data Dragon CDN and needed no Riot key,
@@ -233,11 +234,12 @@ One RWX volume, `lolstats-data` on the `nfs-client` StorageClass, mounted at
   system can reproduce it.
 - `agg/` - the published aggregates, published by renaming a directory into
   place, so a reader never sees a half-written tree.
-- `site/` - the rendered HTML the deleted static tier used to serve. **Nothing
-  writes it any more** (2026-09-17): `site-build` and the inner Caddy
-  that served the tree are gone, and the Go tier renders from `agg/` per request.
-  Whatever tree is still on the volume is inert - it is not read, and nothing here
-  prunes it, so removing it is a manual `rm` on the volume if you want the space.
+- `site/` - the rendered HTML two deleted tiers used to serve. **Nothing writes
+  it any more** (2026-09-17): `site-build` and the inner Caddy that served the
+  tree are gone, and the Go tier that replaced them rendered from `agg/` per
+  request and was itself retired on 2026-09-18. Whatever tree is still on the
+  volume is inert - it is not read, and nothing here prunes it, so removing it is
+  a manual `rm` on the volume if you want the space.
 
 Postgres keeps its own `longhorn` PVC instead: it wants replicated local NVMe,
 not a network filesystem (see `homecluster/docs/architecture.md` section 3).
@@ -249,9 +251,9 @@ Two things to know about the data volume before you touch it:
   `argocd.argoproj.io/sync-options: Delete=false` so that a stray sync cannot do
   it by accident.
 - The volume root has to be writable by uid 65532 (the Go workloads). It used to
-  be checked with a shell inside the web tier - the inner Caddy was the only
-  workload with one that mounts this volume - and that check has no direct
-  replacement now that the tier is distroless: run `ls -ldn` on a debug pod that
+  be checked with a shell inside the web tier - that container was the only
+  workload with a shell that mounted this volume - and the Go images are
+  distroless, so there is no direct replacement: run `ls -ldn` on a debug pod that
   mounts the claim, or read the ownership on the NFS host itself.
   The nfs-subdir provisioner creates the export directory as root, so on a fresh
   volume check it before trusting a green sync. If it is not writable, the fix is
@@ -282,11 +284,11 @@ frontier size, pipeline staleness, and build duration, cell and failure counts.
 kubectl kustomize deploy/overlays/homelab
 ```
 
-CI builds the one image and runs the Go, Astro-reference and compliance checks,
-including the DuckDB-dependent build tests (the `verify` job installs the pinned
-DuckDB client and runs `make test-build`, which fails on a skip), but it does not
-render these manifests, so this command - plus a read of the rendered output - is
-the check that matters before a change to this directory is pushed.
+CI builds the one image and runs the Go checks, including the DuckDB-dependent
+build tests (the `verify` job installs the pinned DuckDB client and runs
+`make test-build`, which fails on a skip), but it does not render these
+manifests, so this command - plus a read of the rendered output - is the check
+that matters before a change to this directory is pushed.
 
 ## Open TODOs
 
@@ -416,11 +418,12 @@ rule, for when media appears.
 kubectl -n lolstats create job backup-postgres-now --from=cronjob/backup-postgres
 kubectl -n lolstats logs -f job/backup-postgres-now
 
-# Look at the tree. This used to be an `exec` into lolstats-web, then into the
-# inner Caddy, because that Caddy was the only workload with a shell that mounted
-# the data volume. That Deployment was deleted with the static tier on
-# 2026-09-17 and the Go images are distroless, so there is no pod
-# left to exec into: use a throwaway pod that mounts the claim read-only, e.g.
+# Look at the tree. This used to be an `exec` into a running web workload -
+# first the inner Caddy, then the Go tier - because such a container was the only
+# workload with a shell that mounted the data volume. The Caddy Deployment was
+# deleted with the static tier on 2026-09-17, the Go tier on 2026-09-18, and the
+# Go images are distroless, so there is no pod left to exec into: use a throwaway
+# pod that mounts the claim read-only, e.g.
 #
 #   kubectl -n lolstats run pvc-ls --rm -it --restart=Never \
 #     --image=busybox --overrides='{"spec":{"containers":[{"name":"pvc-ls","image":"busybox","command":["ls","-l","/d/backups/postgres"],"volumeMounts":[{"name":"d","mountPath":"/d","readOnly":true}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"lolstats-data"}}]}}'

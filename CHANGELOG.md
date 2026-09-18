@@ -39,6 +39,19 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Removed
 
+- The web tier, on 2026-09-18: `internal/webtier/` (the Go presentation tier,
+  its templates, its assets and its embedded Data Dragon copy), `cmd/lolstats-web`,
+  the `lolstats-web` Deployment, Service and NetworkPolicy in `deploy/base/web/`,
+  and the compliance and serving gate harness (8 scripts, the `compliance` and
+  `gates` Makefile lanes, and the five workflow steps that ran them). The
+  artifact tree is the deliverable; the Riot obligations the gates enforced are
+  now written requirements in `docs/compliance.md`, along with an honest record
+  of what has no automated evidence any more. ADR-011 records the decision and
+  ADR-006, which existed only to extend the tier's component API, is deleted
+  with it. `deploy/base/web/service.yaml` and the `fixtures/site/` demo tree are
+  kept deliberately: the Service name is a frozen external contract the shared
+  Caddy upstream still points at, and the fixture tree is a worked example of
+  the artifact contract.
 - The performance-evidence apparatus, on 2026-09-18: `docs/evidence/` (116
   Lighthouse and axe reports, 46 MB of the repository's tracked bytes),
   `docs/PERF-EVIDENCE.md` (1,292 lines) and `scripts/perf/` (8 scripts). No

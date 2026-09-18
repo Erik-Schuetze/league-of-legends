@@ -24,6 +24,13 @@ No hybrid split. TypeScript appears only in the frontend build, where a Go struc
 change reaches it as a regenerated `.d.ts` rather than as a hand-maintained
 duplicate.
 
+> **Note, 2026-09-18:** the two binaries this decision names are now
+> `lolstats-ingest` and `lolstats-aggregate`, and there is no frontend build left
+> to reach: the presentation tier was deleted by
+> `ADR-011-retire-the-web-tier.md`. `make types` / `cmd/gen-types` survive, so an
+> artifact consumer can still generate a `.d.ts` from the Go types. The decision
+> itself - Go, one language, no shared runtime with Node - is unchanged.
+
 ## Alternatives considered
 
 **Node/TypeScript backend.** The usual argument for it is type sharing across the
