@@ -75,6 +75,86 @@ func sparseMatrixSnapshot(t *testing.T) string {
 	return dst
 }
 
+// denseMatrixSnapshot rewrites the demo tree's mid matrix into the artifact the
+// role would carry if its whole pool were published over the threshold: every
+// ordered pair, and nothing suppressed. It is the shape /matchups/top takes when
+// its lane fills in, and the shape that made this route 2.7 MB. The page may not
+// grow with the artifact's cell count, only with the window.
+func denseMatrixSnapshot(t *testing.T) string {
+	t.Helper()
+	dst := filepath.Join(t.TempDir(), "agg")
+	copyTree(t, fixtureDir(), dst)
+	path := filepath.Join(dst, "v1", "p", "16.18", "EUW", "420", "all", "matchups", "mid.json")
+	document := readJSONDocument(t, path)
+	pool, ok := document["champions"].([]any)
+	if !ok || len(pool) < 2 {
+		t.Fatalf("the demo tree's mid matrix lists %d champions, want a pool to square", len(pool))
+	}
+	cells := make([]any, 0, len(pool)*(len(pool)-1))
+	for _, row := range pool {
+		for _, column := range pool {
+			if row == column {
+				continue // a champion is not its own opponent
+			}
+			cells = append(cells, map[string]any{
+				"champion_id":     row,
+				"opponent_id":     column,
+				"n":               json.Number("900"),
+				"wins":            json.Number("500"),
+				"win_rate":        0.5556,
+				"ci95_half_width": 0.0352,
+			})
+		}
+	}
+	document["cells"] = cells
+	document["suppressed_cells"] = json.Number("0")
+	writeJSONDocument(t, path, document)
+	return dst
+}
+
+// TestDenseMatrixStaysInsideTheBudget is the scaling assertion, and the one that
+// would have caught the defect before a harness had to: the demo tree's mid role
+// with its whole pool squared - 756 published pairs where the checked-in artifact
+// carries 179 - still has to serve a window of the axis and not the matrix. A
+// grid tuned to today's numbers passes every other test in this file and still
+// serves 2.7 MB the day a role's data arrives.
+func TestDenseMatrixStaysInsideTheBudget(t *testing.T) {
+	t.Parallel()
+	opts := OptionsFromEnv()
+	opts.AggRoot = denseMatrixSnapshot(t)
+	opts.FixturesMode = FixturesOff
+	_, live := newTestServer(t, opts)
+
+	for _, test := range []struct {
+		path   string
+		budget int
+	}{
+		{"/matchups/mid/", defaultViewGoal},
+		{"/matchups/mid/?page=3", planHTMLBudget},
+		{"/matchups/mid/?per=30", planHTMLBudget},
+		{"/matchups/mid/?q=a", planHTMLBudget},
+	} {
+		page := get(t, live, test.path).text()
+		if got := len(page); got > test.budget {
+			t.Errorf("GET %s serves %d B of HTML over a fully published artifact, over its %d B budget (cells: %d)",
+				test.path, got, test.budget, matrixCells(page))
+		}
+		if got := matrixCells(page); got > MaxMatrixCells {
+			t.Errorf("GET %s renders %d cells over a fully published artifact, over the %d cell budget",
+				test.path, got, MaxMatrixCells)
+		}
+	}
+
+	page := get(t, live, "/matchups/mid/").text()
+	t.Logf("the default view over 756 published pairs is %d B of HTML in %d cells", len(page), matrixCells(page))
+	if strings.Contains(page, `class="cell missing"`) {
+		t.Error("a window of a fully published artifact renders dashes, so the grid is not the artifact's cells")
+	}
+	if got, want := matrixLinks(page), 28; got != want {
+		t.Errorf("the page carries %d champion links, want %d (one per champion in the pool)", got, want)
+	}
+}
+
 // TestMatchupMatrixRendersAWindowOfTheAxis is the core assertion: a stored axis
 // longer than the window is served as the window, with the pager carrying the
 // rest, and the champion list under the grid still describing the whole pool.

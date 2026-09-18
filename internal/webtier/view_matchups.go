@@ -21,6 +21,16 @@ import (
 // role measured the most games for, and the rows are carried a page at a time by
 // the URL. The matrix stays reachable in full through ?q=, which renders one
 // champion's complete row against every column.
+//
+// Three query keys are offered here: ?q= narrows the rows to one champion's
+// complete row, ?per= sizes the window and is clamped to MaxMatrixPer, and
+// ?page= picks which window. The query layer this route shares with the tier
+// list also recognises ?sort=, ?dir=, ?compare= and ?patch=; none of them is
+// applied here and the page carries no control for any of them, because the axis
+// is ordered by the games the artifact measured and that is the order the
+// columns have to be in for the grid to be the matrix. Recognised keys that
+// change nothing still make the address non-default, which is what draws the
+// Clear link; a key the layer does not recognise is ignored outright.
 
 // matchupCellView is one cell of the heatmap, pre-rendered. The cells are
 // assembled in Go rather than in the template because each of the three shapes
