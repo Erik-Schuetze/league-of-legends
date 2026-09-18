@@ -23,6 +23,12 @@
 # repository root.
 /files/
 /.zz-*
+# The second lane scratch prefix, added 2026-09-18 after a lane wrote `.lane-m2/`
+# for its own before/after captures. It matched none of the rules above, so it sat
+# untracked-but-committable in a shared worktree for hours: one `git add -A` from
+# any lane would have put another lane's scratch into project history. A pattern,
+# not a name, for the same reason as `/.zz-*` above.
+/.lane-*
 
 # Local data / secrets
 .env
