@@ -324,6 +324,7 @@ migrate:
 # stays append-only like the blocks above it.
 .PHONY: served-pages verify-serving verify-serving-local compliance-negative-control compliance-gnu capture-served-pages
 .PHONY: require-docker serving-static-control precondition-failclosed-control gate-controls
+.PHONY: compliance-live-control compliance-live-preconditions
 
 # Captures what a running tier serves into bin/served-pages, by starting the tier
 # on loopback over the checked-in fixture artifact tree (no cluster, no PVC, no
@@ -499,7 +500,36 @@ serving-static-control:
 precondition-failclosed-control:
 	sh scripts/precondition-failclosed-control.sh docker compliance-gnu require-docker
 
-# Both controls, in the order CI runs them.
-gate-controls: precondition-failclosed-control serving-static-control
+# The control for the half of check 11 that CI never ran. The corpus the gate
+# scans is a capture of the checked-in fixture tree, whose manifest declares a
+# demo source, so every page in it is `demo` and the live-state scan sees an
+# empty list. That is precisely the shape that produced the defect that made CI
+# red on 2026-09-17: `xargs -0 grep -L` with an empty list still runs grep, grep
+# reads its own standard input, and the runner reported a phantom page named
+# "(standard input)" as a live page with no live banner (commit `28c2b7b`, and
+# the before/after pair in the commit's evidence).
+#
+# This target renders a live posture instead of describing one: it rewrites only
+# the `source` field of a copy of fixtures/site/v1 under bin/, starts
+# bin/lolstats-web on loopback over it (no cluster, no PVC, no network), captures
+# that tier's own pages, and requires (1) the gate to pass while saying it
+# scanned the live pages - a run that scanned 0 live pages proves nothing - and
+# (2) one live page stripped of its live banner to fail the gate by its real
+# path, never as a pseudo-file. Every precondition is fail-closed: an unbuilt
+# tier or a tier that stays in the demo posture fails this target with the reason
+# by name, which scripts/compliance-live-preconditions.sh proves.
+compliance-live-control: build
+	sh scripts/compliance-live-control.sh
+
+# The fail-closed direction of the target above: absent tier, and tier in the
+# demo posture, both have to fail and say which precondition was missing. The
+# passing direction is `make compliance-live-control` itself.
+compliance-live-preconditions:
+	sh scripts/compliance-live-preconditions.sh
+
+# All four controls, in the order CI runs them: the serving contract's Data
+# Dragon check, the docker precondition of the GNU-userland run, and the two
+# directions of the live-posture control for check 11.
+gate-controls: precondition-failclosed-control serving-static-control compliance-live-control compliance-live-preconditions
 
 # ---- end additions: gates lane ----

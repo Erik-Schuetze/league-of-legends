@@ -28,7 +28,12 @@ make serving-static-control        # the negative control for the serving contra
                                    # cache policy and a cacheable 404, both rejected
 make precondition-failclosed-control   # hides docker from PATH and requires
                                    # `make compliance-gnu` to fail and say so
-make gate-controls       # both controls, in the order CI runs them
+make compliance-live-control       # renders a live posture and requires check 11's
+                                   # live-banner scan to pass by naming the 248 live
+                                   # pages it read, and to fail by real path
+make compliance-live-preconditions # proves that control fails closed when the tier
+                                   # is unbuilt or not in the live posture
+make gate-controls       # all four controls, in the order CI runs them
 ```
 
 `scripts/compliance-check.sh` is a POSIX `sh` script with no network access and
@@ -87,7 +92,7 @@ The thirteen checks, in the order the gate runs them:
 | 8 | The served address is the deployed one | A served page, the sitemap or `robots.txt` carries a reserved placeholder hostname, with or without `LOLSTATS_SITE_URL` set; or the published addresses name more than one origin, or an origin other than `LOLSTATS_SITE_URL`. The tier publishes a stated default instead of a placeholder and refuses a reserved hostname outright, so a misconfigured origin fails a request rather than the deployment |
 | 9 | Nothing per-player is published | The artifact schema (`schema/agg.*`) or a served JSON file carries a PUUID, summoner id, account id, Riot id or profile icon id, or the served tree holds a raw-archive path |
 | 10 | Committed payloads carry no real player identifier | A fixture identifier is neither the reserved `fixture-` prefix nor the generator's reserved `FIXT` tagline, or the fixtures are deleted |
-| 11 | Every served page is a whole document | A served page is truncated, or loses the labelling that discloses its data state |
+| 11 | Every served page is a whole document | A served page is truncated, or loses the labelling that discloses its data state. The live-state half of the scan is exercised by `make compliance-live-control`, because the corpus CI scans is all-demo and that half was the one a harness fault hid |
 | 12 | The scan harness cannot mistake its own standard input for a page | A scan that is handed an empty list of paths finds something anyway (grep answering from the runner's stdin), or a scan that is handed a real list finds nothing (a guard that has quietly stopped feeding grep). Both are harness faults that make every scan above report a result it did not earn |
 
 Each `PASS`/`FAIL` line names the number of files or pages the scan read, so a
@@ -946,6 +951,67 @@ a compliance change, not a copy change.
   by check 12). `scripts/compliance-negative-control.sh` gained a seventh control,
   a demo page re-declared live with no live banner, which proves the `-L` scan
   still fails on a genuinely bad page now that the empty list is short-circuited.
+- **The red `Compliance gate` a verifier attributed to this lane was a harness
+  fault, not a page - cause (2), and it was already closed by tightening, on
+  2026-09-18.** The report was that CI's compliance step failed on `main` at
+  `e36b78f` (and the commit before it) with "1 live page carries no live banner".
+  It did, in the `verify` job of `Build and push` run
+  [35252224808](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35252224808/job/105307090744),
+  and the raw failing lines were:
+
+  ```
+  FAIL  1 live page(s) carry no live banner:
+        (standard input)
+  FAIL  1 no-data page(s) do not carry 'No sample yet':
+        (standard input)
+  RESULT: FAIL - 2 launch-blocking violation(s)
+  ```
+
+  with `scanned 1063 built page(s) ... 1063 demo, 0 live, 0 no-data` printed a
+  few lines above. Those two facts cannot both describe the corpus: `0 live` and
+  `1 live page carrying no banner` are contradictory, and `(standard input)` is
+  not a path in any corpus. The path lists handed to `grep -L` were empty, GNU
+  `xargs` runs the command even for an empty list, and `grep` with no file
+  operand reads its own standard input - the runner's redirected stdin - and
+  reported it as a page. BSD/macOS `grep` reads an empty stdin and prints nothing,
+  which is why the gate was green on the author's machine and red only in CI.
+  So the answer to "a real honesty defect or a stale check" is **(2), the check** -
+  specifically its shell harness - and the part of (2) that mattered most is that
+  every page of the deployment was in the `demo` state, so the live-banner scan
+  was asserting about a state that did not occur. No page was claiming a
+  provenance it did not have, and nothing was edited to make the complaint go
+  away: `list_grep` short-circuits an empty list at every scan call site and
+  **check 12** now fails the gate if an empty list ever yields a match again, with
+  the pattern on stdin, exactly as CI supplies it. Same corpus, same non-empty
+  stdin, unguarded harness vs. this one: `bin/phantom-before-now.log` (`RESULT:
+  FAIL - 3 launch-blocking violation(s)`, including `check 12: FAIL the scan
+  harness is broken`) and `bin/phantom-after-now.log` (`RESULT: PASS - 0
+  launch-blocking violations`, exit 0).
+- **The live half of check 11 is now exercised by a control, because the corpus
+  CI scans cannot exercise it - added 2026-09-18.** The capture the gate scans is
+  the tier rendering the checked-in fixtures, whose manifest declares a demo
+  source, so every page in it is `demo` and the live-banner scan still sees an
+  empty list there: the half that broke is the half a green CI run cannot show.
+  `scripts/compliance-live-control.sh` (`make compliance-live-control`) rewrites
+  only the `source` field of a copy of `fixtures/site/v1` under `bin/`, starts
+  `bin/lolstats-web` on loopback over it - no cluster, no PVC, no network -
+  captures that tier's 248 live pages and requires the gate both to pass while
+  reporting `248 live` and to fail, naming the real page path, on one live page
+  stripped of its live banner. `scripts/compliance-live-preconditions.sh` proves
+  that control fails closed when it cannot reach its own conditions: with the tier
+  unbuilt it exits non-zero naming the missing build, and with the posture
+  rewrite pointed at `demo` it exits non-zero naming `data-state="demo"`;
+  `bin/compliance-live-preconditions/` holds both raw logs. Both run in CI inside
+  the `Gate controls (fail closed)` step, alongside the docker and serving
+  controls.
+- **A second, unrelated cause of red `main` runs was observed and is not this
+  lane's step.** Runs `922c831`, `b248917`, `38996d4`, `041ce79`, `5524545` and
+  `47c13b4` (2026-09-17T21:49-22:14Z) fail in the `Test` job's `Set up Node` step
+  with `The specified node version file at: .../web/package.json does not exist`,
+  because `web/` was deleted while those runs used the pre-split workflow. The
+  launch gates have had no Node step since `6ba6f14`, so the current workflow
+  cannot fail that way; the runs are recorded here only so a reader who finds them
+  does not attribute them to the compliance gate.
 - Three decisions were recorded: `docs/decisions/ADR-008-no-third-party-ingestion.md`,
   `ADR-009-operator-identity-and-governing-law.md` and
   `ADR-010-public-preview-posture.md`.
