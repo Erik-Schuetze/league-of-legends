@@ -529,12 +529,12 @@ reason:
   `make compliance-gnu` re-runs the gate in a GNU userland locally; the reason is
   recorded in `docs/compliance.md`.
 
-Both of those also run as a job of their own in `.github/workflows/gates.yml`
-(`Launch gates`). In `docker-build.yml` they sit *after* the test step, so a Go
-test failure stops the job before either produces a result - which is what
-happened on 2026-09-17, when a parity mismatch in a design layer that is not this
-lane's left the compliance result unwritten. One definition of each gate, two
-independent signals about it.
+Both run as steps of the `verify` job in `.github/workflows/docker-build.yml`,
+and those steps carry `if: always()`. They sit *after* the test step, so without
+the guard a Go test failure would stop the job before either produced a result -
+which is what happened on 2026-09-17, when a parity mismatch in a design layer
+that is not this lane's left the compliance result unwritten. One definition of
+each gate, and a result that is readable while some other check is red.
 
 The **render-parity gate was retired on 2026-09-17**, together with its live
 variant and its mutation control. It required the Go tier's rendered bytes to
