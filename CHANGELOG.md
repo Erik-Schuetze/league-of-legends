@@ -287,6 +287,26 @@ short. "Breaking" means something that used to work no longer does.
   WARN. The 429 counters are unchanged on both paths, so
   `LolstatsRiotRateLimited` reads what it always did.
 
+- The ingest exited `1` when Postgres was not yet accepting connections at
+  startup, so its recovery from a cluster event was the kubelet restarting a
+  crashed container - a crash loop with backoff, not a retry - and every event
+  that brought Postgres and the ingest up together cost the pipeline the whole
+  backoff while `newest_fetched_at` went stale. `store.Open`'s single ping was
+  fatal, which is also what the `Ping` doc comment denied: it said a failing ping
+  "is not fatal anywhere in the crawler ... the worker retries". The comment was
+  false at the only call site that mattered, which is why no gate caught it. The
+  startup connect is now a bounded retry - a 60 s code default window
+  (`store.Options.ConnectWindow`, negative to opt out), 500 ms doubling to an
+  8 s cap, each attempt's ping clamped to what is left of the window - that logs
+  one WARN per failed attempt with the attempt number and the wait, one INFO if
+  it took more than one, and on a dependency that never arrives one ERROR plus an
+  error still carrying the `store: connect:` prefix, so existing greps and alerts
+  keep matching. `Ping` is unchanged and `/readyz` stays honest: it still reports
+  not-ready while the database is unreachable. The ingest startup probe's
+  `failureThreshold` goes 12 -> 24 (60 s -> 120 s) because the metrics listener
+  only starts after the connect returns, so the old budget would have killed the
+  container as the retry succeeded.
+
 ### Notes
 
 - The ingest `worker` subcommand starts, serves metrics and shuts down cleanly,

@@ -22,6 +22,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	// pgx's database/sql driver. The whole package is written against
@@ -58,8 +59,21 @@ type Options struct {
 	// MaxConns is the pool ceiling. It is small on purpose: the crawler is
 	// rate-limited by Riot long before it is limited by Postgres.
 	MaxConns int
-	// ConnTimeout bounds the startup connectivity check only.
+	// ConnTimeout bounds a single connectivity check: the startup attempt and
+	// every retry of it, and nothing else.
 	ConnTimeout time.Duration
+	// ConnectWindow bounds the whole startup connect, retries included. Zero
+	// means defaultConnectWindow - order of a minute; a negative value means
+	// no retry, so a database that is not answering is reported by the first
+	// ping. It is a field rather than an environment variable because the
+	// number only makes sense next to the caller's own startup budget, which
+	// is a property of the workload and not of the deployment's environment.
+	ConnectWindow time.Duration
+	// Logger receives one line per startup connect attempt and one line when
+	// the window is spent. Nil discards them, which follows the convention the
+	// rest of the packages use - but the error Open returns is never dropped,
+	// so a caller with no logger still learns why it did not start.
+	Logger *slog.Logger
 	// Region is the default region written to frontier entries whose caller
 	// left it empty, so a frontier row can never be region-less.
 	Region string
@@ -87,6 +101,14 @@ var _ contract.Store = (*Store)(nil)
 // rather than on the first query is deliberate: a process that starts, logs
 // "ready" and only then discovers that the database is wrong is a process whose
 // readiness signal lied.
+//
+// The verification retries before it fails, because a database that is not up
+// yet is a normal startup condition rather than a misconfiguration: the two come
+// up together after a cluster event, and a first dial that is refused must not be
+// what ends the process. The retry is bounded by Options.ConnectWindow and the
+// error it finally returns keeps the "store: connect:" prefix that existing
+// greps, alerts and operator habits match; see connect.go for why the retry
+// exists and why it is capped.
 func Open(ctx context.Context, opts Options) (*Store, error) {
 	if opts.DSN == "" {
 		return nil, errors.New("store: DSN is required")
@@ -97,17 +119,18 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	}
 	s := newStore(db, opts)
 
-	timeout := opts.ConnTimeout
-	if timeout <= 0 {
-		timeout = defaultConnTimeout
-	}
-	pingCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if err := s.Ping(pingCtx); err != nil {
+	if err := s.connect(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("store: connect: %w", err)
+		return nil, err
 	}
 	return s, nil
+}
+
+// connect runs the startup ping under the retry policy. The pool is open
+// already; the caller closes it when this reports a failure, so nothing here
+// owns the pool.
+func (s *Store) connect(ctx context.Context) error {
+	return connectPolicyFrom(s.opts).run(ctx, s.Ping)
 }
 
 // newStore wires a pool that the caller already owns. Tests use it directly.
@@ -146,9 +169,16 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// Ping reports whether the database answers. A failing ping is not fatal
-// anywhere in the crawler: it means "not ready", which the health endpoint
-// reports and the worker retries.
+// Ping reports whether the database answers. A failing ping is not fatal to a
+// running process: it means "not ready", which the health endpoint reports and
+// the worker retries on its next pass.
+//
+// The startup path is the one place a ping decides anything, and even there it
+// is not fatal on its own: Open retries it for a bounded window, and only a
+// window that is spent without an answer stops the process. That distinction is
+// the whole of connect.go, and this comment used to be the reason the retry was
+// missing - it described a retry that was really the kubelet restarting a
+// crashed container.
 func (s *Store) Ping(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("store: closed")
