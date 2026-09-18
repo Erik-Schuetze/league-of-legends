@@ -46,6 +46,33 @@ const byRoute = (arr) => new Map(arr.map((o) => [o.route, o]));
 const R1 = byRoute(r1);
 const R2 = byRoute(r2);
 
+// ---------------------------------------------------------------- which round is "current"
+// `fetchTime` is the one field that orders the rounds, and every artifact carries it. The gate selects
+// the newest round from the summaries rather than being pinned to whichever round happened to be newest
+// when it was written: before this, §5's worst first-load was asserted out of `lh-summary-r{1,2}.json` —
+// the retired rounds — so a newer round could become the document's current state and nothing would fail.
+// Retirement is a fact about the record, not a constant in the checker.
+const ROUND_SUMMARIES = readdirSync(EV)
+  .filter((f) => /^lh-summary-r\d+\.json$/.test(f))
+  .map((f) => ({ round: Number(/-r(\d+)\.json$/.exec(f)[1]), rows: json(`${EV}/${f}`) }))
+  .map((r) => ({
+    ...r,
+    // The round's own newest report, so a round is dated by its artifacts and not by its number.
+    fetchTime: r.rows.reduce((a, x) => (String(x.fetchTime ?? '') > a ? x.fetchTime : a), ''),
+  }))
+  .sort((a, b) => (a.fetchTime < b.fetchTime ? -1 : a.fetchTime > b.fetchTime ? 1 : a.round - b.round));
+const NEWEST = ROUND_SUMMARIES[ROUND_SUMMARIES.length - 1];
+// The document is the only place that can be stale, so the check is an equality between what §5 and
+// §5.1 call the current round and what the artifacts order: a tenth round makes this fail, loudly.
+const declaredCurrent = [
+  ...doc.matchAll(/(?:the current state is |measured on the real edge \()r(\d+)/g),
+].map((m) => Number(m[1]));
+checkTrue(
+  'what the document calls the current round is the newest round by fetchTime',
+  declaredCurrent.length >= 2 && declaredCurrent.every((n) => n === NEWEST.round),
+  `document says r${[...new Set(declaredCurrent)].join('/r')}, artifacts say r${NEWEST.round} (${NEWEST.fetchTime})`,
+);
+
 // ---------------------------------------------------------------- §4 per-route table
 const section = (title, next) => {
   const start = doc.indexOf(`## ${title}`);
@@ -116,22 +143,61 @@ for (const row of tableRows) {
 }
 
 // ---------------------------------------------------------------- §5 scorecard
+// The rows that call themselves invariants are asserted across EVERY round the artifacts hold, not just
+// r1/r2. From r1/r2 alone "0 ms on every route and round" was true and r5's 227.4 ms exception was
+// invisible to the gate — a score row must not be able to go stale the way the weight row could.
+const allRows = ROUND_SUMMARIES.flatMap((r) => r.rows.map((x) => ({ ...x, r: `r${r.round}` })));
+const descOf = (x) => `${x.r} ${x.route} ${x.fetchTime}`;
+const exceptions = (pred) => allRows.filter(pred).map(descOf);
+const worstLcp = Math.max(...allRows.map((x) => x.metrics.lcpMs));
 const scorecard = {
-  'Performance ≥90': [Math.min(...r1.map((x) => x.scores.performance)), 90],
-  'Accessibility =100': [Math.min(...r1.map((x) => x.scores.accessibility)), 100],
-  'Best Practices ≥95': [Math.min(...r1.map((x) => x.scores.bestPractices)), 95],
-  'SEO ≥95': [Math.max(...r1.map((x) => x.scores.seo)), 95],
-  'LCP ≤2.5s': [Math.max(...r1.concat(r2).map((x) => x.metrics.lcpMs)), 2500],
-  'CLS ≤0.1': [Math.max(...r1.concat(r2).map((x) => x.metrics.cls)), 0.1],
-  'TBT ≤200ms': [Math.max(...r1.concat(r2).map((x) => x.metrics.tbtMs)), 200],
+  'Performance ≥90': [Math.min(...allRows.map((x) => x.scores.performance)), 90],
+  'Accessibility =100': [Math.min(...allRows.map((x) => x.scores.accessibility)), 100],
+  'Best Practices ≥95': [Math.min(...allRows.map((x) => x.scores.bestPractices)), 95],
+  'SEO ≥95': [Math.max(...allRows.map((x) => x.scores.seo)), 95],
+  'LCP ≤2.5s': [worstLcp, 2500],
+  'CLS ≤0.1': [Math.max(...allRows.map((x) => x.metrics.cls)), 0.1],
+  'TBT ≤200ms': [Math.max(...allRows.map((x) => x.metrics.tbtMs)), 200],
 };
-checkTrue('§5 Performance measured min is 99', scorecard['Performance ≥90'][0] === 99);
-checkTrue('§5 Accessibility measured min is 100', scorecard['Accessibility =100'][0] === 100);
-checkTrue('§5 TBT measured max is 0', scorecard['TBT ≤200ms'][0] === 0);
+const perfRow = doc.split('\n').find((l) => l.startsWith('| Performance ≥90')) ?? '';
+const perfUnder99 = exceptions((x) => x.scores.performance < 99);
 checkTrue(
-  '§5 LCP prose "worst 1,849 ms" matches raw',
-  doc.includes(`${Math.round(Math.max(...r1.concat(r2).map((x) => x.metrics.lcpMs))).toLocaleString('en-US')} ms`),
-  `raw max ${Math.round(Math.max(...r1.concat(r2).map((x) => x.metrics.lcpMs)))}`,
+  '§5 Performance: every round ≥90, the only scores under 99 are /matchups/mid/ in r3/r4/r5, and the row quotes the worst of them',
+  scorecard['Performance ≥90'][0] >= 90 &&
+    perfUnder99.length === 3 &&
+    perfUnder99.every((d) => d.startsWith('r3 /matchups/mid/') || d.startsWith('r4 /matchups/mid/') || d.startsWith('r5 /matchups/mid/')) &&
+    perfRow.includes(`**${scorecard['Performance ≥90'][0]}** on \`/matchups/mid/\` in r5`) &&
+    perfRow.includes(`r${NEWEST.round}`) &&
+    perfRow.includes(`**${Math.min(...NEWEST.rows.map((x) => x.scores.performance))}**`),
+  `min ${scorecard['Performance ≥90'][0]}; under 99: ${perfUnder99.join(' | ')}`,
+);
+checkTrue('§5 Accessibility measured min is 100 in every round', scorecard['Accessibility =100'][0] === 100);
+checkTrue('§5 Best Practices measured min is 95 in every round', scorecard['Best Practices ≥95'][0] >= 95);
+// TBT breaches its threshold exactly once, on the r5 route §11.9 records. Both halves are asserted so
+// neither the measurement nor its label can quietly disappear.
+const tbtOver = exceptions((x) => x.metrics.tbtMs > 200);
+const tbtMax = scorecard['TBT ≤200ms'][0];
+checkTrue(
+  '§5 TBT: 0 ms everywhere except one recorded breach on /matchups/mid/ in r5, and the row says so',
+  tbtOver.length === 1 &&
+    tbtOver[0].startsWith('r5 /matchups/mid/') &&
+    allRows.filter((x) => x.metrics.tbtMs === 0).length === allRows.length - 1 &&
+    doc.includes(`${tbtMax.toFixed(1)} ms** on \`/matchups/mid/\` in r5`) &&
+    doc.includes('it is not 0 on every round'),
+  `over 200 ms: ${tbtOver.join(' | ') || 'none'} (max ${tbtMax.toFixed(1)} ms)`,
+);
+// The LCP row carries three figures from three rounds, so each must be scoped to the round it came from:
+// an unscoped "worst N ms" is how a superseded round reads as the current state.
+const r12Lcp = Math.max(...r1.concat(r2).map((x) => x.metrics.lcpMs));
+const edgeLcp = Math.max(...NEWEST.rows.map((x) => x.metrics.lcpMs));
+const lcpRow = doc.split('\n').find((l) => l.startsWith('| LCP ≤2.5 s')) ?? '';
+checkTrue(
+  `§5 LCP row dates all three of its figures (r1/r2 ${Math.round(r12Lcp)}, worst ${Math.round(worstLcp)}, edge ${Math.round(edgeLcp)} ms)`,
+  lcpRow.includes(`**${Math.round(r12Lcp).toLocaleString('en-US')} ms** on r1/r2`) &&
+    lcpRow.includes(`**${Math.round(worstLcp).toLocaleString('en-US')} ms** on \`/matchups/mid/\` in r4`) &&
+    lcpRow.includes(`r${NEWEST.round}`) &&
+    lcpRow.includes(`${Math.round(edgeLcp).toLocaleString('en-US')} ms`),
+  lcpRow.slice(0, 120),
 );
 checkTrue('§5 states SEO 69 on exactly one route', r1.filter((x) => x.scores.seo < 95).length === 1);
 checkTrue(
@@ -326,23 +392,25 @@ const section114 = sectionOf('### 11.4 ', '\n### ');
 checkTrue('§5.1 exists and is a measurement section', section51.length > 1500, `${section51.length} chars`);
 checkTrue('§11.8 is no longer a deferred run', section118.length > 800 && !/deferred to the coordinator/.test(section118));
 
-const r9path = `${EV}/lh-summary-r9.json`;
-checkTrue('§5.1 cites docs/evidence/lh-summary-r9.json', existsSync(r9path), r9path);
-const r9 = json(r9path);
+// §5.1's rows are asserted against the round the artifacts order as newest, not against a literal round
+// number, so promoting a newer round is a document edit and not a checker edit.
+const r9path = `${EV}/lh-summary-r${NEWEST.round}.json`;
+checkTrue(`§5.1 cites the newest round's summary (docs/evidence/lh-summary-r${NEWEST.round}.json)`, existsSync(r9path), r9path);
+const r9 = NEWEST.rows;
 const r9raw = r9.map((r) => json(r.file));
-checkTrue('§5.1 r9 summarises 11 routes', r9.length === 11, `${r9.length}`);
+checkTrue(`§5.1 r${NEWEST.round} summarises 11 routes`, r9.length === 11, `${r9.length}`);
 checkTrue(
-  '§5.1 r9 summary is self-consistent',
+  `§5.1 r${NEWEST.round} summary is self-consistent`,
   r9.every((r) => r.overall === (Object.values(r.grades).includes('FAIL') ? 'FAIL' : 'PASS')),
 );
 checkTrue(
-  '§5.1 r9 reports the raw files it summarises',
-  r9.every((r) => r.file.startsWith(`${EV}/lh-r9-`) && existsSync(r.file)),
+  `§5.1 r${NEWEST.round} reports the raw files it summarises`,
+  r9.every((r) => r.file.startsWith(`${EV}/lh-r${NEWEST.round}-`) && existsSync(r.file)),
 );
 // The whole point of the round: the bytes came from the public origin, not from a port-forward or a
 // local binary. If this ever fails, §5.1 is describing the wrong instrument.
 checkTrue(
-  '§5.1 r9 was taken against the public edge',
+  `§5.1 r${NEWEST.round} was taken against the public edge`,
   r9raw.every((x) => String(x.finalUrl ?? '').includes('lol.erik-schuetze.dev')),
   r9raw.map((x) => String(x.finalUrl ?? '').slice(0, 40)).join(' '),
 );
@@ -371,7 +439,7 @@ checkTrue(
 
 const r9failed = r9.filter((r) => r.overall !== 'PASS');
 checkTrue(
-  '§5.1 r9 fails on exactly the two recorded routes',
+  `§5.1 r${NEWEST.round} fails on exactly the two recorded routes`,
   r9failed.length === 2 &&
     r9failed.some((r) => r.route === '/champions/ahri/top/' && r.failingAudits.includes('is-crawlable')) &&
     r9failed.some((r) => r.route === '/explore/' && r.grades.firstLoad === 'FAIL'),
@@ -477,7 +545,7 @@ checkTrue(
 // the old measurement has to stay (see the guards below) and the new one has to be present.
 const weightRow = doc.split('\n').find((l) => l.startsWith('| total first-load ≤300 KB uncompressed ')) ?? '';
 checkTrue(
-  '§5 first-load row carries the r9 edge measurement beside the r1/r2 FAIL',
+  `§5 first-load row carries the r${NEWEST.round} edge measurement beside the r1/r2 FAIL`,
   weightRow.includes('/explore/') &&
     weightRow.includes(thousands(explore.weight.firstLoadBytes)) &&
     weightRow.includes(kib(explore.weight.firstLoadBytes)) &&
@@ -693,8 +761,8 @@ for (const route of ['/champions/ahri/mid/', '/champions/kennen/']) {
 }
 
 checkTrue(
-  '§10 lists the r9 reports and the request-list script',
-  doc.includes('lh-r9-*.json.gz') && doc.includes('scripts/perf/lh-requests.mjs'),
+  `§10 lists the newest round's reports and the request-list script`,
+  doc.includes(`lh-r${NEWEST.round}-*.json.gz`) && doc.includes('scripts/perf/lh-requests.mjs'),
 );
 
 // §5 still carries the r1/r2 measurement in its cells, with the later rounds as annotation.
@@ -712,7 +780,7 @@ checkTrue(
 const firstLoadRow = row('total first-load ≤300 KB uncompressed');
 checkTrue(
   '§5 first-load row states the current round and labels the r1/r2 figures as the "before" state',
-  firstLoadRow.includes('the current state is r9') &&
+  firstLoadRow.includes(`the current state is r${NEWEST.round}`) &&
     firstLoadRow.includes('before §11.2 removed the images') &&
     firstLoadRow.includes('2026-09-17T17:15Z') &&
     !firstLoadRow.includes('superseded'),
@@ -809,11 +877,50 @@ for (const r of r4after) {
   );
 }
 
+// ------------------------------- §5.3: the landed fix, and why the row still shows r9's FAIL
+// The row's FAIL is the last *audited* round; the fix that removes the overrun has landed and is
+// deployed, and a second instrument re-read it. All three facts are checked here, plus the arithmetic,
+// so neither half can be deleted into a tidier story: a PASS claimed from a curl is as wrong as a FAIL
+// silently dropped the moment a fix merged. The byte figures are taken from §5.3 and compared with §5's
+// row rather than hardcoded, so a future re-read changes both together and this checker does not go stale.
+const s53 = sectionOf('### 5.3 ');
+const readArith = /(\d[\d,]*) \+ (\d[\d,]*) = (\d[\d,]*) B/.exec(s53);
+const readDoc = /document is \*\*(\d[\d,]*) B\*\*/.exec(s53);
+const readClock = /at \*\*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\*\*/.exec(s53);
+checkTrue(
+  '§5.3 states the re-read as an arithmetic whose parts add up',
+  readArith && Number(readArith[1].replace(/,/g, '')) + Number(readArith[2].replace(/,/g, '')) === Number(readArith[3].replace(/,/g, '')),
+  readArith ? readArith[0] : 'no arithmetic found',
+);
+checkTrue(
+  '§5.3 dates the re-read and states its headroom against the unchanged ceiling',
+  Boolean(readClock) && s53.includes('43,762 B') && s53.includes('14.2 %') && s53.includes('ceiling exactly as written'),
+  `${readClock ? readClock[1] : 'no clock'} | headroom stated: ${s53.includes('43,762 B')}`,
+);
+checkTrue(
+  '§5.3 names the fix and the pin, and says a tenth round was not taken',
+  s53.includes('`5e08b23`') && s53.includes('`ce91477`') && s53.includes('A tenth round is deliberately not taken here'),
+);
+checkTrue(
+  '§5.3 keeps the FAIL as the last audited state rather than reporting the re-read as a pass',
+  s53.includes('does not say the row passes') && s53.includes('last audited'),
+);
+const firstLoadRow53 = doc.split('\n').find((l) => l.startsWith('| total first-load ≤300 KB uncompressed')) ?? '';
+checkTrue(
+  '§5 total first-load row carries the re-read beside the r9 FAIL, with the same bytes and clock as §5.3',
+  readDoc && readClock && s53.includes(readDoc[1]) && s53.includes(readClock[1]) &&
+    firstLoadRow53.includes(readDoc[1]) && firstLoadRow53.includes('5e08b23') && firstLoadRow53.includes('deferred'),
+  `${readDoc ? readDoc[1] : '?'} / ${readClock ? readClock[1] : '?'}`,
+);
+
 // ------------------------------- the instrument and the coverage: which tier each round measured
 // A round's tier is a field in its reports (`finalDisplayedUrl`), not a claim in the prose. This block
 // is why the round table cannot be edited into saying a port-forward round measured the edge: r5's
 // reports were fetched from 127.0.0.1:18921, and the table has to agree with the artifacts.
-const ROUNDS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const ROUNDS = readdirSync(EV)
+  .filter((f) => /^lh-summary-r\d+\.json$/.test(f))
+  .map((f) => String(Number(/-r(\d+)\.json$/.exec(f)[1])))
+  .sort((a, b) => Number(a) - Number(b));
 const summaryOf = (k) => `${EV}/lh-summary-r${k}.json`;
 const reportOfRow = (row) => json(row.file);
 const roundHost = (k) => {
@@ -849,9 +956,9 @@ checkTrue(
 );
 const edgeRounds = ROUNDS.filter((k) => /lol\.erik-schuetze\.dev/.test(roundHost(k) ?? ''));
 checkTrue(
-  'r9 is the only round whose reports were fetched from the public origin',
-  edgeRounds.length === 1 && edgeRounds[0] === '9',
-  `rounds on the public origin: ${edgeRounds.join(',') || 'none'}`,
+  'the newest round is the only one whose reports were fetched from the public origin',
+  edgeRounds.length === 1 && Number(edgeRounds[0]) === NEWEST.round,
+  `rounds on the public origin: ${edgeRounds.join(',') || 'none'}; newest is r${NEWEST.round}`,
 );
 const livePortRounds = ROUNDS.filter((k) => roundHost(k) === '127.0.0.1:18921');
 checkTrue(
@@ -867,7 +974,7 @@ checkTrue(
     routesOf('2') === 9 &&
     routesOf('3') === 8 &&
     routesOf('7') === 11 &&
-    routesOf('9') === 11 &&
+    routesOf(String(NEWEST.round)) === 11 &&
     roundTable.includes('**9** routes') &&
     roundTable.includes('**8**') &&
     roundTable.includes('**11**'),
@@ -878,8 +985,8 @@ const sampledOnlyBy = (route) =>
 checkTrue(
   'the round table records which routes only one round sampled, as unmeasured rather than passing',
   roundTable.includes('unmeasured, not passing') &&
-    sampledOnlyBy('/explore/') === '9' &&
-    sampledOnlyBy('/champions/kennen/') === '9' &&
+    sampledOnlyBy('/explore/') === String(NEWEST.round) &&
+    sampledOnlyBy('/champions/kennen/') === String(NEWEST.round) &&
     sampledOnlyBy('/matchups/bottom/') === '7' &&
     roundTable.includes('/matchups/{jungle,support,bottom}/'),
   `/explore/=${sampledOnlyBy('/explore/')} /champions/kennen/=${sampledOnlyBy('/champions/kennen/')} /matchups/bottom/=${sampledOnlyBy('/matchups/bottom/')}`,
