@@ -30,30 +30,23 @@ resources:
   - ingest/service.yaml
 
   # The public route: the ClusterIP Service the shared Caddy in namespace `web`
-  # proxies to. Which tier answers on it is decided by this Service's own
-  # `component:` selector (see the file), which is what makes moving the public
-  # name onto the Go tier below a one-line edit; that line is not changed here.
+  # proxies to. It is kept although nothing backs it since 2026-09-18: the
+  # retired web tier (docs/decisions/ADR-011) was its only workload, so a
+  # request to the public name now has no endpoints behind it and the shared
+  # Caddy answers 503. The Service stays because the name, the port and the
+  # `component:` selector are the contract the Caddy upstream is already
+  # written against, and re-adding a serving workload should be an edit to a
+  # Deployment rather than to the cluster's proxy config. See the file.
   - web/service.yaml
-
-  # ---- additions: Go web tier (server-rendered per request) ----
-  # The same pages served by a Go process that reads the published snapshot
-  # instead of a Caddy file server over a directory a Node build wrote. It has
-  # its own Service and its own ingress policy; the `lolstats-web` selector above
-  # is the one thing that chooses between it and nothing else, and that choice is
-  # not made in this file. The static tier it replaced was deleted outright on
-  # 2026-09-17 rather than kept as a fallback.
-  - web/go-deployment.yaml
-  - web/go-service.yaml
-  - web/go-networkpolicy.yaml
-  # ---- end additions: Go web tier ----
 
   # Every scheduled unit of work, in the order they run during a night:
   # discover-seeds (00:10, before the build so the night's own discovery is in
   # it), aggregate (01:00), maintain (hourly), backfill (suspended, manual
   # only). `static-sync` and `site-build` used to sit at 03:10 and 03:40 and
-  # were deleted on 2026-09-17 with the static tier; the Go tier
-  # renders from the published snapshot per request, so nothing writes a site
-  # tree any more.
+  # were deleted on 2026-09-17 with the static tier; the Go tier that replaced
+  # them was itself retired on 2026-09-18 (docs/decisions/ADR-011), so nothing
+  # writes a site tree at all and the aggregate job's output is the end of the
+  # pipeline.
   - jobs/aggregate.yaml
   - jobs/discover-seeds.yaml
   - jobs/maintain.yaml

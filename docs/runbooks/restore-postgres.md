@@ -43,15 +43,25 @@ that parsed. Nothing in the tree is world-readable: the job runs with `umask 077
 ## Reading the backup tree
 
 The Go workloads run a distroless image with no shell, and the Postgres pod does
-not mount this volume, so `lolstats-web` is the pod to read it from - its Caddy
-container has a shell and mounts `lolstats-data` read-only, so nothing done here
-can disturb what it reads:
+not mount this volume. Until 2026-09-18 the web tier was the pod to read it from,
+because its Caddy container had a shell and mounted `lolstats-data` read-only;
+that Deployment was deleted with the tier (`docs/decisions/ADR-011-retire-the-web-tier.md`)
+and no workload left has a shell, so start a throwaway reader that mounts the claim
+the same way - read-only, so nothing done here can disturb what it reads:
 
 ```
-kubectl -n lolstats exec deploy/lolstats-web -- cat /var/lib/lolstats/backups/postgres/LATEST
-kubectl -n lolstats exec deploy/lolstats-web -- ls -l /var/lib/lolstats/backups/postgres/daily
-kubectl -n lolstats exec deploy/lolstats-web -- cat /var/lib/lolstats/backups/postgres/daily/lolstats-20260917T043012Z.dump.manifest
+# start it, and keep it until the end of this page
+kubectl -n lolstats run pvc-reader --restart=Never --image=busybox --command -- sleep 7200 \
+  --overrides='{"spec":{"containers":[{"name":"pvc-reader","image":"busybox","command":["sleep","7200"],"volumeMounts":[{"name":"d","mountPath":"/d","readOnly":true}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"lolstats-data"}}]}}'
+
+kubectl -n lolstats exec pvc-reader -- cat /d/backups/postgres/LATEST
+kubectl -n lolstats exec pvc-reader -- ls -l /d/backups/postgres/daily
+kubectl -n lolstats exec pvc-reader -- cat /d/backups/postgres/daily/lolstats-20260917T043012Z.dump.manifest
+
+# and, when you are done with it
+kubectl -n lolstats delete pod pvc-reader
 ```
+
 
 ## Rehearse: restore into a throwaway database
 
@@ -68,14 +78,14 @@ behind the launch gate. It does not read a backup *file*.
 
 **The manual one** - restores the artifact you are actually about to use. Both
 the `pg_dump` client and the server are in the `lolstats-postgres-0` container;
-only the dump's bytes have to come from the web pod:
+only the dump's bytes have to come from the reader pod above:
 
 ```
 # 1. a fresh, empty database to restore into
 kubectl -n lolstats exec statefulset/lolstats-postgres -- createdb -U lolstats lolstats_restore_check
 
 # 2. stream the artifact in. pg_restore reads stdin when it is given no file.
-kubectl -n lolstats exec deploy/lolstats-web -- cat /var/lib/lolstats/backups/postgres/daily/lolstats-20260917T043012Z.dump \
+kubectl -n lolstats exec pvc-reader -- cat /d/backups/postgres/daily/lolstats-20260917T043012Z.dump \
   | kubectl -n lolstats exec -i statefulset/lolstats-postgres -- \
       pg_restore --no-owner --no-acl --exit-on-error -d lolstats_restore_check -U lolstats
 
@@ -107,6 +117,8 @@ Prisma CLI, a Node runtime or the application binary.
 
 Destructive. Read the whole sequence before starting, and prefer a quiet window:
 the nightly jobs run 01:00-05:00 Europe/Berlin and the dump is taken at 04:30.
+Step 3 reads the dump through the `pvc-reader` pod from "Reading the backup tree"
+above, so start it first if it is not already running.
 
 ```
 # 0. keep the current state, even the broken one. It costs a file and it is the
@@ -126,7 +138,7 @@ kubectl -n lolstats exec statefulset/lolstats-postgres -- \
 kubectl -n lolstats exec statefulset/lolstats-postgres -- createdb -U lolstats -O lolstats lolstats
 
 # 3. restore
-kubectl -n lolstats exec deploy/lolstats-web -- cat /var/lib/lolstats/backups/postgres/daily/lolstats-20260917T043012Z.dump \
+kubectl -n lolstats exec pvc-reader -- cat /d/backups/postgres/daily/lolstats-20260917T043012Z.dump \
   | kubectl -n lolstats exec -i statefulset/lolstats-postgres -- \
       pg_restore --no-owner --no-acl --exit-on-error -d lolstats -U lolstats
 

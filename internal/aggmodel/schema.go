@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// This file is the single source of truth for the types the frontend uses. The
-// Astro build reads generated output, never a hand-written interface, so a
-// change to an artifact shape breaks the site build instead of silently
-// rendering blanks in a browser.
+// This file is the single source of truth for the artifact types. Every consumer
+// reads the generated output, never a hand-written interface, so a change to an
+// artifact shape shows up as a type error or a schema violation in whatever
+// reads the tree instead of silently rendering blanks.
 //
 // Generation is reflection-based rather than code-generated from the Go AST,
 // because the emitter has to run from `go run ./cmd/gen-types` inside a

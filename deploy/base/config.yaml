@@ -52,45 +52,19 @@ data:
   LOLSTATS_RIOT_TIMEOUT: "45s"
 
   # Both trees live on the one ReadWriteMany volume mounted at
-  # /var/lib/lolstats, which is also where the site build writes and the web
-  # tier serves from. Keeping the roots here means no manifest has to guess a
-  # path.
+  # /var/lib/lolstats, which is where the crawler writes raw payloads and the
+  # nightly aggregate job writes its published snapshots. Keeping the roots here
+  # means no manifest has to guess a path.
   LOLSTATS_RAW_ROOT: "/var/lib/lolstats/raw"
   LOLSTATS_AGG_ROOT: "/var/lib/lolstats/agg"
 
-  # The public origin of the site, used for canonical URLs, sitemap.xml and
-  # robots.txt. It is declared here rather than left to the tier's default so
-  # that the hostname the release publishes is visible in the deployed
-  # configuration: an unset value is not an error, because the tier falls back
-  # to the same hostname (internal/webtier/artifacts.go DefaultSiteURL), whereas
-  # a reserved hostname in the served pages is a release failure in the
-  # compliance gate. Declaring it makes the intent explicit instead of implicit
-  # in code.
+  # The public origin of the site. It is declared here rather than left to a
+  # default in code so that the hostname this project publishes is visible in
+  # the deployed configuration rather than implicit. Since the web tier was
+  # retired (docs/decisions/ADR-011) nothing in the cluster serves it: the value
+  # is the origin the released artifacts describe themselves as living at, and it
+  # is what a future serving workload should read instead of hardcoding it.
   LOLSTATS_SITE_URL: "https://lol.erik-schuetze.dev"
-
-  # Documented operator switch, not a permanent override. The Go tier reads it
-  # (internal/webtier/artifacts.go, `LOLSTATS_AGG_FIXTURES`): `only` ignores the
-  # aggregate root and serves the checked-in demo tree, `off` renders the
-  # configured `LOLSTATS_AGG_ROOT` and never substitutes fixtures, and `auto`
-  # falls back to the demo tree only when no root resolves.
-  #
-  # The public tier does not use the value below. `base/web/go-deployment.yaml`
-  # declares `LOLSTATS_AGG_FIXTURES: "off"` in the container's own `env`, because
-  # this ConfigMap is shared with the ingest lane and the value that decides what
-  # the public site serves must not move when another lane moves this one.
-  # Whatever is set here therefore reaches only a process that inherits it
-  # without an override.
-  #
-  # It is set to `only` because there is no approved Riot production key, so
-  # ingestion cannot run, the archive stays empty and a process rendering
-  # LOLSTATS_AGG_ROOT alone would publish the no-data state instead of the
-  # clearly-labelled preview ADR-010 and plan risk R2 require. No crawled data is
-  # published either way.
-  #
-  # FLIP TO REAL DATA: once the key is approved and the archive has produced a
-  # published snapshot, change the value below to "off". The public tier needs no
-  # change - it already forces "off".
-  LOLSTATS_AGG_FIXTURES: "only"
 
   # The DuckDB resource bounds the nightly aggregate Job runs under. They are
   # declared here because the value that matters is the one the deployed pod

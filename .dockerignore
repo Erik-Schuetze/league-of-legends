@@ -6,24 +6,18 @@
 .agent-artifacts
 docs
 deploy
-# The only two directories the image copies from the repository are cmd/,
-# internal/, sql/ and the demo tree below, and Docker's ignore rules are
-# last-match-wins: a path that has to stay in the context needs its parents
-# re-included first.
+# The only directories the image copies from the repository are cmd/,
+# internal/ and sql/. Docker's ignore rules are last-match-wins, so anything
+# that had to stay in the context would need its parents re-included first.
 #
-# The demo tree the Go web tier renders at runtime with LOLSTATS_AGG_FIXTURES=only
-# (see the Dockerfile) lives at fixtures/site since 2026-09-17, when the retired
-# Astro tree that used to carry it was deleted. `fixtures` is ignored as a whole
-# because the hand-authored Riot payloads under it are tests' input, not the
-# image's, and the two lines below put the demo tree back.
+# `fixtures` is ignored as a whole: the hand-authored Riot payloads under it are
+# the tests' input, not the image's, and the demo tree at fixtures/site was only
+# ever copied for the retired web tier.
 fixtures
-!fixtures/site
-!fixtures/site/**
-# The checked-in Data Dragon projection the tier reads when LOLSTATS_DATA_DIR
-# points at it. It is not copied into the image (the projection the image needs
-# is embedded in the binary, internal/webtier/data.go), and it is large. The
-# upstream-shaped payloads the crawler tests read are a different tree, at
-# fixtures/ddragon/, and are excluded with the rest of fixtures/.
+# The checked-in Data Dragon projection is a designer's and a test's input, not
+# the image's. The upstream-shaped payloads the crawler tests read are a
+# different tree, at fixtures/ddragon/, and are excluded with the rest of
+# fixtures/.
 projection
 # The generated artifact shape cmd/gen-types writes. internal/aggmodel owns the
 # document and the image emits it from there, so the copy on disk is a

@@ -4,9 +4,12 @@ name: Build and push
 # Go binaries. Until 2026-09-17 this was a matrix of three - the Go image, the
 # Node/Astro source the nightly site build rendered from, and Caddy with the
 # cache-handler module (gate G0.5) - and the static tier was deleted outright
-# rather than kept as a fallback, so the other two
-# entries and their contexts went with it. The `verify` job gates the publish:
-# nothing is published unless the Go and compliance checks pass.
+# rather than kept as a fallback, so the other two entries and their contexts
+# went with it. The Go web tier followed on 2026-09-18 (docs/decisions/ADR-011),
+# which also removed the five `verify` steps that ran the serving and compliance
+# gates; there is no presentation tier in the matrix or in the job any more. The
+# `verify` job still gates the publish: nothing is published unless the Go checks
+# pass.
 on:
   push:
     branches:
@@ -54,10 +57,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # No Node setup and no frontend build: the site is server-rendered by the
-      # Go tier and the Astro tree that used to be built here was deleted on
-      # 2026-09-18. The compliance gate scans pages a running tier served, which
-      # `make compliance` captures itself over the checked-in fixtures.
+      # No Node setup and no frontend build: both the Astro tree (2026-09-18)
+      # and the Go tier that replaced it (2026-09-18, docs/decisions/ADR-011)
+      # are gone, and this job builds and tests the data layer only.
 
       - name: fmt vet
         run: make fmt vet
@@ -99,61 +101,6 @@ jobs:
         run: |
           make types
           git diff --exit-code -- schema
-
-      # From here down the steps carry `if: always()`, so a red step above them
-      # does not stop them running. The five gates are independent definitions,
-      # and a gate whose result is unreadable while some other check is red is
-      # not evidence: on 2026-09-17 an unrelated parity failure stopped this job
-      # before any of them ran, so the run said nothing about the compliance
-      # gate either. The job still fails overall if any step failed, which is
-      # what keeps `build-and-push` from running.
-
-      # The serving contract of the deployed Go tier, exercised against a tier
-      # started in the runner over the checked-in fixture artifact tree, and
-      # again over a corrupt root to prove a missing agg/v1 is a 503 with a
-      # visible page rather than a truncated 200. No cluster is involved.
-      - name: Serving contract
-        if: always()
-        run: make verify-serving-local
-
-      # The launch-blocking compliance gate, over the pages the tier itself
-      # serves: the target captures that corpus (served-pages) and then scans it.
-      # It had never run in CI, so the checks amended on 2026-09-17
-      # (docs/compliance.md) could have been weakened without anything noticing.
-      - name: Compliance gate
-        if: always()
-        run: make compliance
-
-      # ...and the proof that the amendment is not a weakening: one planted
-      # violation at a time, each of which the amended gate must still fail on,
-      # plus a page with no <script> at all, which must pass.
-      - name: Compliance negative controls
-        if: always()
-        run: make compliance-negative-control
-
-      # The controls for the gates that could not fail: an origin that serves
-      # the Data Dragon projection with no cache policy and a 404 under the
-      # reserved prefix that a cache would keep (the serving gate must reject
-      # both), docker hidden from PATH for real (make compliance-gnu must fail and
-      # name the missing tool), and a live posture rendered from the checked-in
-      # fixtures (the live-state half of check 11 must pass while naming the live
-      # pages it scanned, and must fail on a live page stripped of its banner by
-      # that page's real path). The corpus CI scans is all-demo, so the live half
-      # of that scan is only exercised there. Every control fails closed when it
-      # cannot create its condition.
-      - name: Gate controls (fail closed)
-        if: always()
-        run: make gate-controls
-
-      # The gate's scans hand a NUL-delimited list of paths to grep, and GNU
-      # grep answers an empty list from its own standard input. This runner has
-      # GNU userland and the author's machine does not, so the portability half
-      # of that control runs here: the same script under Debian, with a
-      # deliberately non-empty stdin. The target fails closed (require-docker)
-      # when no usable container runtime is present, which the step above proves.
-      - name: Compliance gate under GNU userland
-        if: always()
-        run: make compliance-gnu
 
   build-and-push:
     needs: verify

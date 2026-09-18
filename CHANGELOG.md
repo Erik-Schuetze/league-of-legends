@@ -36,9 +36,41 @@ short. "Breaking" means something that used to work no longer does.
   in `deploy/` sets the variable, so the deployed nightly build still runs
   without the gate; adding the key to `deploy/base/config.yaml` is what turns it
   on. Fixture builds, offline verification and `demo` are unaffected either way.
+- `docs/frontend/` - the design system for the frontend that replaces the
+  retired tier: `README.md` (the normative guide), `components.md` (52
+  components with their props, states and state matrix), `a11y.md` (the WCAG 2.1
+  AA contract and a measured contrast table), `responsive.md` (the breakpoint
+  contract), `tokens.css` (the token layer, importable by any future frontend),
+  `tools/contrast-audit.mjs` (recomputes the contrast table and fails on a
+  failing pair) and `mockup/` (a SvelteKit review build with a component gallery,
+  a landing page and an explorer that renders every honesty state). 14 review
+  renders are checked in under `docs/frontend/screenshots/mockups/`, beside the
+  owner's reference captures. ADR-012 records the stack decision. This is a
+  design deliverable: no product frontend is implemented, and `docs/contracts.md`
+  still describes only the aggregate shapes, the Go interfaces and the image
+  contract.
+- The frontend URL space, on 2026-09-18: `ADR-013-url-space.md` and section 8.1
+  of `docs/frontend/README.md`. Canonical paths name a page and partition or
+  filter state lives in query parameters, with defaults omitted so one URL
+  denotes one view. The repository had no route table at all - section 1.3 of
+  `docs/contracts.md` was deleted with the Go tier - while the guide requires
+  filter state to be in the URL, so the explorer's links had no defined shape.
 
 ### Removed
 
+- The web tier, on 2026-09-18: `internal/webtier/` (the Go presentation tier,
+  its templates, its assets and its embedded Data Dragon copy), `cmd/lolstats-web`,
+  the `lolstats-web` Deployment, Service and NetworkPolicy in `deploy/base/web/`,
+  and the compliance and serving gate harness (8 scripts, the `compliance` and
+  `gates` Makefile lanes, and the five workflow steps that ran them). The
+  artifact tree is the deliverable; the Riot obligations the gates enforced are
+  now written requirements in `docs/compliance.md`, along with an honest record
+  of what has no automated evidence any more. ADR-011 records the decision and
+  ADR-006, which existed only to extend the tier's component API, is deleted
+  with it. `deploy/base/web/service.yaml` and the `fixtures/site/` demo tree are
+  kept deliberately: the Service name is a frozen external contract the shared
+  Caddy upstream still points at, and the fixture tree is a worked example of
+  the artifact contract.
 - The performance-evidence apparatus, on 2026-09-18: `docs/evidence/` (116
   Lighthouse and axe reports, 46 MB of the repository's tracked bytes),
   `docs/PERF-EVIDENCE.md` (1,292 lines) and `scripts/perf/` (8 scripts). No
@@ -101,6 +133,15 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Changed
 
+- The review mockup's data contract seam. Its generated module hand-declared
+  `Coverage`, `Cell`, `RankedRow`, `Champion` and `ChampionRolePage` instead of
+  importing the contract, and that copy had drifted: `Coverage` had lost
+  `schema` and `source` and gained three fields that live on `Partition`, and
+  `RankedRow` merged the contract's `Build` and `SkillOrder` into one
+  all-optional type. The types now come from `schema/agg.d.ts` through a single
+  type-only import surface, `mockup/src/lib/agg.ts`, and the provenance label
+  reads `coverage.source` rather than a separately injected constant. No
+  rendering changed; the assertion suite passes 461/461 as before.
 - Documents that described the deleted static tier as live were corrected on
   2026-09-18, without a behaviour change: the README no longer calls the
   pipeline a scaffold, `CHANGELOG.md`'s own notes no longer say the ingest and

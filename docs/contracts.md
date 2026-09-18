@@ -14,18 +14,19 @@ the bug.
 
 Sections:
 
-1. Aggregate artifact shapes and the route table
+1. Aggregate artifact shapes
 2. Go interfaces
 4. `agg/v1` filesystem layout
 5. CI image contract
 
 Sections 3 (frontend component API) and 6 (ownership map) were removed on
 2026-09-18: the Astro tree they described and the concurrent-agent arrangement
-they assigned paths for are both gone. The design authority is now the Go
-renderer in `internal/webtier` and its asset tree; the git history still carries
-both sections if the reasoning is ever wanted.
+they assigned paths for are both gone. Section 1.3, the route table, was removed
+the same day when the Go tier that rendered those routes was retired; the
+artifacts it read are still the contract, and only the page-shaped view of them
+went. The git history carries all three sections if the reasoning is ever wanted.
 
-## 1. Aggregate artifact shapes and the route table
+## 1. Aggregate artifact shapes
 
 ### 1.1 Envelope and cells
 
@@ -118,46 +119,9 @@ the array is empty rather than rendering a table of forty games.
 
 `Partition` in the manifest repeats the envelope fields for its segment plus
 `cells_published`, `build_run_id`, `git_sha`, `champions: number[]` and
-`matchup_roles: Role[]`. Those last two are the index the frontend uses to build
-links without listing the tree: a champion route that is not in `champions` does
-not exist and must 404 at build time.
-
-### 1.3 Route table
-
-Every route is **rendered at request time** by the Go serving tier
-(`lolstats-web`, section 4.4) from the artifacts below - not pre-rendered into a
-directory of HTML. `<root>` is the aggregate root on the tier's volume, and the
-tier exposes it at the URL prefix `/agg`, so a page that needs
-`<root>/v1/manifest.json` reads `/agg/v1/manifest.json` through the same origin
-it is served from. There is no CORS exception and no second server.
-
-| Route | Artifacts read | JavaScript |
-| --- | --- | --- |
-| `/` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/patches.json`, `<root>/v1/p/<latest>/tierlist.json` | none |
-| `/tier-list/<role>` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/champions.json`, `<root>/v1/p/<latest>/<region>/<queue>/<bracket>/tierlist.json` | `TableIsland`, deferred |
-| `/patch/<version>/tier-list/<role>` | as above with `<version>` in place of `<latest>` | `TableIsland`, deferred |
-| `/champions/<slug>` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/champions.json`, `<root>/v1/p/<latest>/champions/<champion_id>.json` | `HeatmapIsland` only on the matchup section |
-| `/champions/<slug>/<role>` | as above; the role selects which `ChampionRole` is rendered | same |
-| `/matchups/<role>` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/champions.json`, `<root>/v1/p/<latest>/matchups/<role>.json` | `HeatmapIsland`, deferred |
-| `/about` | none | none |
-| `/legal/terms` | none | none |
-| `/legal/privacy` | none | none |
-| `/disclaimer` | none | none |
-
-`<region>`, `<queue>` and `<bracket>` in the paths above are not route
-parameters. They are read from the manifest's `latest` partition and substituted
-into every URL. The site publishes one region and one bracket in v1, and the
-route stays free of them so that adding a second region is a new manifest entry
-rather than a new route.
-
-`<champion_id>` is looked up from `static/<ddragon>/champions.json` by matching
-the route's `<slug>` against `ChampionSlug(champion.key)`. `<slug>` is never
-parsed back into a champion name.
-
-No route requires JavaScript to render its primary content. Patch switching is
-plain links between snapshots, and the sort/filter/paging controls are GET forms
-that the tier answers server-side; the islands only add interaction on top of a
-page that is already complete.
+`matchup_roles: Role[]`. Those last two are the index a reader uses to build
+links without listing the tree: a champion that is not in `champions` has no
+published artifact, and a reader must treat it as absent rather than guess.
 
 ## 2. Go interfaces
 
@@ -317,8 +281,8 @@ and never migrated in place.
 
 `manifest.json` is the one file a reader may depend on for the shape of
 everything else, so its keys are frozen. Frozen does not mean optional: a
-missing key is a contract break, and `scripts/verify-serving.sh` fails when the
-served manifest does not carry them.
+missing key is a contract break, and a reader must fail closed on a manifest that
+does not carry them rather than rendering a page with holes in it.
 
 | Key | Frozen value or meaning |
 | --- | --- |
@@ -343,123 +307,98 @@ the contract can cite numbers rather than placeholders: `cells_published` far
 below the champion-role cross product is the expected state of a young archive,
 and it is disclosed rather than hidden.
 
-### 4.4 How the tree is served
+### 4.4 Serving the tree (no server)
 
-The serving tier exposes the aggregate root at the URL prefix `/agg` on its own
-origin: `/agg/v1/manifest.json`,
-`/agg/v1/p/16.18/EUW/420/all/tierlist.json`,
-`/agg/v1/static/<ddragon_version>/champions.json`. There is no separate
-artifact host and no CORS exception, which is why a page and the data it renders
-cannot become two origins that drift apart.
+**Nothing serves this tree.** The Go tier that did was retired on 2026-09-18
+(`docs/decisions/ADR-011-retire-the-web-tier.md`), and this section is kept in
+trimmed form because two of the things it fixed are still contract:
 
-Cache policy is part of the contract, because it is what a reader's browser and
-every intermediate cache will do with the bytes:
+- **The URL prefix.** The aggregate root is published at the URL prefix `/agg`,
+  on the same origin as anything that reads it: `/agg/v1/manifest.json`,
+  `/agg/v1/p/16.18/EUW/420/all/tierlist.json`,
+  `/agg/v1/static/<ddragon_version>/champions.json`. There is no separate
+  artifact host and no CORS exception, so a page and the data it renders cannot
+  become two origins that drift apart. A future serving layer must keep the
+  prefix rather than inventing a second one.
+- **Cache policy.** `public, max-age=60` with an `ETag` on
+  `manifest.json` and the artifacts under `p/`, and `public, max-age=3600` on
+  `/agg/v1/static/<ddragon_version>/**.json` -- immutable upstream data with no
+  reader in it, so it is safe to cache publicly for longer. The static prefix is
+  **conditional**: it is served at that policy whenever the published tree
+  carries it, and an unpublished path under the reserved prefix answers `404`
+  with `Cache-Control: no-store` rather than an invented `200` (see the
+  static-projection amendment below).
 
-| Path | Response |
-| --- | --- |
-| `/agg/v1/manifest.json` and the other artifacts under `p/` | `Cache-Control: public, max-age=60`, with an `ETag` |
-| `/agg/v1/static/<ddragon_version>/**.json` | `Cache-Control: public, max-age=3600` - immutable upstream data with no reader in it, so it is safe to cache publicly for longer. **Conditional on the prefix being published**: the tier serves the projection at that policy whenever the tree carries it, and answers an unpublished path under the reserved prefix with `404` and `Cache-Control: no-store` rather than an invented `200` (see the static-projection amendment below) |
-| HTML | `Cache-Control: private, max-age=60, stale-while-revalidate=300`, `ETag`, `Vary: Accept-Encoding`; a matching `If-None-Match` is `304` |
+Two failure modes were contract rather than implementation detail, and remain the
+behaviour a reader has to expect:
 
-Two failure modes are contract, not implementation detail:
+- **A missing or unreadable `agg/v1` is an error, never a partial success.** A
+  page that cannot be rendered correctly must not be served at all; the retired
+  tier answered `503` with a visible error page and a corrupt root was required
+  to fail rather than to serve a truncated body.
+- **A corrupt artifact is passed through as it is.** A reader serves the bytes it
+  was given rather than inventing a state, which is why the retired tier
+  byte-compared its served manifest against a deliberately corrupt fixture.
 
-- **A missing or unreadable `agg/v1` is a 503 with a visible error page**, never
-  a 200 with a truncated body. A page that cannot be rendered correctly must not
-  be served at all.
-- **A corrupt artifact is passed through as it is.** The tier serves the bytes
-  it was given rather than inventing a state; `make verify-serving-local`
-  byte-compares the served manifest against a deliberately corrupt fixture for
-  exactly this reason.
-
-Every row above is asserted against a **running** tier rather than read off the
-source: `scripts/verify-serving.sh` requests each route, checks the declared and
-delivered `Content-Length` agree, re-requests with `If-None-Match` for the `304`,
-sends a stale validator for the byte-identical `200`, starts the binary a second
-time over a corrupt root for the 503, and asserts both published and unpublished
-states of the static projection (see below). It also asserts the property the
-no-JS filter depends on - that a control's values change the document the server
-returns - and `make compliance` asserts the amended compliance checks 3
-and 4 over the captured responses (docs/compliance.md, amendment 2).
+Nothing asserts any of this now. The harness that did - a script that started the
+tier over the checked-in fixture tree, probed each route's status, headers and
+`Content-Length`, re-requested with `If-None-Match` for a `304`, and re-ran over
+a corrupt root - went with the tier. There is no automated evidence for section
+4.4 today, and `docs/compliance.md` records that as a gap.
 
 **Amendment: the Data Dragon projection is reserved, and not published. Amended
-2026-09-17, last reviewed 2026-09-17. Reason: this section froze a prefix the
-deployed Service does not serve, and the gate reported the disagreement as a
+2026-09-17, last reviewed 2026-09-18. Reason: this section froze a prefix the
+deployed Service did not serve, and the gate reported the disagreement as a
 `WARN` and still exited `0`, so the frozen wording outlived the served reality it
 described.**
 
-Measured against `svc/lolstats-go-web` through
-`kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80` at
-2026-09-17T23:30:33Z, every Data Dragon URL this section used to promise answers
-`404` from the tier's own error page, with the tier's honest-absence policy:
+Measured against the deployed tier at 2026-09-17T23:30:33Z, every Data Dragon URL
+this section used to promise answered `404` from the tier's own error page, with
+`Cache-Control: no-store`; `16.18.1`, `16.18`, `16.19.1`, the bare
+`/agg/v1/static/` and a nonsense version were all probed and all answered the
+same way. The rest of the tree was served at its own policy, so what was absent
+was one projection, not the artifact and not the tier.
 
-```
-$ curl -sD - -o /dev/null http://127.0.0.1:18099/agg/v1/static/16.18.1/patches.json
-HTTP/1.1 404 Not Found
-Cache-Control: no-store
-Content-Type: text/html; charset=utf-8
-```
-
-`16.18.1`, `16.18`, `16.19.1`, the bare `/agg/v1/static/` and a nonsense version
-were all probed and all answer the same way; `.../champions.json` is `404` too.
-The rest of the tree is served, at its own policy
-(`/agg/v1/manifest.json` and `/agg/v1/p/16.18/EUW/420/all/tierlist.json` are both
-`200` with `Cache-Control: public, max-age=60`), so what is absent is one
-projection, not the artifact and not the tier.
-
-Two properties follow, and both of them are contract:
+Two properties follow, and both are still contract:
 
 - **The prefix stays reserved, and the version in the path is the Data Dragon
   version, not the game patch.** `internal/aggmodel/paths.go` defines
-  `v1/static/<ddragon_version>/{champions,items,runes,summoner-spells,patches}.json`,
-  the tier serves that prefix at `public, max-age=3600` whenever the published
-  tree carries it, and `/agg/v1/static/16.18/champions.json` is a miss by design.
-- **No page depends on it.** The tier renders champion, item, rune and spell
-  metadata from a Data Dragon projection **embedded in the binary**
-  (`internal/webtier/data/`, read through `internal/webtier/data.go`), preferring
-  a published copy when one exists and falling back to the embedded one
-  otherwise. So the pages are complete whether or not the projection is
-  published, and the fallback is the server's business after all - the earlier
-  wording here put it in the build's hands and that was wrong.
+  `v1/static/<ddragon_version>/{champions,items,runes,summoner-spells,patches}.json`.
+  `/agg/v1/static/16.18/champions.json` is therefore a miss by design when the
+  game patch is `16.18` and the Data Dragon version is `16.18.1`.
+- **No page depended on it, and a future one need not either.** The retired tier
+  rendered champion, item, rune and spell metadata from a Data Dragon projection
+  embedded in its binary, preferring a published copy when one existed. So the
+  pages were complete whether or not the projection was published, and the
+  fallback was the server's business rather than the build's.
 
-The gate no longer waves this through. `scripts/verify-serving.sh` check 5
-asserts whichever of the two conformant shapes it observes and fails on anything
-else:
+What the retired harness did about this is the part worth keeping as a design
+note, because it is the shape of a check that can actually fail: it asserted
+whichever of the two conformant shapes it observed and rejected anything else. A
+**published** version had to answer `200` with exactly
+`Cache-Control: public, max-age=3600`, a declared `Content-Length` that matched
+the bytes delivered, and a JSON body. An **unpublished** version had to answer
+`404` **and** `Cache-Control: no-store` on every probed version, with the absence
+stated in the check's own output. Everything else failed: a `404` without
+`no-store`, a `200` with the wrong policy, a `5xx`, or a version that could not be
+derived and probed at all. A published version alongside `404`s for the
+patch-version candidates was not a failure, because the path carries the Data
+Dragon version and not the game patch, so the candidates routinely disagree - but
+each probed version had to be in one of the two conformant shapes.
 
-- **published**: `200`, exactly `Cache-Control: public, max-age=3600`, a declared
-  `Content-Length` that matches the bytes delivered, and a JSON body;
-- **unpublished**: `404` **and** `Cache-Control: no-store` on every probed
-  version, with the absence stated in the check's own output;
-- **anything else fails**: a `404` without `no-store`, a `200` with the wrong
-  policy, a `5xx`, or a version that could not be derived and probed at all.
-  A published version alongside `404`s for the patch-version candidates is *not*
-  a failure - the path carries the Data Dragon version and not the game patch, so
-  the candidates routinely disagree - but each probed version has to be in one of
-  the two conformant shapes.
-
-The failure direction of that check is itself a control, because a check that
-only ever passes is the defect this amendment was written against:
-`make serving-static-control` (`scripts/serving-static-control.sh`) stands in its
-own HTTP origin - python3's file server, no cluster and no network - serving the
+The failure direction of that check was itself a control, because a check that
+only ever passes is the defect this amendment was written against: a stand-in
+HTTP origin - python3's file server, no cluster and no network - served the
 projection with no `Cache-Control` at all, and again with the projection absent
-and the `404` still uncacheable, and requires check 5 to reject both and the gate
-to exit non-zero. It fails closed when it cannot create the origin it needs, and
-the positive direction runs against the real tier in `make verify-serving-local`
-once over the fixture tree (projection published) and once over a copy with
-`v1/static` removed (projection absent).
-
-Both states are exercised, not just described: `make verify-serving-local` runs
-the fixture tree, which does publish the projection, and then runs the same gate
-a second time over a copy of it with `v1/static` removed, where the absence
-verdict is the required result. Publishing the projection is an open requirement
-of the publisher rather than a defect of the tier, and it is recorded as such in
-docs/compliance.md ("Honest gaps and known weaknesses", item 8).
+and the `404` still uncacheable, and the check had to reject both. Anything that
+publishes or serves this prefix must pick one of the two states and stay in it,
+and publishing the projection remains an open requirement of the publisher rather
+than a defect of any consumer. `docs/compliance.md` records that as a gap.
 
 ## 5. CI image contract
 
-One image contains all three binaries. A deployment or CronJob selects the binary
-it needs with `command`, so a new subcommand never needs a new image; the serving
-tier is the third (`lolstats-web`, section 4.4), which is why adding it did not
-add an image.
+One image contains both binaries. A deployment or CronJob selects the binary it
+needs with `command`, so a new subcommand never needs a new image.
 
 | Item | Value |
 | --- | --- |
@@ -497,10 +436,12 @@ DuckDB CLI is a glibc binary that needs `libc`, `libstdc++` and `libgcc_s`,
 which the `cc` variant carries and the `static` variant does not; that amendment
 is recorded in `docs/decisions/ADR-007-pinned-duckdb-cli-engine.md`.
 
-Binary names inside the image are `/lolstats-ingest`, `/lolstats-aggregate` and
-`/lolstats-web` (with the Data Dragon fallback fixtures at
-`/web/src/fixtures`), with `ENTRYPOINT ["/lolstats-ingest"]` and
-`CMD ["worker"]`.
+Binary names inside the image are `/lolstats-ingest` and `/lolstats-aggregate`,
+with `ENTRYPOINT ["/lolstats-ingest"]` and `CMD ["worker"]`. The third binary,
+`/lolstats-web`, and the Data Dragon fallback fixtures at `/web/src/fixtures`
+were removed with the serving tier on 2026-09-18
+(`docs/decisions/ADR-011-retire-the-web-tier.md`); the image is now smaller by
+one binary and one fixture tree, and nothing in the image listens on a socket.
 
 An image is only published by a run in which the DuckDB-dependent build tests
 actually executed. The end-to-end analytics tests in
@@ -516,35 +457,29 @@ package reported `SKIP`. A skip is a failure in CI, not a pass. The same two
 commands - `make duckdb` and then `make test-build` - are how a contributor runs
 that gate locally.
 
-One more gate runs in the same job, added because it was passing for the wrong
-reason:
+Two further gates used to run in the same job, and both are gone:
 
-- **The serving contract and the compliance gate.** `make verify-serving-local`
-  starts the tier over the checked-in fixture tree and again over a deliberately
-  corrupt aggregate root, and `make compliance` plus `make
-  compliance-negative-control` run the launch-blocking compliance gate and its
-  negative controls. The gate's scans hand a NUL-delimited list of paths to
-  `grep`, whose empty-list behaviour differs between GNU (the CI runner) and BSD
-  (macOS), so check 12 asserts that both an empty list and a real list behave and
-  `make compliance-gnu` re-runs the gate in a GNU userland locally; the reason is
-  recorded in `docs/compliance.md`.
+- **The serving contract and the compliance gate.** A local serving harness
+  started the tier over the checked-in fixture tree and again over a corrupt
+  aggregate root; `make compliance`, `make compliance-negative-control` and
+  `make compliance-gnu` ran the launch-blocking compliance gate, its negative
+  controls, and the gate again under a GNU userland locally (the gate's scans
+  hand a NUL-delimited path list to `grep`, whose empty-list behaviour differs
+  between GNU and BSD). All of it, plus the `if: always()` guard that kept those
+  results readable while some other check was red, went with the tier on
+  2026-09-18. The launch-blocking claims they enforced are still requirements and
+  are now written in `docs/compliance.md`.
+- **The render-parity gate,** retired on 2026-09-17 together with its live
+  variant and its mutation control. It required the Go tier's rendered bytes to
+  equal those of `web/dist` - the Astro build of the tree the tier replaced - and
+  the served design layer had, deliberately and by recorded decision, diverged
+  from that tree in three ways: the frozen CSS layer inlined into every document
+  (14,178 raw / 5,015 gzip bytes), the `--bg-light` -> `--surface` rename, and one
+  added nav entry. A byte comparison against a retired tree cannot be a pass/fail
+  gate for the tree that superseded it, so the gate was deleted rather than
+  mirrored. On 2026-09-18 both renderers and the trees behind them were deleted
+  too, so there is nothing left to compare and no design authority to name.
 
-Both run as steps of the `verify` job in `.github/workflows/docker-build.yml`,
-and those steps carry `if: always()`. They sit *after* the test step, so without
-the guard a Go test failure would stop the job before either produced a result -
-which is what happened on 2026-09-17, when a parity mismatch in a design layer
-that is not this lane's left the compliance result unwritten. One definition of
-each gate, and a result that is readable while some other check is red.
-
-The **render-parity gate was retired on 2026-09-17**, together with its live
-variant and its mutation control. It required the Go tier's rendered bytes to
-equal those of `web/dist` - the Astro build of the tree this tier replaced - and
-the served design layer had, deliberately and by recorded decision, diverged from
-that tree in three ways: the frozen CSS layer inlined into every document (14,178
-raw / 5,015 gzip bytes), the `--bg-light` -> `--surface` rename, and one added
-nav entry. A
-byte comparison against a retired tree cannot be a pass/fail gate for the tree
-that superseded it, so the gate was deleted rather than mirrored. On 2026-09-18
-the tree itself was deleted as well: the compliance gate above now scans the
-pages the running tier serves, nothing compares the two renderers any more, and
-the Go tier is the design authority.
+`make duckdb` and `make test-build` are therefore the whole of the image's
+build-time evidence now: they are the only thing standing between a green
+`verify` job and a published image, and they still fail on a skip.

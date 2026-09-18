@@ -2,23 +2,27 @@
 
 A self-hosted League of Legends statistics site: win rates, pick rates, ban rates,
 builds and matchups by champion, role and patch. Everything is pre-computed
-nightly into a published artifact tree and served from it by a Go tier, so a page
-view never touches a database and never calls the Riot API.
+nightly into a published artifact tree, so a page view never touches a database
+and never calls the Riot API. There is no server in this repository: the tree is
+the deliverable.
 
 Not endorsed by Riot Games.
 
 ## What is here
 
 The pipeline is implemented end to end: `lolstats-ingest` crawls Riot's API into
-an append-only raw archive and a Postgres control plane, `lolstats-aggregate`
-turns that archive into the published `agg/v1` tree, and `lolstats-web` renders
-every page from that tree at request time.
+an append-only raw archive and a Postgres control plane, and `lolstats-aggregate`
+turns that archive into the published `agg/v1` tree. The tree is the end of the
+pipeline. A Go presentation tier used to render pages from it and was removed on
+2026-09-18 (`docs/decisions/ADR-011-retire-the-web-tier.md`); what a reader of the
+tree owes Riot is written down in `docs/compliance.md` rather than enforced by
+code.
 
 | Path | What it is |
 |---|---|
 | `cmd/lolstats-ingest` | Crawler and scheduler jobs. Subcommands: `worker`, `discover-seeds`, `backfill`, `maintain` |
 | `cmd/lolstats-aggregate` | Nightly DuckDB build step. Subcommands: `build`, `verify`, `manifest` |
-| `cmd/gen-types` | Emits the JSON Schema and `.d.ts` the frontend consumes |
+| `cmd/gen-types` | Emits the JSON Schema and `.d.ts` for the artifact contract |
 | `internal/contract` | The frozen Go interfaces between the pipeline's components |
 | `internal/aggmodel` | The aggregate artifact types, path builders and schema emitter |
 | `internal/riot` | The frozen Match-V5 DTO subset |
@@ -112,20 +116,18 @@ and repair jobs around it; `./bin/lolstats-ingest --help` is the list.
 ```sh
 make types        # regenerate schema/agg.{d.ts,schema.json} from the Go structs
 make run          # start the ingest worker
-make served-pages # capture what a running tier serves into bin/served-pages
 ```
 
 ## Verify
 
 ```sh
 make fmt vet test test-race lint vuln build
-make compliance compliance-negative-control
 ```
 
-`make compliance` builds the tier, captures the pages it serves over the
-checked-in fixture tree into `bin/served-pages`, and scans that corpus. There is
-no Node toolchain in the repository: the frontend is the Go tier
-(`internal/webtier`).
+There is no Node toolchain in the repository and, since the web tier was retired
+on 2026-09-18, no compliance or serving lane either: the launch-blocking claims
+those gates enforced are written in `docs/compliance.md` and nothing asserts them
+any more, which that page records as a gap.
 
 `make vuln` runs `govulncheck` over the module graph. Run it on any dependency
 change.
@@ -173,6 +175,11 @@ make docker-build
 - `docs/contracts.md` - frozen interfaces. Read this before writing cross-component code.
 - `docs/architecture.md` - how the pieces fit, and what happens when one fails.
 - `docs/data-sources.md` - where every datum comes from, and the Phase 0 gate table.
-- `docs/compliance.md` - Riot policy conformance checklist and its evidence.
+- `docs/compliance.md` - the Riot obligations that survive, the approved
+  wording, and an honest account of what is no longer asserted.
+- `docs/frontend/` - the frontend design system: the normative guide
+  (`README.md`), the component toolbox (`components.md`), the accessibility
+  contract (`a11y.md`), the responsive contract (`responsive.md`), the token
+  layer (`tokens.css`) and a review mockup. No product frontend is implemented
+  yet; see `docs/decisions/ADR-012-frontend-design-system.md`.
 - `docs/decisions/` - the ADRs.
-- `AGENTS.md` - how changes are written down in this repository.

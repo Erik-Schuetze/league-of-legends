@@ -171,11 +171,11 @@ spec:
 # `allow-web-ingress` used to be here: an ingress rule selecting
 # `component: web` - the inner Caddy Deployment - that admitted the shared Caddy
 # in namespace `web` on ports 8080 and 80. The Deployment was deleted with the
-# static tier on 2026-09-17, which left the rule matching no pod at
-# all, so it was deleted in the same change rather than kept as an object that
-# looks like it guards the public route and admits nothing. The flow it described
-# lives on unchanged in `deploy/base/web/go-networkpolicy.yaml`
-# (`allow-go-web-ingress`), which admits the same peer - namespace `web`, ports
-# 8080 and 80 - to `component: web-go`, plus the pod CIDR that makes a
-# port-forward probe work. `deploy/base/web/service.yaml` is what chooses which
-# pods answer on the public name.
+# static tier on 2026-09-17, which left the rule matching no pod at all, so it
+# was deleted in the same change rather than kept as an object that looks like it
+# guards the public route and admits nothing. The Go tier that replaced it
+# (`allow-go-web-ingress`, selecting `component: web-go`) was itself retired on
+# 2026-09-18 (docs/decisions/ADR-011) and its rule and Deployment went with it,
+# so nothing in this namespace accepts ingress from the shared Caddy at all any
+# more. `deploy/base/web/service.yaml` is still the name the Caddy upstream
+# points at, and it currently has no endpoints behind it.

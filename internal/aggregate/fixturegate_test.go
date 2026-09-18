@@ -1400,7 +1400,7 @@ func TestBuildReconciliationGateIsExactAndBounded(t *testing.T) {
 // The demo exists because no Riot API key is available in this environment, so
 // the one thing it must never do is look like measured data. Determinism is
 // part of that: a demo whose numbers changed between runs could not be used to
-// review a frontend change, and its generated_at is therefore derived from the
+// review a presentation change, and its generated_at is derived from the
 // simulated window rather than read from the clock.
 func TestDemoIsDeterministicAndLabelled(t *testing.T) {
 	t.Parallel()
@@ -1485,7 +1485,7 @@ func TestDemoIsDeterministicAndLabelled(t *testing.T) {
 	}
 
 	// Valid: the tree passes verification against the schema cmd/gen-types
-	// writes, which is the same document the frontend types are generated from.
+	// writes, which is the same document the published declarations come from.
 	schema := filepath.Join("..", "..", "schema", "agg.schema.json")
 	if _, err := os.Stat(schema); err != nil {
 		t.Fatalf("the schema cmd/gen-types writes is missing: %v", err)
@@ -1763,8 +1763,8 @@ func TestVerifyAcceptsTheFixtureBuild(t *testing.T) {
 			// The schema rejects an unpublished grade before the tier-list
 			// check runs, so this case pins the schema message rather than the
 			// verifier's own wording. Both exist: the schema document is the
-			// contract cmd/gen-types ships to the frontend, so a grade the
-			// web app cannot render must fail at the schema, not later.
+			// contract cmd/gen-types ships to a consumer, so a grade no reader
+			// can render must fail at the schema, not later.
 			name: "a grade the schema does not allow",
 			want: "cells[0].tier",
 			damage: func(t *testing.T, root string) {

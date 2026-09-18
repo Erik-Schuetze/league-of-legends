@@ -1,8 +1,11 @@
 // Command gen-types derives the JSON Schema and the TypeScript declaration for
 // the agg/v1 artifacts from the Go structs in internal/aggmodel. The structs are
-// the single source of truth: anything hand-written on the frontend side would
+// the single source of truth: anything hand-written on a consumer's side would
 // drift the moment a field is added, so the declarations are generated from the
-// same types the aggregator marshals.
+// same types the aggregator marshals. No consumer in this repository reads them
+// since the presentation tier was deleted on 2026-09-18
+// (docs/decisions/ADR-011-retire-the-web-tier.md); they are published as part of
+// the artifact contract.
 //
 // Usage:
 //

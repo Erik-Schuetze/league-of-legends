@@ -1,0 +1,355 @@
+/* ============================================================================
+   Global layer for the LoL Stats frontend.
+   ----------------------------------------------------------------------------
+   Order: font faces, token import, reset, page canvas, primitives, utilities.
+   Anything component-specific lives in the component's own <style> block.
+   ========================================================================= */
+
+@import "../../tokens.css";
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Montserrat";
+  src: url("/fonts/montserrat-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* -- Reset ---------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body,
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+blockquote,
+dl,
+dd,
+ul,
+ol {
+  margin: 0;
+}
+
+ul[class],
+ol[class] {
+  padding: 0;
+  list-style: none;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* -- Page canvas ---------------------------------------------------------- */
+body {
+  min-height: 100vh;
+  background-color: var(--c-surface-sunken);
+  /* The 27px backdrop. Two thin rules, decorative, never structural. */
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-cell) var(--grid-cell);
+  background-attachment: fixed;
+  color: var(--c-text);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-body);
+}
+
+/* -- Type defaults -------------------------------------------------------- */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+  color: var(--c-text-strong);
+  text-wrap: balance;
+}
+
+h1 { font-size: var(--step-4); }
+h2 { font-size: var(--step-3); }
+h3 { font-size: var(--step-2); }
+h4 { font-size: var(--step-1); }
+
+p { text-wrap: pretty; }
+
+a {
+  color: var(--c-text-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
+a:hover {
+  color: var(--c-text-accent-strong);
+  text-decoration-thickness: 2px;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+hr {
+  height: 0;
+  border: 0;
+  border-top: 2px solid var(--c-rule-strong);
+  margin: var(--space-6) 0;
+}
+
+::selection {
+  background: var(--c-blue);
+  color: var(--c-cream);
+}
+
+/* -- Anchors -------------------------------------------------------------- */
+/* The nav is sticky, so an in-page link would otherwise scroll its heading
+   underneath the bar. Every fragment target keeps clear of it. */
+:target,
+:target,
+[id] {
+  scroll-margin-block-start: calc(var(--nav-height) + var(--space-3));
+}
+
+/* -- Focus ---------------------------------------------------------------- */
+/* One ring for everything. It is never removed, only ever restyled. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-shadow);
+  border-radius: var(--radius);
+}
+
+/* -- Primitives ----------------------------------------------------------- */
+.shell {
+  width: 100%;
+  max-width: var(--shell-max);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.measure {
+  max-width: var(--measure);
+}
+.measure-narrow {
+  max-width: var(--measure-narrow);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-gap, var(--space-5));
+}
+.stack-3 { --stack-gap: var(--space-3); }
+.stack-4 { --stack-gap: var(--space-4); }
+.stack-6 { --stack-gap: var(--space-6); }
+.stack-7 { --stack-gap: var(--space-7); }
+.stack-8 { --stack-gap: var(--space-8); }
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cluster-gap, var(--space-3));
+}
+.cluster-2 { --cluster-gap: var(--space-2); }
+.cluster-4 { --cluster-gap: var(--space-4); }
+.cluster-5 { --cluster-gap: var(--space-5); }
+.cluster-spread {
+  justify-content: space-between;
+}
+
+.grow { flex: 1 1 auto; min-width: 0; }
+
+.grid-auto {
+  display: grid;
+  gap: var(--grid-gap, var(--space-5));
+  grid-template-columns: repeat(auto-fit, minmax(var(--grid-min, 15rem), 1fr));
+}
+
+/* -- Utilities ------------------------------------------------------------ */
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Every numeral in the interface. Tabular so columns never jitter. */
+.num {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--num-features);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--c-text-muted);
+}
+
+.lede {
+  font-size: var(--step-1);
+  line-height: var(--lh-snug);
+  color: var(--c-text-muted);
+  max-width: var(--measure);
+}
+
+.muted { color: var(--c-text-muted); }
+.strong { color: var(--c-text-strong); font-weight: var(--fw-semibold); }
+
+.visually-hidden:not(:focus):not(:active) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute;
+  inset-inline-start: var(--space-4);
+  inset-block-start: var(--space-2);
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--touch-target);
+  padding: var(--space-2) var(--space-4);
+  background: var(--c-cream);
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: var(--fw-bold);
+  color: var(--c-text-strong);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.skip-link:focus-visible {
+  transform: none;
+  box-shadow: var(--shadow-card);
+}
+
+.prose > * + * {
+  margin-block-start: var(--space-4);
+}
+.prose h2 {
+  margin-block-start: var(--space-7);
+}
+.prose h3 {
+  margin-block-start: var(--space-6);
+}
+.prose ul,
+.prose ol {
+  padding-inline-start: var(--space-5);
+}
+.prose li + li {
+  margin-block-start: var(--space-2);
+}
+
+/* -- Stretched link ------------------------------------------------------- */
+/* A card whose whole face is one link target, while the visible text stays a
+   normal-sized link. The host carries the target size; the link's ::after
+   paints over the host, so the clickable box and the visible box differ. */
+.stretch-host {
+  position: relative;
+}
+
+.stretch-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* -- Touch floor ---------------------------------------------------------- */
+/* Below the tablet breakpoint every target a thumb has to hit is at least
+   --touch-target square (WCAG 2.5.5). Compact component sizes are kept for
+   pointer widths, where WCAG 2.5.8 (24x24) is what has to hold and density
+   matters more than reach. Components carry the same rule in their own
+   stylesheet; this section covers the shared patterns in the shell. */
+@media (max-width: 767px) {
+  .link-list a {
+    display: flex;
+    align-items: center;
+    min-block-size: var(--touch-target);
+  }
+}
+
+/* A vertical list of navigation links. Pairs with the touch rule above. */
+.link-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* -- Forced colours ------------------------------------------------------- */
+@media (forced-colors: active) {
+  body {
+    background-image: none;
+  }
+  :focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}

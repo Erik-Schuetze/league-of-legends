@@ -18,29 +18,11 @@ COPY internal ./internal
 # internal/store embeds the migration SQL, so the build stage needs it too.
 COPY sql ./sql
 
-# The demo tree the web tier renders when LOLSTATS_AGG_FIXTURES is "only", which
-# is the value deploy/base/config.yaml sets and therefore the value the deployed
-# tier inherits. It is checked-in data rather than a source it compiles, so it is
-# copied instead of embedded: it is a snapshot, it is large, and the code that
-# reads it is the same code that reads the real root off the volume. A tier
-# without it answers 503 on every ladder route rather than serving a table with
-# holes in it. The Data Dragon projection the champion pages need is embedded in
-# the binary instead (internal/webtier/data.go), so it is not copied here.
-#
-# The source is fixtures/site since 2026-09-17; the destination stays
-# /web/src/fixtures because that is the path deploy/base/web/go-deployment.yaml
-# sets LOLSTATS_FIXTURES_DIR to, and the deployment is not this change's to
-# make. Nothing named web/ remains in the repository: this is one directory
-# name inside the image, kept so an image-path rename does not have to travel
-# with a manifest change.
-COPY fixtures/site /web/src/fixtures
-
-# CGO disabled: the three Go binaries link no C, so they are fully static. A
-# single build stage produces all of them because they share every dependency. The
+# CGO disabled: the two Go binaries link no C, so they are fully static. A
+# single build stage produces both because they share every dependency. The
 # image still carries a libc, but only for the pinned DuckDB CLI below.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lolstats-ingest ./cmd/lolstats-ingest \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lolstats-aggregate ./cmd/lolstats-aggregate \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lolstats-web ./cmd/lolstats-web
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lolstats-aggregate ./cmd/lolstats-aggregate
 
 # The aggregation step is the one part of the pipeline that needs a SQL engine,
 # and there is no static DuckDB CLI to link against: both official Linux CLI
@@ -102,10 +84,6 @@ FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57
 # need with `command`, so a subcommand change never needs a new image.
 COPY --from=build /out/lolstats-ingest /lolstats-ingest
 COPY --from=build /out/lolstats-aggregate /lolstats-aggregate
-COPY --from=build /out/lolstats-web /lolstats-web
-# Read-only input for that binary, at the path deploy/base/web/go-deployment.yaml
-# names. It is data, not code, and nothing in this image writes to it.
-COPY --from=build /web/src/fixtures /web/src/fixtures
 COPY --from=duckdb /opt/duckdb/duckdb /usr/local/bin/duckdb
 
 # The aggregate build resolves the engine version and refuses to publish from a

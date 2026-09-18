@@ -61,7 +61,11 @@ existing field, or any published document's shape. `internal/aggmodel` is the
 single source of truth, so the schema, the TypeScript declaration and the
 validator all move together: `internal/aggmodel.Source`, `SourceRiotMatchV5`
 and `SourceDemo` are the definitions, and `cmd/gen-types` regenerates
-`web/src/types/agg.schema.json` and `agg.d.ts` from them.
+`schema/agg.schema.json` and `schema/agg.d.ts` from them. (This ADR was written
+when that output landed in `web/src/types/`, under the Astro tree; that tree, the
+Go tier that ported it and the tier's own copy of the schema were all deleted by
+2026-09-18, so `schema/` is the only copy now -
+`ADR-011-retire-the-web-tier.md`.)
 
 ## What a demo artifact is, and where it may live
 
@@ -89,14 +93,18 @@ document in hand:
 1. `source` on `manifest.json` and on every envelope - `"demo"` or
    `"riot-match-v5"`. This is the machine-readable answer and the one `verify`
    enforces.
-2. The banner every page renders. `web/src/layouts/StateBanner.astro` is driven
-   from the manifest alone, on every route, and says which of the three states
-   the reader is in: `"Published snapshot"` for a real manifest, `"Preview
-   build"` for a demo set, `"Preview build - snapshot source not declared"` when
-   the source is missing or unrecognised, and an explicit empty state when
-   nothing has been published. So a reader never has to know which directory the
-   page was built from, and a page cannot be mistaken for real statistics by
-   being visited directly.
+2. The banner every page rendered. `web/src/layouts/StateBanner.astro` was
+   driven from the manifest alone, on every route, and said which of the three
+   states the reader is in: `"Published snapshot"` for a real manifest,
+   `"Preview build"` for a demo set, `"Preview build - snapshot source not
+   declared"` when the source is missing or unrecognised, and an explicit empty
+   state when nothing has been published. So a reader never had to know which
+   directory the page was built from, and a page could not be mistaken for real
+   statistics by being visited directly. **That banner went with the Astro tree
+   and then with the Go tier that ported it (2026-09-18)**, so the mechanism now
+   exists only as this record: the machine-readable `source` field is what is
+   left, and the requirement that a reader surface it is obligation 11 of
+   `docs/compliance.md`.
 
 ## Alternatives considered
 

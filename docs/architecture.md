@@ -39,22 +39,22 @@ alternative behind them live in `docs/decisions/`; this page is the map.
                                 manifest.json (patches, n per cell, suppressed cells)
                                            |
                                            v
-                                +---------------------+      +---------------+
-                                |  lolstats-web       | ---> |  shared Caddy | --> users
-                                |  (Go tier, Deploy)  |      |  (ns `web`)   |
-                                |  renders every      |      |  TLS, proxy   |
-                                |  route from agg/v1  |      +---------------+
-                                +---------------------+
+                                           |
+                                           v
+                                   agg/v1/** is read from the
+                                   volume by whatever needs it
+                                 (no server in this repository)
 ```
 
 The two properties worth noticing:
 
 **Nothing leaves the origin at request time.** Every number and every sentence is
-derived inside the cluster: the Go tier renders a route from the artifacts on its
-volume and from nothing else. There is no request path to a database, no
-third-party call, no analytics and no font or CDN fetch from the browser, so there
-is no query to make slow, no connection pool to exhaust and no upstream that can
-rate-limit or observe a reader.
+derived inside the cluster from the artifacts on the volume and from nothing else.
+There is no request path to a database, no third-party call, no analytics and no
+font or CDN fetch from the browser, so there is no query to make slow, no
+connection pool to exhaust and no upstream that can rate-limit or observe a
+reader. Since 2026-09-18 there is also no renderer in this repository: the
+artifacts are the deliverable, and whoever displays them reads files.
 
 **There are exactly two stores, and they hold different kinds of thing.**
 Postgres holds control-plane state whose write volume is bounded by pipeline
@@ -76,59 +76,37 @@ it is an outage rather than a data loss.
 | `lolstats-ingest maintain` | CronJob | Frontier pruning, raw-archive compaction, key-age check, source-toggle review dates | daily |
 | `lolstats-aggregate build` | CronJob | DuckDB reads the raw archive, computes cells, suppresses thin ones, writes `agg/v1/**` and flips the manifest | nightly |
 | `lolstats-aggregate verify` | CronJob | Validate published artifacts against the schema and the gate rules; alert on staleness | after build |
-| `lolstats-web` | Deployment | Render every route from `agg/v1` at request time, serve `/agg/**` unchanged, answer `/healthz` and `/metrics`, and fail visibly (503 + error page) when the artifact tree is missing | continuous |
-| shared Caddy (namespace `web`) | Deployment | Terminate TLS and reverse-proxy to `lolstats-web`; it is the cluster's, not this project's | continuous |
+| `lolstats-web` | Deployment, **retired 2026-09-18** | Rendered every route from `agg/v1` at request time, served `/agg/**` unchanged, answered `/healthz` and `/metrics`, and failed visibly (503 + error page) when the artifact tree was missing. Deleted with its tier; `deploy/base/web/service.yaml` is now unbaked | - |
+| shared Caddy (namespace `web`) | Deployment | Terminate TLS and reverse-proxy to the `lolstats-web` Service. It is the cluster's, not this project's, and its upstream no longer resolves | continuous |
 
-## The serving tier
+## What serves the tree
 
-`lolstats-web` is one Go binary and one Deployment (`cmd/lolstats-web`,
-`internal/webtier`). It is not a file server with a router bolted on: it renders
-each route from the published `agg/v1` artifacts that are mounted on the pod's
-volume, which is what makes the site and `/agg/**` one origin with no CORS
-exception and no route of its own in the shared proxy.
+**Nothing, in this repository.** The Go tier that did - one Deployment,
+`cmd/lolstats-web`, `internal/webtier` - was removed on 2026-09-18
+(`docs/decisions/ADR-011-retire-the-web-tier.md`). What is left is the artifact
+tree and the rules a reader of it has to honour; `docs/contracts.md` section 4
+is the authority for both.
 
-| Surface | Behaviour |
+| Property | Behaviour |
 | --- | --- |
-| `/healthz` | 200 `ok`, `Cache-Control: no-store`; this is the readiness and liveness probe |
-| `/metrics` | Prometheus text, `lolstats_`-prefixed, `Cache-Control: no-store` |
-| HTML routes | `Cache-Control: private, max-age=60, stale-while-revalidate=300`, a quoted `ETag`, `Vary: Accept-Encoding`; a matching `If-None-Match` is answered `304` with no body, a stale validator is answered with the byte-identical 200 |
-| `/agg/v1/static/**` | Data Dragon JSON, reserved for the static sync. **Conditional, amended 2026-09-17**: *published* - `Cache-Control: public, max-age=3600`, safe to cache publicly because it is immutable upstream data with no reader in it; *unpublished* (today's state) - `404` with `Cache-Control: no-store`, and the pages are unaffected because the tier renders from the Data Dragon projection embedded in the binary (`internal/webtier/data.go`). `docs/contracts.md` section 4 is the authority; gap 8 of `docs/compliance.md` records why the contract was amended rather than the tree published |
-| `/agg/v1/manifest.json` | `Cache-Control: public, max-age=60`; the 60s matches the nightly build's directory-rename publish, so a stale entry cannot outlive one publish cycle |
-| `agg/v1` absent | 503 with a **visible** error page (`data-fault="no-snapshot"`), `no-store` - a page that cannot be rendered correctly is never served as a 200 |
+| URL prefix | The aggregate root is published at `/agg`, on the same origin as whatever reads it, so a page and its data cannot become two origins that drift apart |
+| Cache policy | `public, max-age=60` with an `ETag` on `manifest.json` and the artifacts under `p/`; `public, max-age=3600` on `/agg/v1/static/<ddragon_version>/**.json`, which is immutable upstream data. The static prefix is **conditional**: served at that policy when published, `404` with `Cache-Control: no-store` when it is not |
+| `agg/v1` absent | An error, never a partial success. A page that cannot be rendered correctly must not be served at all - the retired tier answered 503 with a visible error page |
+| Corrupt artifact | Passed through as it is. A reader serves the bytes it was given rather than inventing a state |
+| Repeated request | `ETag` + `304`, and `private, max-age=60, stale-while-revalidate=300` on HTML so a stale copy is revalidated rather than assumed correct |
 
-`scripts/verify-serving.sh` (`make verify-serving` against the cluster through
-`kubectl -n lolstats port-forward svc/lolstats-go-web 18099:80`, or
-`make verify-serving-local` against a tier started over the checked-in fixture
-tree) asserts every row of that table, and asserts it against the deployed
-Service rather than against the source: the gate grew out of a static-site
-script whose file paths and `Cache-Status` expectations no longer described
-anything the tier does. The local variant starts the binary a third time over a
-copy of the fixture tree with `v1/static` removed, so both states of the
-conditional row above are executed rather than described, and a second time over
-a deliberately corrupt aggregate root, because "503 rather than a truncated 200"
-is the kind of property that only a live probe can establish.
+Nothing asserts any of that now. The harness that did went with the tier, as did
+the compliance gate that scanned the pages the running tier served. Those
+launch-blocking claims are still requirements and are written in
+`docs/compliance.md`, which also records their absence of automated evidence as a
+gap.
 
-No row is a warning. A row that the deployed tier is in neither state of - a
-`404` whose miss a cache may keep, a `200` at the wrong policy, a `5xx` - fails
-the gate, and `make serving-static-control` is the standing proof of that failure
-direction: it stands in its own origin serving the projection with no
-`Cache-Control`, and again with the projection absent and the `404` still
-uncacheable, and requires the gate to reject both.
-
-It also asserts the property the tier exists for: **the page works with
-JavaScript disabled.** The filter bar is a `method="get"` form, and check 4 reads
-the option values out of the served `<select>` elements, requests each one, and
-requires at least two distinct documents back - so a control that only looks like
-a control fails the gate. The digests are printed, so the evidence names which
-two bodies differed (docs/compliance.md, amendment 2).
-
-That form exists only in the response, so the compliance gate scans responses
-rather than files: `scripts/capture-served-pages.sh` captures the HTML the tier
-actually serves (routes discovered from the tier's own `/sitemap.xml`) and
-`make compliance` scans that corpus on loopback over the fixture tree, in CI as
-well as here. It is the only corpus now - the Astro reference tree it used to be
-compared against was retired on 2026-09-17 and deleted on 2026-09-18, so there is
-no second corpus for a byte comparison to come from.
+**No gate is left behind.** A serving harness used to assert each cache
+property against the deployed Service, and a compliance gate used to scan the
+HTML the running tier served - the only corpus a scanner could read, because the
+filter form exists in the response and not in a file. Both went with the tier on
+2026-09-18. Nothing here is asserted by automation any more; `docs/compliance.md`
+is where the surviving obligations live and where that gap is recorded.
 
 ## Boundaries
 
@@ -142,9 +120,9 @@ control metadata. That is what makes a rebuild reproducible from a pinned image
 digest, and what makes "Riot changed the payload" an additive transform change
 rather than an emergency.
 
-**The frontend never computes a statistic.** Every number it renders arrives
-pre-computed, with its `n`. Suppression happens in the aggregate build, so a
-thin cell cannot reach a page even by accident.
+**No consumer computes a statistic.** Every number in the tree arrives
+pre-computed, with its `n`. Suppression happens in the aggregate build, so a thin
+cell cannot reach a reader even by accident.
 
 **The binaries never write to their own image.** Raw archive, aggregate output
 and the site volume are mounts. The runtime image is distroless and nonroot.
@@ -157,11 +135,10 @@ and the site volume are mounts. The runtime image is distroless and nonroot.
 | Riot returns 403 | Circuit-break, alert on key age; a rejected key is a stop condition, not a retry loop |
 | Crash between archive write and dedupe | Nothing is lost: the archive is written first and the queue row is idempotent |
 | Aggregate build fails | The previous artifacts stay live and the manifest is not flipped. Publishing nothing beats publishing garbage |
-| Aggregate build is thin | `cells_suppressed` is surfaced in the manifest and on the page; thin is visible before it is wrong |
-| `agg/v1` is missing or unreadable | The pages that need it answer **503 with a visible error page** and `Cache-Control: no-store` - never a truncated 200. Pages that do not need it (`/`, `/about`) render their no-data state |
-| The manifest is present but corrupt | The tier serves the artifact bytes back unchanged rather than inventing a state, so a corrupt manifest is visible as a corrupt manifest. `make verify-serving-local` byte-compares the served bytes against the fixture on purpose |
-| A tier process dies | It is a Deployment with a readiness probe on `/healthz`, so the pod is replaced; the shared Caddy proxies to the Service, not to a pod |
-| A request is repeated | `ETag` + `304`, and `Cache-Control: private, max-age=60, stale-while-revalidate=300` on HTML so a stale copy is revalidated rather than assumed correct |
+| Aggregate build is thin | `cells_suppressed` is surfaced in the manifest; thin is visible before it is wrong |
+| `agg/v1` is missing or unreadable | An error, never a partial success: a consumer that cannot read the tree must not present a page as if it could. The retired tier answered **503 with a visible error page** and `Cache-Control: no-store` rather than a truncated 200 |
+| The manifest is present but corrupt | The bytes are passed through unchanged rather than a state being invented, so a corrupt manifest is visible as a corrupt manifest |
+| A reader repeats a request | `ETag` + `304`, and `private, max-age=60, stale-while-revalidate=300` on HTML so a stale copy is revalidated rather than assumed correct |
 | Postgres lost | Rebuildable from the archive. Crawl state is lost, which costs time and not data |
 
 ## What is deliberately not here
