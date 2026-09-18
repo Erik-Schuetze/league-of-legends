@@ -1,0 +1,194 @@
+/* ============================================================================
+   LoL Stats - design tokens
+   ----------------------------------------------------------------------------
+   The single source of truth for every value the interface uses. Components
+   reference tokens; they never hard-code a colour, size or duration.
+
+   Import once per app:
+     @import "tokens.css";
+
+   Colours are authored in sRGB hex and must stay that way. The owner's
+   reference captures are macOS Display-P3 screenshots, so they read #3449bf
+   where this file says #1b4bc6. The hexcode wins, always.
+
+   Semantic hues: `--sig-up` (deep teal) and `--sig-down` (rust) are the only
+   colours that carry data meaning. Accent blue is reserved for interaction.
+   Measured luminance separation between the three is at most 1.3:1, so no
+   component may ever use colour alone to say something; pair it with a sign,
+   glyph, word or weight.
+   ========================================================================= */
+
+:root {
+  /* -- Core palette ------------------------------------------------------- */
+  --c-ink: #0b162a; /* deepest navy: headings, primary surfaces */
+  --c-blue: #1b4bc6; /* retro blue: interaction, rings, shadows */
+  --c-sand: #efdbbf; /* page background */
+  --c-cream: #f1eae0; /* raised surface: cards, tiles, tables */
+  --c-graphite: #242a2b; /* body text */
+
+  /* -- Text -------------------------------------------------------------- */
+  --c-text: var(--c-graphite);
+  --c-text-strong: var(--c-ink);
+  --c-text-muted: #55524b; /* 6.53:1 on cream, 5.77:1 on sand */
+  --c-text-accent: var(--c-blue); /* 6.13:1 on cream, 5.42:1 on sand */
+  --c-text-accent-strong: #163f9f; /* 7.83:1 on cream, 6.93:1 on sand */
+  --c-text-on-accent: var(--c-cream); /* 6.13:1 on blue */
+  --c-text-on-ink: var(--c-cream); /* 15.13:1 on ink */
+  /* Exempt from AA as disabled text. Never used for live data. */
+  --c-text-disabled: #8b877e;
+
+  /* -- Surfaces ---------------------------------------------------------- */
+  --c-surface: var(--c-cream);
+  --c-surface-sunken: var(--c-sand);
+  --c-surface-inverse: var(--c-ink);
+  --c-surface-overlay: rgb(241 234 224 / 0.96); /* dialogs, drawers */
+  --c-scrim: rgb(11 22 42 / 0.45); /* behind dialogs and drawers */
+
+  /* -- Lines -------------------------------------------------------------- */
+  --c-rule: #cbbba2; /* decorative hairlines only, 1.5:1: never the sole
+                        indicator of anything, never a text colour */
+  --c-control-border: #6f6a60; /* 4.50:1 on cream, 3.98:1 on sand */
+  --c-rule-strong: var(--c-ink); /* 2px structural rules, table thead */
+
+  /* -- Data semantics ----------------------------------------------------- */
+  --sig-up: #0f5f52; /* win / above baseline. 6.33:1 cream, 5.60:1 sand */
+  --sig-down: #9e4a22; /* loss / below baseline. 5.09:1 cream, 4.50:1 sand */
+  --sig-flat: var(--c-graphite); /* at baseline, no direction */
+  --sig-unknown: #6f6a60; /* not published, not computed, not comparable */
+  --sig-up-tint: rgb(15 95 82 / 0.08);
+  --sig-down-tint: rgb(158 74 34 / 0.08);
+  --sig-unknown-tint: rgb(111 106 96 / 0.08);
+  --c-text-on-up: var(--c-cream);
+  --c-text-on-down: var(--c-cream);
+
+  /* -- Tints ------------------------------------------------------------- */
+  --tint-accent: rgb(27 75 198 / 0.07); /* inert rows, inset wells */
+  --tint-accent-strong: rgb(27 75 198 / 0.14); /* selected rows, active tabs */
+  --grid-line: rgb(27 75 198 / 0.06); /* the 27px backdrop */
+  --bg-fade-50: rgb(239 219 191 / 0.5); /* nav gradient mid stop */
+  --bg-fade-0: rgb(239 219 191 / 0); /* nav gradient end stop */
+
+  /* -- Focus ------------------------------------------------------------- */
+  --focus-ring-color: var(--c-blue);
+  --focus-ring-inner: 0 0 0 2px var(--c-cream); /* keeps the ring legible on
+                                                   sand and on accent fills */
+  --focus-ring: 0 0 0 4px var(--focus-ring-color);
+  --focus-shadow: var(--focus-ring-inner), var(--focus-ring);
+
+  /* -- Elevation --------------------------------------------------------- */
+  /* Two steps only. A 2px accent ring plus a hard, blurred-free accent block
+     offset down-right. The shadow colour is the ring colour: that is the
+     whole look, and softening either breaks it. */
+  --ring-width: 2px;
+  --ring: 0 0 0 var(--ring-width) var(--c-blue);
+  --offset-card: 8px 8px 0 var(--c-blue);
+  --offset-hero: 12px 12px 0 var(--c-blue);
+  --offset-hover: 6px 6px 0 var(--c-blue); /* while a card is pressed/lifted */
+  --shadow-card: var(--ring), var(--offset-card);
+  --shadow-hero: var(--ring), var(--offset-hero);
+  --shadow-inset: inset 0 0 0 var(--ring-width) var(--c-rule);
+
+  /* -- Radius ------------------------------------------------------------ */
+  --radius: 0; /* every surface is square. The look is flat and sharp. */
+  --radius-code: 3px; /* inline code only */
+
+  /* -- Typography -------------------------------------------------------- */
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-brand: "Montserrat", var(--font-body);
+  --font-heading: var(--font-mono); /* headings are mono: that is the voice */
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Fluid scale. Sizes are clamp(min, preferred, max) so a table never
+     reflows between breakpoints. */
+  --step--2: clamp(0.6875rem, 0.65rem + 0.19vw, 0.8125rem); /* 11-13px: meta, n */
+  --step--1: clamp(0.8125rem, 0.77rem + 0.21vw, 0.9375rem); /* 13-15px: dense table */
+  --step-0: clamp(0.9375rem, 0.9rem + 0.19vw, 1.0625rem); /* 15-17px: body */
+  --step-1: clamp(1.0625rem, 0.99rem + 0.36vw, 1.25rem); /* 17-20px: lede */
+  --step-2: clamp(1.25rem, 1.1rem + 0.75vw, 1.625rem); /* 20-26px: h3, stat */
+  --step-3: clamp(1.5rem, 1.24rem + 1.3vw, 2.125rem); /* 24-34px: h2 */
+  --step-4: clamp(1.875rem, 1.4rem + 2.4vw, 3rem); /* 30-48px: h1 */
+  --step-5: clamp(2.25rem, 1.5rem + 3.8vw, 4rem); /* 36-64px: hero */
+
+  --lh-tight: 1.15; /* headings */
+  --lh-snug: 1.4; /* table cells, labels */
+  --lh-body: 1.6; /* prose */
+
+  --ls-tight: -0.01em; /* display sizes */
+  --ls-normal: 0;
+  --ls-wide: 0.06em; /* uppercase labels, table headers */
+
+  --measure: 56rem; /* longest comfortable prose column */
+  --measure-narrow: 40rem;
+
+  /* -- Space ------------------------------------------------------------- */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+
+  /* -- Motion ------------------------------------------------------------ */
+  --dur-fast: 120ms; /* state flips: hover colour, focus */
+  --dur-base: 200ms; /* the lift */
+  --dur-slow: 400ms; /* panels, drawers */
+  --ease: ease;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --lift: translate(-3px, -3px); /* box travels toward its own shadow */
+  --float-amp: -12px; /* the idle float, decorative only */
+  --float-dur-a: 2.8s;
+  --float-dur-b: 3.2s;
+  --float-dur-c: 3.6s;
+
+  /* -- Layout ------------------------------------------------------------ */
+  --shell-max: 1400px;
+  --nav-height: 4rem;
+  --grid-cell: 27px; /* the backdrop square; also the base rhythm unit */
+  --gutter: var(--space-5);
+  --rail-width: clamp(7rem, 8.5vw, 10rem);
+
+  /* Breakpoints are documented, not tokenised: CSS custom properties cannot
+     be used in media queries. Keys, min-width, mobile-first:
+       480   phone-landscape
+       768   tablet        (--bp-sm)
+       1024  laptop        (--bp-md)
+       1400  desktop shell (--bp-lg, equals --shell-max)
+     Only the 768 boundary changes structure; wider ones only change density. */
+
+  /* -- Data density ------------------------------------------------------ */
+  --row-y: var(--space-2); /* dense table vertical padding */
+  --row-y-roomy: var(--space-3); /* desktop row padding */
+  --cell-x: var(--space-3);
+  --num-features: "tnum" 1, "lnum" 1; /* tabular numerals, mandatory */
+  --touch-target: 44px; /* minimum interactive box on touch */
+}
+
+/* Honour the OS setting: the float and the lift are the only motion in the
+   design, and both are decorative. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --lift: none;
+    --float-amp: 0px;
+  }
+}
+
+/* Forced-colours mode: keep the ring, drop the decoration. */
+@media (forced-colors: active) {
+  :root {
+    --shadow-card: none;
+    --shadow-hero: none;
+    --ring: 0 0 0 var(--ring-width) CanvasText;
+  }
+}

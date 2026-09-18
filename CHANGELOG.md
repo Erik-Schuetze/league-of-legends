@@ -36,6 +36,19 @@ short. "Breaking" means something that used to work no longer does.
   in `deploy/` sets the variable, so the deployed nightly build still runs
   without the gate; adding the key to `deploy/base/config.yaml` is what turns it
   on. Fixture builds, offline verification and `demo` are unaffected either way.
+- `docs/frontend/` - the design system for the frontend that replaces the
+  retired tier: `README.md` (the normative guide), `components.md` (52
+  components with their props, states and state matrix), `a11y.md` (the WCAG 2.1
+  AA contract and a measured contrast table), `responsive.md` (the breakpoint
+  contract), `tokens.css` (the token layer, importable by any future frontend),
+  `tools/contrast-audit.mjs` (recomputes the contrast table and fails on a
+  failing pair) and `mockup/` (a SvelteKit review build with a component gallery,
+  a landing page and an explorer that renders every honesty state). 14 review
+  renders are checked in under `docs/frontend/screenshots/mockups/`, beside the
+  owner's reference captures. ADR-012 records the stack decision. This is a
+  design deliverable: no product frontend is implemented, and `docs/contracts.md`
+  still describes only the aggregate shapes, the route table, the Go interfaces
+  and the image contract.
 
 ### Removed
 

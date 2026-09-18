@@ -177,4 +177,9 @@ make docker-build
 - `docs/data-sources.md` - where every datum comes from, and the Phase 0 gate table.
 - `docs/compliance.md` - the Riot obligations that survive, the approved
   wording, and an honest account of what is no longer asserted.
+- `docs/frontend/` - the frontend design system: the normative guide
+  (`README.md`), the component toolbox (`components.md`), the accessibility
+  contract (`a11y.md`), the responsive contract (`responsive.md`), the token
+  layer (`tokens.css`) and a review mockup. No product frontend is implemented
+  yet; see `docs/decisions/ADR-012-frontend-design-system.md`.
 - `docs/decisions/` - the ADRs.
