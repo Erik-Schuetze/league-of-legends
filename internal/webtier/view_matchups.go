@@ -193,7 +193,7 @@ func (r *Renderer) matchupsPage(role aggmodel.Role, query Query, interactive boo
 	page := &Page{
 		Title:         title,
 		Description:   matchupDescription(label, snap),
-		CanonicalPath: "/matchups/" + slug + "/",
+		CanonicalPath: CanonicalPath("/matchups/" + slug),
 		Active:        "/matchups/" + slug,
 		Partition:     snap.Partition,
 		Noindex:       snap.Partition == nil,

@@ -118,7 +118,7 @@ func (r *Renderer) AboutPage() (*Page, error) {
 	return &Page{
 		Title:         title,
 		Description:   description,
-		CanonicalPath: "/about/",
+		CanonicalPath: CanonicalPath("/about"),
 		Active:        "/about",
 		Body:          body,
 		JSONLD:        jsonld,
@@ -181,7 +181,7 @@ func (r *Renderer) DisclaimerPage() (*Page, error) {
 	return &Page{
 		Title:         title,
 		Description:   description,
-		CanonicalPath: "/disclaimer/",
+		CanonicalPath: CanonicalPath("/disclaimer"),
 		Active:        "/disclaimer",
 		Body:          body,
 		JSONLD:        jsonld,
@@ -213,7 +213,7 @@ func (r *Renderer) PrivacyPage() (*Page, error) {
 	return &Page{
 		Title:         title,
 		Description:   description,
-		CanonicalPath: "/legal/privacy/",
+		CanonicalPath: CanonicalPath("/legal/privacy"),
 		Active:        "/legal/privacy",
 		Body:          body,
 		JSONLD:        jsonld,
@@ -240,7 +240,7 @@ func (r *Renderer) TermsPage() (*Page, error) {
 	return &Page{
 		Title:         title,
 		Description:   description,
-		CanonicalPath: "/legal/terms/",
+		CanonicalPath: CanonicalPath("/legal/terms"),
 		Active:        "/legal/terms",
 		Body:          body,
 		JSONLD:        jsonld,

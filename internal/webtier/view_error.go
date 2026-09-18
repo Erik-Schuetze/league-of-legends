@@ -82,7 +82,7 @@ func (r *Renderer) ErrorPage(path string, status int, kind string, detail string
 	return &Page{
 		Title:         view.Title,
 		Description:   view.Description(),
-		CanonicalPath: view.Path,
+		CanonicalPath: CanonicalPath(view.Path),
 		Noindex:       true,
 		Body:          body,
 	}

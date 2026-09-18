@@ -127,6 +127,26 @@ func (r *Renderer) Loader() *Loader { return r.loader }
 // Site loads the snapshot for this request.
 func (r *Renderer) Site() (*Site, error) { return r.loader.Site() }
 
+// CanonicalPath is the site-relative path a page is addressed by: the same path
+// with a trailing slash.
+//
+// It exists because the site used to name its URLs two ways. Every page's
+// rel=canonical, og:url and structured-data url node was built from a path with
+// the trailing slash - the form the retired static tier's edge redirect resolved
+// to, so the one form that has never sat behind a redirect - while
+// /sitemap.xml's <loc> entries were built from the bare path. A sitemap that
+// advertises a URL which is not the canonical of the page it points at, and
+// which used to redirect before arriving there, is a promise about a page that is
+// not the page, and it leaves a crawler no way to tell which of the two to keep.
+// Both sides are now built from this one function, so they cannot disagree about
+// the shape of a URL again.
+func CanonicalPath(path string) string {
+	if path == "" || path == "/" {
+		return "/"
+	}
+	return strings.TrimRight(path, "/") + "/"
+}
+
 // absolute returns the absolute URL of a site-relative path.
 func (r *Renderer) absolute(path string) string {
 	if path == "" {
