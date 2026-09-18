@@ -20,6 +20,25 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    # sha-ea03221: the revision that describes an empty matchup role by the cells
+    #   it holds, rather than by an artifact it claims does not exist.
+    #   - /matchups/jungle told the reader "has no matchup artifact for this role,
+    #     so no pair is shown rather than an estimate." Measured on the edge
+    #     against the build of sha-88a53f0: that sentence is served, HTTP 200,
+    #     33,923 B, 0 data-search rows - and the artifact it denies returns 200
+    #     with cells=0, suppressed_cells=513, champions=135, min_cell_n=100. The
+    #     pairing was stored and every pair it counted was withheld below the
+    #     floor, which is a different fact and the one the page owed the reader.
+    #   - the same denial was owed wherever a role held no published cell. Five
+    #     roles measured on the edge at sha-88a53f0: mid 49,870 B, bottom 68,840,
+    #     support 56,595, top 50,257, jungle 33,923 - and jungle alone served the
+    #     false sentence. matchups.go now branches on what the artifact stores:
+    #     one cell, more than one, suppressed > 0, or none withheld at all. The
+    #     sentence survives only for a genuinely absent artifact (matchups==nil).
+    #   - view_matchups_test.go holds both new shapes and the no-frame property at
+    #     33,060 B / 33,012 B against the 150,000 B ceiling. **No route,
+    #     indexability or data changes; current_contract prints one more value.**
+    #
     # sha-4afb043: the revision that scopes the explorer's own numbers to the view
     #   that states them.
     #   - two sentences on /explore claimed figures the artifact does not support.
@@ -104,7 +123,7 @@ metadata:
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:5031f92f5523d2f6fbb76cebf5a94ae143a5acfb7fdde73f10911228dcefb6ff
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:fbe21de1d86637e3ba608412f92581c6be52cf343811bc3b6c967ef75733b0bf
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
