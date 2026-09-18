@@ -271,7 +271,7 @@ position is derived, non-identifying statistics: **no `puuid` appears in any
 table**, and a participant appears only as the 1-based `participant_id` MATCH-V5
 assigns within one match, which is a position in a game rather than a person. The
 raw archive is still never published.
-`docs/decisions/ADR-012-ingest-match-timelines.md` is the decision of record,
+`docs/decisions/ADR-014-ingest-match-timelines.md` is the decision of record,
 including why a minute-level table cannot carry the frozen contract's
 `min_cell_n: 100` suppression.
 
@@ -420,7 +420,7 @@ plane holds it and the published surface does not. The `timeline-v1` dataset add
 no identity of its own: a participant enters it only as the in-match
 `participant_id` and never as a `puuid`, so obligation 9's failing condition - a
 published artifact schema carrying a PUUID, summoner id, account id, Riot id or
-profile icon id - is not met by it. `docs/decisions/ADR-012-ingest-match-timelines.md`
+profile icon id - is not met by it. `docs/decisions/ADR-014-ingest-match-timelines.md`
 is the full argument.
 
 Per-player data is not published in any other form either: no aggregate type

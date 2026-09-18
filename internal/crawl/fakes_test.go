@@ -944,15 +944,6 @@ func (f *fakeFetcher) serve(id string, dto riot.MatchDTO, body []byte) {
 	f.bodies[id] = body
 }
 
-// serveTimeline registers a timeline fixture, and a nil body for a timeline the
-// fake should answer with 404.
-func (f *fakeFetcher) serveTimeline(id string, dto riot.TimelineDTO, body []byte) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.timelines[id] = dto
-	f.timelineBodies[id] = body
-}
-
 func (f *fakeFetcher) MatchWithPayload(_ context.Context, matchID string) (riot.MatchDTO, []byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

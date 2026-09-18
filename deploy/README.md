@@ -245,7 +245,7 @@ One RWX volume, `lolstats-data` on the `nfs-client` StorageClass, mounted at
   - nothing schedules it, deliberately, so a bad timeline extract cannot fail the
   nightly tier list. `base/jobs/backfill-timelines.yaml` is the weekly job that
   fills the timeline half of the archive this dataset reads. See
-  `docs/decisions/ADR-012-ingest-match-timelines.md` and
+  `docs/decisions/ADR-014-ingest-match-timelines.md` and
   `docs/runbooks/rebuild-aggregates.md`.
 - `site/` - the rendered HTML two deleted tiers used to serve. **Nothing writes
   it any more** (2026-09-17): `site-build` and the inner Caddy that served the

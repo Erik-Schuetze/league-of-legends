@@ -17,4 +17,6 @@ number is the failure it exists to prevent.
 | 009 | `ADR-009-operator-identity-and-governing-law.md` | Operator identity, the contact route, and a deliberately unnamed governing law |
 | 010 | `ADR-010-public-preview-posture.md` | A labelled public preview while the production key application is pending - **superseded 2026-09-17 by owner decisions D-1 and D-4; the title is kept as the record of what it decided** |
 | 011 | `ADR-011-retire-the-web-tier.md` | The web tier is retired: the artifact tree is the deliverable, and the Riot obligations become written requirements |
-| 012 | `ADR-012-ingest-match-timelines.md` | Match timelines are ingested, and a per-minute feature dataset is published outside the `agg/v1` reader contract |
+| 012 | `ADR-012-frontend-design-system.md` | The frontend is a SvelteKit design system with a normative guide, an importable token layer, and a reviewable component toolbox |
+| 013 | `ADR-013-url-space.md` | The URL space is a few canonical paths with filter state in query parameters |
+| 014 | `ADR-014-ingest-match-timelines.md` | Match timelines are ingested, and a per-minute feature dataset is published outside the `agg/v1` reader contract |

@@ -161,7 +161,7 @@ type QueueItem struct {
 // looking like a random sample. Instead the query orders by a hash of the match
 // id over the whole window, which is stable, unbiased and reproducible.
 // TimelineQuery is the selection rule a timeline backfill runs, as it is
-// recorded in ADR-012. The rule is frozen because the dataset's validity
+// recorded in ADR-014. The rule is frozen because the dataset's validity
 // depends on it: it is what makes the sample reproducible and unbiased rather
 // than whatever happened to be crawled most recently.
 type TimelineQuery struct {

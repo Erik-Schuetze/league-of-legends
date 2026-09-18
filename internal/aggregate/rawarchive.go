@@ -32,7 +32,7 @@ const (
 	rawSourceDir = "match-v5"
 	// RawSourceTimeline is the match timeline source, whose rows are the
 	// timeline payloads for the same matches. See
-	// docs/decisions/ADR-012-ingest-match-timelines.md.
+	// docs/decisions/ADR-014-ingest-match-timelines.md.
 	RawSourceTimeline = "match-v5-timeline"
 	rawPartitionPr    = "dt="
 )

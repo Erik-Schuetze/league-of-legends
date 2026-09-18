@@ -61,7 +61,7 @@ resources:
   # lane - the dataset built from those payloads - is `lolstats-aggregate
   # features`, run by hand; nothing schedules it, so that a bad timeline extract
   # cannot fail the nightly tier list. See
-  # docs/decisions/ADR-012-ingest-match-timelines.md.
+  # docs/decisions/ADR-014-ingest-match-timelines.md.
   - jobs/backfill-timelines.yaml
 
   # ---- additions: operations workstream (backups) ----

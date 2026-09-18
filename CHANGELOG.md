@@ -59,7 +59,7 @@ short. "Breaking" means something that used to work no longer does.
   contract, its `manifest.json` is a build receipt rather than a contract, and
   the nightly build still reads `match-v5` alone, so a bad timeline extract
   cannot fail the tier list.
-- `docs/decisions/ADR-012-ingest-match-timelines.md` - the second raw payload
+- `docs/decisions/ADR-014-ingest-match-timelines.md` - the second raw payload
   and the feature dataset derived from it, including the sample-selection rule
   the crawl and the build both depend on and why a minute-level dataset cannot
   carry the frozen contract's `min_cell_n` suppression.
@@ -67,6 +67,25 @@ short. "Breaking" means something that used to work no longer does.
   feature build, with `internal/aggregate/fixturetimeline_test.go`,
   `internal/aggregate/features_fixture_test.go` and
   `internal/crawl/timeline_backfill_test.go`.
+- `docs/frontend/` - the design system for the frontend that replaces the
+  retired tier: `README.md` (the normative guide), `components.md` (52
+  components with their props, states and state matrix), `a11y.md` (the WCAG 2.1
+  AA contract and a measured contrast table), `responsive.md` (the breakpoint
+  contract), `tokens.css` (the token layer, importable by any future frontend),
+  `tools/contrast-audit.mjs` (recomputes the contrast table and fails on a
+  failing pair) and `mockup/` (a SvelteKit review build with a component gallery,
+  a landing page and an explorer that renders every honesty state). 14 review
+  renders are checked in under `docs/frontend/screenshots/mockups/`, beside the
+  owner's reference captures. ADR-012 records the stack decision. This is a
+  design deliverable: no product frontend is implemented, and `docs/contracts.md`
+  still describes only the aggregate shapes, the Go interfaces and the image
+  contract.
+- The frontend URL space, on 2026-09-18: `ADR-013-url-space.md` and section 8.1
+  of `docs/frontend/README.md`. Canonical paths name a page and partition or
+  filter state lives in query parameters, with defaults omitted so one URL
+  denotes one view. The repository had no route table at all - section 1.3 of
+  `docs/contracts.md` was deleted with the Go tier - while the guide requires
+  filter state to be in the URL, so the explorer's links had no defined shape.
 
 ### Removed
 
@@ -145,6 +164,15 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Changed
 
+- The review mockup's data contract seam. Its generated module hand-declared
+  `Coverage`, `Cell`, `RankedRow`, `Champion` and `ChampionRolePage` instead of
+  importing the contract, and that copy had drifted: `Coverage` had lost
+  `schema` and `source` and gained three fields that live on `Partition`, and
+  `RankedRow` merged the contract's `Build` and `SkillOrder` into one
+  all-optional type. The types now come from `schema/agg.d.ts` through a single
+  type-only import surface, `mockup/src/lib/agg.ts`, and the provenance label
+  reads `coverage.source` rather than a separately injected constant. No
+  rendering changed; the assertion suite passes 461/461 as before.
 - Documents that described the deleted static tier as live were corrected on
   2026-09-18, without a behaviour change: the README no longer calls the
   pipeline a scaffold, `CHANGELOG.md`'s own notes no longer say the ingest and
@@ -185,7 +213,7 @@ short. "Breaking" means something that used to work no longer does.
   archive directory, and the deletion of the rule that stated no timeline method
   exists. Nothing in the frozen `agg/v1` reader contract changes, which is why
   the dataset those payloads feed is published beside it rather than inside it;
-  ADR-012 is the decision of record.
+  ADR-014 is the decision of record.
 - The design freeze over the served CSS layer was retired with
   `DESIGN-FREEZE.md`: the token set, the contrast floors, the "is it still
   inlined last" checks and the byte ceiling are still asserted by

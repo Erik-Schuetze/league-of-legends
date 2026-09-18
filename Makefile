@@ -85,7 +85,7 @@ run-aggregate: build
 # publish different trees, and a dataset pass must not be able to touch the
 # frozen agg/v1 reader contract the nightly build publishes. Nothing schedules
 # it, so it is run by hand once the timeline archive has grown. See
-# docs/decisions/ADR-012-ingest-match-timelines.md.
+# docs/decisions/ADR-014-ingest-match-timelines.md.
 run-features: build
 	./bin/lolstats-aggregate features
 

@@ -20,7 +20,7 @@ Both rows publish transactionally and both leave the previous tree live when the
 fail, but they are otherwise independent on purpose: the first publishes a frozen
 reader contract, the second an exploratory dataset with no such promise, and a
 failed run of either leaves the other alone. The second tree is the one
-`docs/decisions/ADR-012-ingest-match-timelines.md` decided; it has its own
+`docs/decisions/ADR-014-ingest-match-timelines.md` decided; it has its own
 section at the end of this file, and everything before that section is about
 `agg/v1` alone and is unchanged by the dataset's existence.
 
@@ -263,7 +263,7 @@ worth a line in the incident notes.
 ## The second tree: the timeline feature dataset
 
 Everything above this heading is about `agg/v1`. This section is about the tree
-`docs/decisions/ADR-012-ingest-match-timelines.md` added beside it: match
+`docs/decisions/ADR-014-ingest-match-timelines.md` added beside it: match
 timelines are archived as a second raw payload (`raw/riot/match-v5-timeline/`,
 next to the summaries in `raw/riot/match-v5/`) and a separate Parquet dataset is
 derived from both. It follows the same shape as the sections above - when to use
@@ -291,7 +291,7 @@ manifest repoint.
 **Nothing schedules this build, and that is the decision, not an omission.** The
 nightly job publishes `agg/v1` alone, so a bad timeline extract cannot fail the
 tier list; the dataset is built when its inputs have moved and read by hand. See
-ADR-012 for the tradeoff.
+ADR-014 for the tradeoff.
 
 ### What a build does
 

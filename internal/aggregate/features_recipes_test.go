@@ -12,7 +12,7 @@ import (
 // The dataset's recipes are executed, not trusted.
 //
 // There is no web tier and no query service, so the README this build writes is
-// the analyst's entire interface to the data (ADR-011, ADR-012). A recipe that
+// the analyst's entire interface to the data (ADR-011, ADR-014). A recipe that
 // does not run is therefore not a documentation defect - it is the interface
 // failing, and it fails for the one reader who cannot debug it. This test is the
 // only thing standing between a generated recipe and that reader, so it runs

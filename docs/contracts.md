@@ -213,7 +213,7 @@ Rules that the signatures do not express:
   payload: they are fetched per match, archived under their own source, and
   built into the separate `timeline-v1` dataset that is not part of this
   contract. The method and `RawWriter.WriteTimeline` are governed by
-  `docs/decisions/ADR-012-ingest-match-timelines.md`; the `agg/v1` artifacts stay
+  `docs/decisions/ADR-014-ingest-match-timelines.md`; the `agg/v1` artifacts stay
   computed from match summaries alone.
 - **`ClaimJobs` and `ClaimFrontier` must use `FOR UPDATE SKIP LOCKED`.** The
   crawler is required to be safe to run concurrently with itself. Handing the
@@ -231,7 +231,7 @@ Rules that the signatures do not express:
   `ok`, `failed` or `quarantined`; publishing nothing beats publishing garbage.
 
 `RiotClient.Match` returns `riot.MatchDTO`; `RiotClient.Timeline` returns
-`riot.TimelineDTO` and is not part of this contract (ADR-012). The `MatchDTO`
+`riot.TimelineDTO` and is not part of this contract (ADR-014). The `MatchDTO`
 subset is frozen to what Match-V5
 summaries carry: `championId`, `teamPosition`, `individualPosition`, `win`,
 `item0`..`item6`, `perks.styles`, `summoner1Id`/`summoner2Id`, the match

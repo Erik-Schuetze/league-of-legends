@@ -11,7 +11,7 @@
 # fetch. No Riot call is made here, which is why there is no key below, and why
 # `-dry-run` is the way to see the selection - and therefore the request budget a
 # run will spend - before it is spent. See
-# docs/decisions/ADR-012-ingest-match-timelines.md.
+# docs/decisions/ADR-014-ingest-match-timelines.md.
 #
 # The window is why a schedule is needed at all. Riot keeps timelines for one
 # year against two for summaries, and the horizon is 330 days because a request

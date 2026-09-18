@@ -1,4 +1,4 @@
-# ADR-012: Ingest match timelines and publish a per-minute feature dataset
+# ADR-014: Ingest match timelines and publish a per-minute feature dataset
 
 - Status: accepted
 - Date: 2026-09-19

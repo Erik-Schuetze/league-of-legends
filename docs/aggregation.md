@@ -766,7 +766,7 @@ test has to find.
 `lolstats-aggregate features` builds a second dataset, from match timelines
 rather than match summaries. It shares a binary and an archive root with the
 nightly build and nothing else: it is not part of `agg/v1`, and
-`docs/decisions/ADR-012-ingest-match-timelines.md` is the decision behind it.
+`docs/decisions/ADR-014-ingest-match-timelines.md` is the decision behind it.
 
 | Question | Answer |
 | --- | --- |

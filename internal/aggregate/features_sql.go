@@ -12,7 +12,7 @@ import (
 // the nightly build keeps reading match-v5 alone, so a bad timeline extract
 // cannot fail it, and the dataset is not part of the frozen agg/v1 reader
 // contract, so a minute-level table is never suppressed by min_cell_n. See
-// docs/decisions/ADR-012-ingest-match-timelines.md.
+// docs/decisions/ADR-014-ingest-match-timelines.md.
 //
 // The statements below run one process each (CLIEngine starts the pinned DuckDB
 // binary per statement), so no relation survives between them and every
@@ -43,12 +43,6 @@ const (
 	// than a summary and an inherited constant would be an estimate. See
 	// docs/data-sources.md for the measurement this value was pinned from.
 	featureBatchParts = 4
-
-	// featureCheckpoints are the minutes the per-matchup table is built at.
-	// They are the three the requested analysis asks for; every minute stays
-	// in participant_minutes, so a different checkpoint is a query, not a
-	// rebuild.
-	featureCheckpointList = "(5, 10, 15)"
 )
 
 // featureScopeFilter renders the optional scope predicate over the archive
@@ -56,7 +50,7 @@ const (
 //
 // It is empty by default on purpose. The dataset describes what the archive
 // holds - the crawl is what chose the sample (see the frozen selection rule in
-// ADR-012) - so the build narrowing it again would make the published coverage
+// ADR-014) - so the build narrowing it again would make the published coverage
 // a function of two rules instead of one.
 //
 // The region is matched on the payload's platform id under both spellings, not
@@ -1044,7 +1038,7 @@ LEFT JOIN plates_at pa ON pa.match_id = p.match_id AND pa.participant_id = p.par
 // it can see has a match id and a payload the parser could read.
 //
 // The duration floor is the same floor the crawl used to choose the sample
-// (ADR-012), passed in rather than hardcoded so the ledger and the crawl cannot
+// (ADR-014), passed in rather than hardcoded so the ledger and the crawl cannot
 // disagree about what "too short" means.
 func matchIndexSQL(envelopePath, timelineEnvelopePath, scope string, minDurationS int) string {
 	return fmt.Sprintf(`WITH s AS (

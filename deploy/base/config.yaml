@@ -78,7 +78,6 @@ data:
   # is the origin the released artifacts describe themselves as living at, and it
   # is what a future serving workload should read instead of hardcoding it.
   LOLSTATS_SITE_URL: "https://lol.erik-schuetze.dev"
-
   # The DuckDB resource bounds the nightly aggregate Job runs under. They are
   # declared here because the value that matters is the one the deployed pod
   # gets: DuckDB sizes its own default memory limit from the *host's* RAM, so a

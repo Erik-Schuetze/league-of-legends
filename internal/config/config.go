@@ -281,7 +281,7 @@ const (
 	// it: agg/v1 is a frozen reader contract with a published schema and the
 	// dataset is neither, so keeping them in separate trees is what stops a
 	// reader from assuming the dataset's paths are as stable as the tier
-	// list's. See docs/decisions/ADR-012-ingest-match-timelines.md.
+	// list's. See docs/decisions/ADR-014-ingest-match-timelines.md.
 	defaultDatasetRoot = "/var/lib/lolstats/datasets"
 	// The floor below which a game is called too short to hold a usable
 	// timeline. It is the same floor the timeline backfill used to choose the

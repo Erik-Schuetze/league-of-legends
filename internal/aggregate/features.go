@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -21,7 +20,7 @@ import (
 // minutes, so it must not be suppressed and must not be folded into that
 // contract. Nothing here reads or writes the agg/v1 tree, and a failed run
 // leaves the live dataset untouched rather than failing the tier list. See
-// docs/decisions/ADR-012-ingest-match-timelines.md.
+// docs/decisions/ADR-014-ingest-match-timelines.md.
 //
 // What it shares with the nightly build is the plumbing and nothing else: the
 // engine, the spill-and-batch pattern, the publishing discipline (directories,
@@ -1013,15 +1012,4 @@ func (s *featureState) publish(result *FeatureResult) error {
 		"tables", len(featureTables), "matches", s.counts.TimelinePresent,
 		"eligible", s.counts.Eligible)
 	return nil
-}
-
-// sortedExclusions renders the exclusion breakdown in a stable order, so that
-// two builds of the same archive produce the same document.
-func sortedExclusions(excluded map[string]int) []featureExclusion {
-	out := make([]featureExclusion, 0, len(excluded))
-	for reason, rows := range excluded {
-		out = append(out, featureExclusion{Reason: reason, Rows: rows})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Reason < out[j].Reason })
-	return out
 }
