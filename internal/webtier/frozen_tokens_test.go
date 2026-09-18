@@ -21,8 +21,8 @@ import (
 //  2. Every var() reference in the served sheets resolves to something declared.
 //  3. Every colour pair the served sheets actually put together meets its WCAG
 //     2.x floor. This includes the pair that motivated the freeze: the accent on
-//     the surface is AA (6.13:1), not AAA, so §3.8 requires it never be used as
-//     small text.
+//     the surface is AA (6.13:1), not AAA, so it must never be used as small
+//     text.
 //  4. The frozen layer is inlined last (TestFrozenLayerIsInlinedLast), so it
 //     wins a specificity tie against the serviced baseline.
 //  5. The frozen layer carries no prose and stays under its byte ceiling
@@ -40,18 +40,18 @@ import (
 //     the document a reader sees when the snapshot is unreadable, which is
 //     exactly when an unstyled page costs the most.
 //
-// The drift assertions are the other half: the porting traps in design-tokens.md
-// §4 are that --bg-light is a surface (not a theme), that square corners are
+// The drift assertions are the other half: the porting traps this layer had to
+// avoid are that --bg-light is a surface (not a theme), that square corners are
 // implicit, and that overflow-x:hidden must not be inherited onto body. Each is
 // pinned below so a regression fails a test rather than failing an eyeball.
 
-// designTokensCSS and componentsCSS are the two files this freeze owns, and
-// designFreezeDoc is where the reasons for both of them live: a <style> block
-// is downloaded by every visitor, so the prose is a separate file.
+// designTokensCSS and componentsCSS are the two sheets of the served design
+// layer. The reasons a rule is what it is live in the commit that changed it and
+// in the CHANGELOG - a <style> block is downloaded by every visitor, so there is
+// deliberately no prose file beside these two.
 const (
 	designTokensCSS = "css/design-tokens.css"
 	componentsCSS   = "css/components.css"
-	designFreezeDoc = "css/DESIGN-FREEZE.md"
 )
 
 // reCSSComment matches a CSS block comment, including the terminator.
@@ -264,7 +264,7 @@ var contrastPairs = []pair{
 	{"body text on page field", "--text-color", "--bg-color", 4.5, "", false},
 	{"heading on surface", "--primary-color", "--surface", 4.5, "", false},
 	{"heading on page field", "--primary-color", "--bg-color", 4.5, "", false},
-	{"accent text on surface", "--accent-color", "--surface", 4.5, "design-tokens.md §3.8: 6.13:1, AA not AAA", false},
+	{"accent text on surface", "--accent-color", "--surface", 4.5, "6.13:1, AA not AAA", false},
 	{"accent text on page field", "--accent-color", "--bg-color", 4.5, "", false},
 	{"muted text on surface", "--text-muted", "--surface", 4.5, "§1 recommends this over #666", false},
 	{"muted text on page field", "--text-muted", "--bg-color", 4.5, "the tightest pair in the layer", false},
@@ -403,7 +403,7 @@ func relativeLuminance(t *testing.T, hex string) float64 {
 	return 0.2126*channel[0] + 0.7152*channel[1] + 0.0722*channel[2]
 }
 
-// TestFrozenDesignTraps pins the three porting traps in design-tokens.md §4 that
+// TestFrozenDesignTraps pins the three porting traps that
 // are silent when they regress. The positive control is that each of these
 // predicates is false for a string that does contain the trap, so the assertion
 // can fail.
@@ -494,20 +494,18 @@ func TestFrozenLayerIsInlinedLast(t *testing.T) {
 // The layer first shipped at 19,646 B, of which 11,884 B (60%) was block
 // comments explaining rules to a browser that discards them, and prose naming
 // tokens (`--bg-color`) sat between `:root{` and `}`, which broke
-// comment-unaware token parsing. The reasons moved to DESIGN-FREEZE.md, and
-// this test was written to stop them drifting back -- but its gate was
-// "comments are less than half the block", so the prose grew back to 45.6%
-// (6,612 B of 14,178 B) without ever failing it. A gate that cannot fail is the
-// reason the figure the doc quotes is now the figure this test computes.
+// comment-unaware token parsing. The first version of this test tolerated
+// comments as long as they were "less than half the block", so the prose grew
+// back to 45.6% (6,612 B of 14,178 B) without ever failing it. A gate that
+// cannot fail is why the budget below is a ceiling on the whole layer.
 func TestFrozenLayerStaysLean(t *testing.T) {
-	// Finding 1's acceptance criterion: the inlined frozen block drops from
-	// 14,158 B to <= 7,800 B. The strip landed at 6,777 B, so the ceiling leaves
-	// about a kilobyte of headroom for a rule that earns its place.
+	// The strip landed at 6,777 B, so the ceiling leaves about a kilobyte of
+	// headroom for a rule that earns its place.
 	const budget = 7800
 
 	layer := frozenCSS()
 	if len(layer) > budget {
-		t.Errorf("the frozen layer is %d bytes, over the %d-byte budget: it is inlined into every document, so a rule that needs a paragraph of justification needs that paragraph in DESIGN-FREEZE.md instead",
+		t.Errorf("the frozen layer is %d bytes, over the %d-byte budget: it is inlined into every document, so a rule that needs a paragraph of justification does not belong in it",
 			len(layer), budget)
 	}
 
@@ -522,34 +520,13 @@ func TestFrozenLayerStaysLean(t *testing.T) {
 		commentBytes += len(c)
 	}
 	if len(comments) > 0 {
-		t.Errorf("the frozen layer carries %d comment(s), %d of %d bytes, every one of which a browser discards: the reason belongs in DESIGN-FREEZE.md",
+		t.Errorf("the frozen layer carries %d comment(s), %d of %d bytes, every one of which a browser discards: the reason belongs in the commit that added the rule",
 			len(comments), commentBytes, len(layer))
 	}
 	// Positive control: the predicate has to reject the prose that was actually
 	// removed, or "no comments" is a claim about a checker that cannot fail.
 	if got := reCSSComment.FindAllString("/* body text, in-card links */\n.link{font-weight:var(--fw-nav)}", -1); len(got) != 1 {
 		t.Errorf("positive control failed: the comment predicate found %d comments in prose it has to reject", len(got))
-	}
-
-	// The doc's cost table is a claim about these bytes, and a stale figure is a
-	// false claim -- a defect class this project has already shipped once. So the
-	// raw size is pinned here: a change to the layer that does not restate the
-	// figure in the same commit fails.
-	doc := string(asset(designFreezeDoc))
-	if size := thousands(len(layer)); !strings.Contains(doc, size) {
-		t.Errorf("DESIGN-FREEZE.md does not state the frozen layer's current size (%s B), so its cost table is a claim about a layer that no longer exists", size)
-	}
-
-	// The register has to live in the doc and has to name the divergence it
-	// justifies. Pointers such as "see DIVERGENCE REGISTER" may stay in the
-	// sheet -- they are one clause, not prose -- but the register itself may not.
-	for _, want := range []string{"Divergence register", "--text-muted", "#615f57", "#666"} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("DESIGN-FREEZE.md does not mention %q, so the divergence register is no longer recorded", want)
-		}
-	}
-	if strings.Contains(layer, "Adopted the served value") {
-		t.Error("the divergence register's entries are back in the inlined sheet")
 	}
 }
 
@@ -688,8 +665,7 @@ func winner(cands []cssCandidate) (cssCandidate, bool) {
 //
 // Nothing about the markup changes when it regresses, so this cannot be checked
 // by looking for the rule. The assertions below derive the arbitration from the
-// served bytes; the computed value itself is a browser measurement and is
-// recorded in DESIGN-FREEZE.md.
+// served bytes; the computed value itself is a browser measurement.
 func TestFrozenLayerWinsTheAriaCurrentTie(t *testing.T) {
 	const prop = "border-bottom-color"
 
@@ -823,8 +799,7 @@ func redundantTokens(layer, earlier string) []string {
 // repeats an identical value from an earlier sheet, and that nothing in the
 // layer reads, is bytes in the one block no visitor can cache and no browser can
 // act on. Twenty-eight of them were removed (800 B of declaration text, 828 with
-// the line endings, per the reconciliation in DESIGN-FREEZE.md); the
-// register above is why the twenty-ninth stays.
+// the line endings); the register above is why the twenty-ninth stays.
 //
 // The predicate reproduces the measured finding exactly: run against the layer
 // as it stood before the strip it returns the 32 names Finding 5 lists, so a
@@ -923,18 +898,6 @@ func TestStandaloneFaultFormInlinesFrozenLayer(t *testing.T) {
 	}
 	sort.Strings(frozenOnly)
 	t.Logf("frozen-only tokens consumed on the standalone document: %s", strings.Join(frozenOnly, " "))
-}
-
-// thousands formats a byte count the way DESIGN-FREEZE.md states it, so the
-// doc's figure can be checked instead of trusted.
-func thousands(n int) string {
-	s := strconv.Itoa(n)
-	var out []string
-	for len(s) > 3 {
-		out = append([]string{s[len(s)-3:]}, out...)
-		s = s[:len(s)-3]
-	}
-	return strings.Join(append([]string{s}, out...), ",")
 }
 
 var _ = fmt.Sprintf

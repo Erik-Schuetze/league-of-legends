@@ -39,6 +39,30 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Removed
 
+- The performance-evidence apparatus, on 2026-09-18: `docs/evidence/` (116
+  Lighthouse and axe reports, 46 MB of the repository's tracked bytes),
+  `docs/PERF-EVIDENCE.md` (1,292 lines) and `scripts/perf/` (8 scripts). No
+  target in the `Makefile` and no workflow invoked any of it; the reports
+  measured a posture that no longer exists and cannot be regenerated. Nothing
+  outside these files referenced them.
+- The two evidence monographs and their reproduction scripts:
+  `docs/PATCH-ROLLOVER-EVIDENCE.md`, `scripts/verify-patch-rollover.sh`,
+  `docs/PUBLISH-LIVENESS-EVIDENCE.md` and
+  `scripts/verify-publish-liveness.sh`. They were the only two scripts under
+  `scripts/` with no `Makefile` entry point, so there was no supported way to
+  run them. The behaviours they recorded are still asserted by code:
+  `TestMissingArtifactIs503WithAPage` covers the fail-closed `503`, and
+  `docs/runbooks/rebuild-aggregates.md` describes the rollover without citing
+  the deleted document.
+- `docs/contracts.md` sections 3 and 6, and `docs/design-system.md`,
+  `internal/webtier/assets/css/DESIGN-FREEZE.md`. Sections 3 and 6 specified the
+  frontend component API of the deleted `web/**` tree and an ownership map for
+  concurrent agents, two of whose paths (`internal/aggregator/**`,
+  `internal/parquet/**`) never existed. `docs/contracts.md` is still normative
+  for the aggregate shapes, the route table, the Go interfaces and the image
+  contract (its sections 1, 2, 4 and 5).
+- `backlog.md` - the deferred-work file. Each item was either already done or a
+  plan for a workstream that is no longer being run in parallel.
 - `web/**` - the Astro tree (218 files), deleted on 2026-09-18. Production has
   served the Go SSR tier since the cutover: `lolstats-go-web` renders every route
   from the published `agg/v1` snapshot, and the inner Caddy deployment, the
@@ -95,6 +119,17 @@ short. "Breaking" means something that used to work no longer does.
   `web/scripts/fetch-ddragon.mjs`, and `internal/webtier/data.go` no longer claims
   a `TestEmbeddedProjectionsMatchTheRepository` drift test that does not exist
   (the two projection copies are byte-equal; nothing tests that they stay so).
+
+- `AGENTS.md` no longer frames the repository as a shared tree edited by several
+  concurrent agents, and no longer points at `docs/contracts.md` section 6 for
+  the ownership map that section 6 was. Its rules - the README's job, the ADR
+  rule, the house style, "before you say it works" - are unchanged.
+- The design freeze over the served CSS layer was retired with
+  `DESIGN-FREEZE.md`: the token set, the contrast floors, the "is it still
+  inlined last" checks and the byte ceiling are still asserted by
+  `internal/webtier/frozen_tokens_test.go`, but the test no longer also has to
+  keep a prose document in sync, so changing a token value no longer means
+  editing a document first.
 
 ### Fixed
 

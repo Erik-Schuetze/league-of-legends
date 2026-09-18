@@ -176,4 +176,3 @@ make docker-build
 - `docs/compliance.md` - Riot policy conformance checklist and its evidence.
 - `docs/decisions/` - the ADRs.
 - `AGENTS.md` - how changes are written down in this repository.
-- `backlog.md` - deferred work.
