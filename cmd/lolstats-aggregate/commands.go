@@ -37,6 +37,7 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		maxRejected = cfg.Aggregate.MaxRejectedRows
 		maxRejectRt = cfg.Aggregate.MaxRejectedRate
 		minShare    = cfg.Aggregate.MinConfidentShare
+		requireProv = cfg.Aggregate.RequireProvenance
 		duckdbBin   string
 		allowMism   bool
 		metricsAddr = cfg.MetricsAddr
@@ -67,6 +68,9 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 		"share of the window's participant rows a build may reject, applied as max(floor, ceil(rate x rows)); 0 disables the rate ceiling")
 	fs.Float64Var(&minShare, "min-confident-share", minShare,
 		"share of computable cells that must survive suppression for the build to publish, >0 and <=1")
+	fs.BoolVar(&requireProv, "require-provenance", requireProv,
+		"refuse to publish a snapshot whose build_run_id and git_sha were not recorded; "+
+			"defaults to $"+config.AggRequireProvenanceEnv)
 	fs.StringVar(&duckdbBin, "duckdb-bin", "",
 		"pinned duckdb client, empty means $LOLSTATS_DUCKDB_BIN or PATH")
 	fs.BoolVar(&allowMism, "duckdb-allow-mismatch", false,
@@ -119,6 +123,7 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 	gates.MaxRejectedRows = maxRejected
 	gates.MaxRejectedRate = maxRejectRt
 	gates.MinConfidentShare = minShare
+	gates.RequireProvenance = requireProv
 
 	result, buildErr := aggregate.Build(ctx, aggregate.BuildOptions{
 		RawRoot:    rawRoot,

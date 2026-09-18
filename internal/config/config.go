@@ -160,6 +160,21 @@ type Aggregate struct {
 	// deployed value is measured against the live archive; see the
 	// MinConfidentShare note in internal/aggregate/gate.go.
 	MinConfidentShare float64
+	// RequireProvenance makes the nightly build refuse to publish a snapshot
+	// that names neither the revision it was built from nor the build_runs row
+	// the run was recorded in.
+	//
+	// It is not set in `deploy/`, so the nightly build runs with the default
+	// below (false) and a run whose GIT_SHA is missing or whose audit row could
+	// not be opened publishes build_run_id 0 and git_sha "unknown" - values
+	// that name no row and no revision, but that nothing in the artifact marks
+	// as absent. Turning the gate on is one key in `deploy/base/config.yaml`
+	// (LOLSTATS_AGG_REQUIRE_PROVENANCE, which the aggregate job already reads
+	// from that ConfigMap); the default here is false so that a developer's
+	// build over a fixture, an offline verification and `lolstats-aggregate
+	// demo` keep working with no database. See the RequireProvenance note in
+	// internal/aggregate/gate.go.
+	RequireProvenance bool
 	// Trailing window of days of raw data a build reads.
 	SourceWindowDays int
 	// v1 publishes a single unsegmented bracket; the value is still explicit
@@ -219,6 +234,14 @@ const envPrefix = "LOLSTATS_"
 // one place and fixed in another.
 func env(name string) string { return envPrefix + name }
 
+// AggRequireProvenanceEnv is the variable that carries Aggregate.RequireProvenance.
+//
+// It is spelled out as a full name rather than through env() because the
+// nightly build's own help text names it - `lolstats-aggregate build
+// -require-provenance` reports where its default comes from - and a second
+// literal for the same switch in another package is a drift waiting to happen.
+const AggRequireProvenanceEnv = envPrefix + "AGG_REQUIRE_PROVENANCE"
+
 // Defaults, named so a reader can see what an unset variable resolves to
 // without tracing the string literals below.
 const (
@@ -255,6 +278,11 @@ const (
 	// operator input behaves identically whether the gate set comes from here
 	// or from internal/aggregate. See Aggregate.MinConfidentShare.
 	defaultMinConfidentShare = 0.5
+	// The same fail-closed-not-assumed rule for provenance: a build with no
+	// operator input records what it can but is not required to prove it, so
+	// that an offline build works. No ConfigMap sets it today. See
+	// Aggregate.RequireProvenance.
+	defaultRequireProvenance = false
 	defaultSourceWindow      = 14
 	defaultQueueID           = 420
 	defaultBracket           = "all"
@@ -308,6 +336,7 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			MaxRejectedRows:   r.nonNegativeInteger(env("AGG_MAX_REJECTED_ROWS"), defaultMaxRejectedRows),
 			MaxRejectedRate:   r.nonNegativeShare(env("AGG_MAX_REJECTED_RATE"), defaultMaxRejectedRate),
 			MinConfidentShare: r.share(env("AGG_MIN_CONFIDENT_SHARE"), defaultMinConfidentShare),
+			RequireProvenance: r.boolean(AggRequireProvenanceEnv, defaultRequireProvenance),
 			SourceWindowDays:  r.integer(env("AGG_SOURCE_WINDOW_DAYS"), defaultSourceWindow),
 			Bracket:           r.str(env("AGG_BRACKET"), defaultBracket),
 			QueueID:           r.integer(env("AGG_QUEUE_ID"), defaultQueueID),
@@ -370,6 +399,23 @@ func (r *reader) oneOf(key, def string, allowed ...string) string {
 	}
 	r.fail(key, fmt.Sprintf("%q is not one of %s", v, strings.Join(allowed, ", ")))
 	return def
+}
+
+// boolean is for operator switches whose off value is the default: an unset or
+// empty variable leaves the switch as the code sets it, and a value that is not
+// a boolean is reported rather than guessed, because a switch that silently
+// reads as "off" is indistinguishable from one nobody set.
+func (r *reader) boolean(key string, def bool) bool {
+	v, ok := r.raw(key)
+	if !ok {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		r.fail(key, "is not a boolean such as true or false")
+		return def
+	}
+	return b
 }
 
 func (r *reader) dur(key string, def time.Duration) time.Duration {

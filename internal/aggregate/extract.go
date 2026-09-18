@@ -137,6 +137,13 @@ func (s *buildState) run(ctx context.Context, result *BuildResult) (err error) {
 	}
 	s.resolvePatch(ctx)
 	s.openAudit(result)
+	// The run's identity exists from here, and it is judged before any of the
+	// expensive work: a build that cannot name the revision and the run behind
+	// its numbers must not publish them, and must not spend the extraction
+	// finding that out.
+	if err := s.checkProvenance(); err != nil {
+		return err
+	}
 
 	if err := s.extract(ctx, filters); err != nil {
 		return err

@@ -55,6 +55,9 @@ func TestLoadFromUsesDefaults(t *testing.T) {
 	if cfg.Aggregate.QueueID != 420 {
 		t.Errorf("Aggregate.QueueID = %d, want 420", cfg.Aggregate.QueueID)
 	}
+	if cfg.Aggregate.RequireProvenance {
+		t.Error("Aggregate.RequireProvenance = true, want false: an unset switch must not stop a build that has no database")
+	}
 	if cfg.Postgres.DSN != "" {
 		t.Errorf("Postgres.DSN = %q, want empty", cfg.Postgres.DSN)
 	}
@@ -74,6 +77,7 @@ func TestLoadFromOverrides(t *testing.T) {
 		"LOLSTATS_AGG_MAX_REJECTED_ROWS":    "25",
 		"LOLSTATS_AGG_MAX_REJECTED_RATE":    "0.0008",
 		"LOLSTATS_AGG_MIN_CONFIDENT_SHARE":  "0.15",
+		"LOLSTATS_AGG_REQUIRE_PROVENANCE":   "TRUE",
 		"LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT":  "768MiB",
 		"LOLSTATS_AGG_DUCKDB_THREADS":       "3",
 		"LOLSTATS_AGG_DUCKDB_TEMP_DIR":      "/tmp",
@@ -121,6 +125,9 @@ func TestLoadFromOverrides(t *testing.T) {
 	}
 	if cfg.Aggregate.MinConfidentShare != 0.15 {
 		t.Errorf("Aggregate.MinConfidentShare = %v, want 0.15", cfg.Aggregate.MinConfidentShare)
+	}
+	if !cfg.Aggregate.RequireProvenance {
+		t.Error("Aggregate.RequireProvenance = false, want true")
 	}
 	// The DuckDB bounds are read as written: the engine is the only place that
 	// decides what a size literal means, and "empty means the engine default" is
@@ -170,9 +177,10 @@ func TestLoadFromIgnoresBlankValues(t *testing.T) {
 	// A ConfigMap that projects an empty variable is common; it should mean
 	// "unset", not "override with the empty string".
 	cfg, err := LoadFrom(envFrom(map[string]string{
-		"LOLSTATS_RIOT_REGION":    "",
-		"LOLSTATS_AGG_MIN_CELL_N": "   ",
-		"LOLSTATS_ENV":            "",
+		"LOLSTATS_RIOT_REGION":            "",
+		"LOLSTATS_AGG_MIN_CELL_N":         "   ",
+		"LOLSTATS_AGG_REQUIRE_PROVENANCE": "",
+		"LOLSTATS_ENV":                    "",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -183,8 +191,56 @@ func TestLoadFromIgnoresBlankValues(t *testing.T) {
 	if cfg.Aggregate.MinCellN != defaultMinCellN {
 		t.Errorf("Aggregate.MinCellN = %d, want %d", cfg.Aggregate.MinCellN, defaultMinCellN)
 	}
+	if cfg.Aggregate.RequireProvenance {
+		t.Error("Aggregate.RequireProvenance = true for a blank value, want the default")
+	}
 	if cfg.Env != "dev" {
 		t.Errorf("Env = %q, want dev", cfg.Env)
+	}
+}
+
+func TestRequireProvenanceIsASwitchNotAValue(t *testing.T) {
+	// The publication gate is the one switch where guessing is expensive: a
+	// value the parser does not understand must stop the process, because a
+	// typo that reads as "off" publishes a snapshot nobody can trace.
+	cases := []struct {
+		value string
+		want  bool
+		bad   bool
+	}{
+		{value: "true", want: true},
+		{value: "TRUE", want: true},
+		{value: "1", want: true},
+		{value: "false", want: false},
+		{value: "0", want: false},
+		{value: "on", bad: true},
+		{value: "yes", bad: true},
+		{value: "ture", bad: true},
+		{value: "2", bad: true},
+	}
+
+	for _, tc := range cases {
+		cfg, err := LoadFrom(envFrom(map[string]string{
+			AggRequireProvenanceEnv: tc.value,
+		}))
+		if tc.bad {
+			if err == nil {
+				t.Errorf("%s=%q was accepted, want an error", AggRequireProvenanceEnv, tc.value)
+				continue
+			}
+			if !strings.Contains(err.Error(), AggRequireProvenanceEnv) {
+				t.Errorf("%s=%q error does not name the key: %v", AggRequireProvenanceEnv, tc.value, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s=%q: unexpected error: %v", AggRequireProvenanceEnv, tc.value, err)
+			continue
+		}
+		if cfg.Aggregate.RequireProvenance != tc.want {
+			t.Errorf("%s=%q: RequireProvenance = %v, want %v",
+				AggRequireProvenanceEnv, tc.value, cfg.Aggregate.RequireProvenance, tc.want)
+		}
 	}
 }
 
