@@ -95,15 +95,17 @@ Rejected, and why:
 - The design is now reviewable without running a product: `docs/frontend/mockup`
   builds, `/gallery` renders every component in every state, and the PNGs in
   `screenshots/mockups/` are the artefact the owner reads.
-- `/gallery` is a living specification, not a product page. It is a candidate for
-  deletion once the real frontend exists - tracked as open question 4 in
-  `README.md` §13.
+- `/gallery` is a living specification, not a product page. It does not survive
+  into the product: settled on 2026-09-18, recorded in `README.md` §13 and left
+  out of the route table in `ADR-013-url-space.md`.
 - `tokens.css` is deliberately framework-neutral. If the stack decision is ever
   revisited, the language survives; only the components are rewritten.
-- Three design decisions remain owner-dependent and are shipped as proposals with
-  a placeholder, not as silent choices: the two semantic hues
+- Three design decisions were owner-dependent under this ADR and were shipped as
+  proposals rather than as silent choices: the two semantic hues
   (`--sig-up #0f5f52`, `--sig-down #9e4a22`), the tier-badge encoding
-  (typographic + tint rather than six fills), and the wordmark.
+  (typographic + tint rather than six fills), and the wordmark. All three were
+  settled on 2026-09-18 and are recorded in `README.md` §13; the hues and the
+  encoding are kept as proposed, and the wordmark stays a placeholder.
 - The mockup's `node_modules` and build output are ignored; only source and the
   review renders are committed.
 - Writing the actual frontend remains a separate piece of work. This ADR decides

@@ -47,8 +47,14 @@ short. "Breaking" means something that used to work no longer does.
   renders are checked in under `docs/frontend/screenshots/mockups/`, beside the
   owner's reference captures. ADR-012 records the stack decision. This is a
   design deliverable: no product frontend is implemented, and `docs/contracts.md`
-  still describes only the aggregate shapes, the route table, the Go interfaces
-  and the image contract.
+  still describes only the aggregate shapes, the Go interfaces and the image
+  contract.
+- The frontend URL space, on 2026-09-18: `ADR-013-url-space.md` and section 8.1
+  of `docs/frontend/README.md`. Canonical paths name a page and partition or
+  filter state lives in query parameters, with defaults omitted so one URL
+  denotes one view. The repository had no route table at all - section 1.3 of
+  `docs/contracts.md` was deleted with the Go tier - while the guide requires
+  filter state to be in the URL, so the explorer's links had no defined shape.
 
 ### Removed
 

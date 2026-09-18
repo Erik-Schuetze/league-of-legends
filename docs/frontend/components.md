@@ -289,4 +289,6 @@ Deliberately absent, with the reason:
 Adding a component: name it, give it the props and states above, render it in
 `/gallery` with every state, add it to §2–§6 of this file, add the touch floor
 if its smallest variant is under 44px, and re-run the checker. A component that
-is not in `/gallery` is not finished.
+is not in `/gallery` is not finished. `/gallery` here means the review app in
+`docs/frontend/mockup`, which is a design artefact and not a product route
+(`README.md` §13).

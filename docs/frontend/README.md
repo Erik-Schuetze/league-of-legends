@@ -212,6 +212,44 @@ Rules:
 5. **One hero per page.** Everything else is a card.
 6. Legal pages use the narrow measure and no data components.
 
+### 8.1 The URL space
+
+A small set of canonical paths names the page; the partition and the filters live
+in the query string. `docs/decisions/ADR-013-url-space.md` holds the reasoning
+and the rejected alternatives.
+
+| Path | Page |
+| --- | --- |
+| `/` | landing |
+| `/explore` | the data explorer |
+| `/champion/<slug>` | one champion, every role and both directions of matchup |
+| `/about` | where the numbers come from |
+| `/disclaimer` | the non-endorsement notice, standalone |
+| `/legal/terms` | terms |
+| `/legal/privacy` | privacy |
+
+| Parameter | Value | Default, and omitted from the URL |
+| --- | --- | --- |
+| `patch` | a patch that has a published partition | the `patch` of `manifest.latest` |
+| `region` | a region code, e.g. `EUW` | the `region` of `manifest.latest` |
+| `queue` | a queue id; `420` is Ranked Solo/Duo | the `queue` of `manifest.latest` |
+| `bracket` | a `Bracket` | the `bracket` of `manifest.latest` |
+| `role` | repeatable; a `Role` | every role |
+| `tier` | repeatable; a `Tier` | every tier |
+| `sort` | a `DataTable` column key | the view's own default |
+| `dir` | `asc` or `desc` | `asc` |
+
+The four partition parameters default to the fields `manifest.latest` reports, so
+a bare `/explore` follows the newest published partition rather than a patch
+number written into the code.
+
+`patch`, `region`, `queue`, `bracket`, `role`, `tier` and `sort` are never a path
+segment. A parameter at its default is left out, so the bare path is the default
+view and exactly one URL denotes each view. An unpublished value falls back to
+the default and the page states which partitions exist; it is not a 404. The
+artifact tree under `/agg` is data, not a route: it carries no chrome and nothing
+links to it.
+
 ## 9. Component usage rules
 
 The full inventory and per-component specs are in `components.md`. The rules
@@ -269,11 +307,16 @@ A frontend change is done when:
 - Renders at 480 / 768 / 1024 / 1400 show no horizontal overflow.
 - No request leaves the origin.
 
-## 13. Open questions
+## 13. Decisions taken with the owner
 
-| # | Question | Current state |
-| --- | --- | --- |
-| 1 | Sign-off on `--sig-up #0f5f52` / `--sig-down #9e4a22` | Proposed, measured, in use in the mockup |
-| 2 | Tier badge encoding: typographic weight + tint, or six tinted fills | Guide specifies typographic + tint; six fills rejected as a rainbow |
-| 3 | Wordmark | Placeholder lockup built on the name *LoL Stats* from `docs/compliance.md` |
-| 4 | Does `/gallery` survive into the product as a living reference page? | Mockup only, for now |
+Settled on 2026-09-18. These were open in the first review of this guide; each
+now has an answer, and changing one is an owner decision rather than a styling
+one.
+
+| Subject | Decision |
+| --- | --- |
+| URL space | Canonical paths with the filter state in query parameters - section 8.1, and `docs/decisions/ADR-013-url-space.md` for the reasoning |
+| Win/loss hues | `--sig-up #0f5f52` and `--sig-down #9e4a22` are kept as specified and as measured in `a11y.md` |
+| Tier badge encoding | Typographic weight plus an accent tint, as specified in section 5. Six tinted fills are rejected: six saturated fills make tier the loudest thing on the page |
+| Wordmark | Stays a placeholder. `docs/compliance.md` and ADR-009 keep the name *LoL Stats*, and no lockup is final |
+| Does `/gallery` survive into the product? | No. It is a design artefact: it stays in the review app and is not in the route table |
