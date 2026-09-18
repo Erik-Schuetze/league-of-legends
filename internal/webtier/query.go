@@ -29,7 +29,11 @@ type Query struct {
 	Filter string
 	// Page is the 1-based page of rows, used only when Per > 0.
 	Page int
-	// Per is the rows per page. Zero means every row.
+	// Per is the rows per page. Zero means every row on the tier list and the
+	// explorer, whose rows are cheap. The matchup route is the exception: there
+	// the cell count is the width of the axis, so zero means that route's own
+	// default window rather than the whole matrix, and Page is honoured there
+	// with Per unset.
 	Per int
 	// Compare is the champion slugs to compare against the page, in order.
 	Compare []string
@@ -63,6 +67,10 @@ func DefaultTierListQuery() Query {
 }
 
 // DefaultMatchupQuery is the view a matchup route serves with no query string.
+// The route's matrix is bounded by its own default window rather than by a value
+// here: the grid's cost is the window squared, and a bound that the query string
+// could restate is a bound a query string could remove. Per on this route is the
+// rows each page of the grid carries.
 func DefaultMatchupQuery() Query {
 	return Query{Sort: "win_rate", Dir: DirDesc}
 }

@@ -399,8 +399,9 @@ func (s *Server) tierList(r *http.Request, path string, role string, patch strin
 	return s.pageResponse(r, route, path, page)
 }
 
-// matchups serves /matchups/<role>. The query's filter narrows the matrix's
-// lens; the island works on the same markup.
+// matchups serves /matchups/<role>. The query's filter carries a champion's
+// complete row and its window carries the rest of the role a page at a time; the
+// island works on the same markup.
 // explore serves /explore, the data explorer: the published aggregate snapshot
 // rendered as one row per (champion, role) cell, with the sample size and the
 // interval behind every rate and the whole artifact downloadable beside it.
