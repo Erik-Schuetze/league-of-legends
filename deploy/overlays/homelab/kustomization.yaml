@@ -50,8 +50,8 @@ replacements:
   # Go tier's own container to a digest while leaving the tag on the rest. A
   # replacement runs after the image transformers, so the digest survives.
   #
-  # sha-8739aa8 is the tier's first green CI run; bump the annotation when the
-  # tier changes.
+  # sha-8739aa8 is the published image tag for the tier's first green CI run;
+  # bump the annotation when the tier changes.
   - source:
       group: apps
       version: v1

@@ -20,6 +20,12 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    #
+    # Each `sha-<short>` in this comment names a published image tag, not a
+    # commit you can still look up here: the history was rewritten on 2026-09-18
+    # to correct an author identity, so those revisions are no longer reachable
+    # from this repository. The tag is what these lines identify, and it is what
+    # the image below was built under.
     # sha-5e08b23: the revision that opens the explorer on 50 rows instead of 100, so
     #   the default /explore document fits the 300 KiB page-quality budget.
     #   - measured before this change, with an exhaustive instrument rather than a
