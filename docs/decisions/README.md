@@ -19,3 +19,4 @@ number is the failure it exists to prevent.
 | 011 | `ADR-011-retire-the-web-tier.md` | The web tier is retired: the artifact tree is the deliverable, and the Riot obligations become written requirements |
 | 012 | `ADR-012-frontend-design-system.md` | The frontend is a SvelteKit design system with a normative guide, an importable token layer, and a reviewable component toolbox |
 | 013 | `ADR-013-url-space.md` | The URL space is a few canonical paths with filter state in query parameters |
+| 014 | `ADR-014-ingest-match-timelines.md` | Match timelines are ingested, and a per-minute feature dataset is published outside the `agg/v1` reader contract |

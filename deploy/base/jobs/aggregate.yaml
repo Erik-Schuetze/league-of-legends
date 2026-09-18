@@ -162,6 +162,12 @@ spec:
                 # is the one writable path it gets.
                 readOnlyRootFilesystem: true
               volumeMounts:
+                # One mount carries all three trees: `raw/` (the crawler and the
+                # backfills), `agg/` (this job's `build`) and `datasets/`
+                # (LOLSTATS_AGG_DATASET_ROOT in the ConfigMap, written by
+                # `lolstats-aggregate features`). That verb is run by hand and is
+                # not a step in this CronJob, but a run started from this
+                # template reaches the dataset root through this same mount.
                 - name: data
                   mountPath: /var/lib/lolstats
                 - name: tmp

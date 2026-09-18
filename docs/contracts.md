@@ -113,8 +113,10 @@ interface Build { kind: string; key: number[]; label: string; n: number; wins: n
 interface SkillOrder { order: string; n: number; wins: number; win_rate: number; }
 ```
 
-`skill_orders` is present and empty in v1. Timelines are not fetched, so no
-acceptably sized sample exists for it yet, and the page hides the section when
+`skill_orders` is present and empty in v1. `agg/v1` does not read the timeline
+archive, so no acceptably sized sample exists for it here; the skill orders for
+matches that have timelines are published in the separate `timeline-v1` dataset
+(`docs/aggregation.md`), not in this contract. The page hides the section when
 the array is empty rather than rendering a table of forty games.
 
 `Partition` in the manifest repeats the envelope fields for its segment plus
@@ -135,12 +137,14 @@ package contract
 
 type RiotClient interface {
 	Match(ctx context.Context, matchID string) (riot.MatchDTO, error)
+	Timeline(ctx context.Context, matchID string) (riot.TimelineDTO, error)
 	MatchIDsByPUUID(ctx context.Context, q MatchListQuery) ([]string, error)
 	LeagueEntries(ctx context.Context, q LeagueQuery) ([]riot.LeagueEntryDTO, error)
 }
 
 type RawWriter interface {
 	WriteMatch(ctx context.Context, match riot.MatchDTO, meta MatchMeta) error
+	WriteTimeline(ctx context.Context, timeline riot.TimelineDTO, meta MatchMeta) error
 	WriteLeagueEntries(ctx context.Context, entries []riot.LeagueEntryDTO, meta LeagueMeta) error
 	Flush(ctx context.Context) error
 }
@@ -205,10 +209,12 @@ type MetricsRecorder interface {
 
 Rules that the signatures do not express:
 
-- **There is no `Timeline` method on `RiotClient`.** Timelines are a second
-  request per match for data only the optional skill-order section uses, and v1
-  ships without that section. Adding the method now buys a rate-limit cost and
-  no product.
+- **`RiotClient` has a `Timeline` method.** Timelines are a second ingested
+  payload: they are fetched per match, archived under their own source, and
+  built into the separate `timeline-v1` dataset that is not part of this
+  contract. The method and `RawWriter.WriteTimeline` are governed by
+  `docs/decisions/ADR-014-ingest-match-timelines.md`; the `agg/v1` artifacts stay
+  computed from match summaries alone.
 - **`ClaimJobs` and `ClaimFrontier` must use `FOR UPDATE SKIP LOCKED`.** The
   crawler is required to be safe to run concurrently with itself. Handing the
   same row to two callers is a bug in the implementation, not in the caller.
@@ -224,7 +230,9 @@ Rules that the signatures do not express:
 - **A failed build leaves the previous artifacts live.** `BuildResult.Status` is
   `ok`, `failed` or `quarantined`; publishing nothing beats publishing garbage.
 
-`RiotClient` returns `riot.MatchDTO`. The DTO subset is frozen to what Match-V5
+`RiotClient.Match` returns `riot.MatchDTO`; `RiotClient.Timeline` returns
+`riot.TimelineDTO` and is not part of this contract (ADR-014). The `MatchDTO`
+subset is frozen to what Match-V5
 summaries carry: `championId`, `teamPosition`, `individualPosition`, `win`,
 `item0`..`item6`, `perks.styles`, `summoner1Id`/`summoner2Id`, the match
 `teams[].bans`, and the match metadata/goal fields. Nothing else may be added to
@@ -273,9 +281,10 @@ Publishing nothing beats publishing garbage, so a build that fails leaves the
 previous tree - and the previous manifest - live.
 
 The static tree is synced as a whole by version directory and old version
-directories are pruned after one release of overlap. The raw archive is
-`raw/riot/match-v5/dt=<date>/part-<n>.parquet.zst`, append-only, never rewritten
-and never migrated in place.
+directories are pruned after one release of overlap. The raw archives are
+`raw/riot/match-v5/dt=<date>/part-<n>.parquet[.zst]` (match summaries) and
+`raw/riot/match-v5-timeline/dt=<date>/part-<n>.parquet[.zst]` (match timelines),
+each append-only, never rewritten and never migrated in place.
 
 ### 4.3 The frozen manifest contract
 

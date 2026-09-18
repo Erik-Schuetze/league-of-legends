@@ -43,6 +43,12 @@ const (
 	APILeague  = "league-v4"
 	APIAccount = "account-v1"
 	APIDDragon = "ddragon"
+	// APITimeline is a directory of its own rather than a second row type
+	// inside match-v5, because the two payloads have different retention at
+	// Riot - a summary lives two years and a timeline one - so a partition
+	// that mixed them would answer "what do we have for this date" with a
+	// half-empty answer for one of the two.
+	APITimeline = "match-v5-timeline"
 )
 
 // Payload schema versions, recorded as a column rather than as a directory
@@ -54,10 +60,11 @@ const (
 // payload_version, and a v2 reader selects what it understands instead of
 // having to be told which directory to open.
 const (
-	MatchPayloadVersion   = "1"
-	LeaguePayloadVersion  = "1"
-	AccountPayloadVersion = "1"
-	StaticPayloadVersion  = "1"
+	MatchPayloadVersion    = "1"
+	LeaguePayloadVersion   = "1"
+	AccountPayloadVersion  = "1"
+	StaticPayloadVersion   = "1"
+	TimelinePayloadVersion = "1"
 )
 
 // archiveRoot joins the archive root with the api prefix shared by every
@@ -101,6 +108,17 @@ func MatchPartitionURI(root string, meta contract.MatchMeta) string {
 	return MatchDir(root, meta.PartitionDate())
 }
 
+// TimelineDir is the partition directory for match timelines fetched on date.
+//
+// There is no TimelinePartitionURI, because no control-plane column records one.
+// A timeline has no row of its own in `matches`; the fetch_queue row saying a
+// timeline was fetched is the record, and a reader that wants the payload joins
+// the archive on match_id. Adding a second URI column would be a second source
+// of truth for a path that is already derivable.
+func TimelineDir(root, date string) string {
+	return filepath.Join(archiveRoot(root, APITimeline), "dt="+date)
+}
+
 // MatchRow is one fetched match, payload and provenance together.
 //
 // Payload is the verbatim response body. It is the reason this archive exists:
@@ -113,6 +131,33 @@ type MatchRow struct {
 	QueueID int32  `parquet:"queue_id"`
 	// Patch is the two-component game version ("16.18"). It is echoed rather
 	// than derived so a reader does not have to reimplement Riot's versioning.
+	Patch          string    `parquet:"patch"`
+	GameVersion    string    `parquet:"game_version"`
+	GameCreationMS int64     `parquet:"game_creation_ms"`
+	GameDurationS  int32     `parquet:"game_duration_s"`
+	PayloadVersion string    `parquet:"payload_version"`
+	FetchedAt      time.Time `parquet:"fetched_at,timestamp"`
+	Payload        string    `parquet:"payload"`
+	PayloadSHA256  string    `parquet:"payload_sha256"`
+}
+
+// TimelineRow is one fetched match timeline, payload and provenance together.
+//
+// The columns are deliberately identical to MatchRow's. A timeline's provenance
+// *is* the summary's - same match id, queue, patch and game - and the same
+// envelope SQL then reads either archive without a second extraction path. The
+// one difference is where the row lives: raw/riot/match-v5-timeline/, because
+// Riot retains a timeline for one year against the summary's two, so the two
+// archives fill up and go stale on different clocks.
+//
+// There is no unique key. Riot cannot be re-asked for a timeline once it has
+// aged out, so a re-fetch appends a second record rather than replacing the
+// first, and the aggregation de-duplicates by match id at the single point
+// where it reads the archive.
+type TimelineRow struct {
+	MatchID        string    `parquet:"match_id"`
+	Region         string    `parquet:"region"`
+	QueueID        int32     `parquet:"queue_id"`
 	Patch          string    `parquet:"patch"`
 	GameVersion    string    `parquet:"game_version"`
 	GameCreationMS int64     `parquet:"game_creation_ms"`

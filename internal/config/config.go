@@ -184,6 +184,16 @@ type Aggregate struct {
 	// Empty means "use the newest patch found in the raw archive".
 	Patch string
 
+	// DatasetRoot is the parent of the feature dataset trees, e.g.
+	// /var/lib/lolstats/datasets. The dataset is written to
+	// <DatasetRoot>/timeline-v1 by `lolstats-aggregate features`. It is a
+	// separate root from the aggregate root on purpose; see the note on
+	// defaultDatasetRoot.
+	DatasetRoot string
+	// FeatureMinDurationS is the duration floor the feature build records as
+	// the reason a short game was excluded from the dataset.
+	FeatureMinDurationS int
+
 	// The DuckDB resource bounds. They are configuration rather than constants
 	// because the value that is right depends on the pod the build runs in, and
 	// this is the one part of the pipeline that can take the whole pod down with
@@ -267,6 +277,16 @@ const (
 	defaultAggRoot       = "/var/lib/lolstats/agg"
 	defaultSchemaVersion = 1
 	defaultMinCellN      = 100
+	// The feature dataset lives beside the aggregate root rather than inside
+	// it: agg/v1 is a frozen reader contract with a published schema and the
+	// dataset is neither, so keeping them in separate trees is what stops a
+	// reader from assuming the dataset's paths are as stable as the tier
+	// list's. See docs/decisions/ADR-014-ingest-match-timelines.md.
+	defaultDatasetRoot = "/var/lib/lolstats/datasets"
+	// The floor below which a game is called too short to hold a usable
+	// timeline. It is the same floor the timeline backfill used to choose the
+	// sample, so the ledger and the crawl explain the same exclusions.
+	defaultFeatureMinDurationS = 600
 	// A fail-closed archive gate: zero tolerant rows unless an operator has
 	// measured a reason to allow some. See Aggregate.MaxRejectedRows.
 	defaultMaxRejectedRows = 0
@@ -341,6 +361,9 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			Bracket:           r.str(env("AGG_BRACKET"), defaultBracket),
 			QueueID:           r.integer(env("AGG_QUEUE_ID"), defaultQueueID),
 			Patch:             r.str(env("AGG_PATCH"), ""),
+
+			DatasetRoot:         r.str(env("AGG_DATASET_ROOT"), defaultDatasetRoot),
+			FeatureMinDurationS: r.integer(env("AGG_FEATURE_MIN_DURATION_S"), defaultFeatureMinDurationS),
 
 			DuckDBMemoryLimit: r.str(env("AGG_DUCKDB_MEMORY_LIMIT"), ""),
 			DuckDBThreads:     r.integer(env("AGG_DUCKDB_THREADS"), 0),

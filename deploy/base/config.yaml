@@ -51,12 +51,25 @@ data:
   # -job-timeout 120s in ingest/deployment.yaml.
   LOLSTATS_RIOT_TIMEOUT: "45s"
 
-  # Both trees live on the one ReadWriteMany volume mounted at
-  # /var/lib/lolstats, which is where the crawler writes raw payloads and the
-  # nightly aggregate job writes its published snapshots. Keeping the roots here
-  # means no manifest has to guess a path.
+  # All three trees live on the one ReadWriteMany volume mounted at
+  # /var/lib/lolstats, which is where the crawler writes raw payloads, the
+  # nightly aggregate job writes its published snapshots and the feature build
+  # writes its dataset. Keeping the roots here means no manifest has to guess a
+  # path.
   LOLSTATS_RAW_ROOT: "/var/lib/lolstats/raw"
   LOLSTATS_AGG_ROOT: "/var/lib/lolstats/agg"
+
+  # The feature dataset root, beside the two above rather than inside `agg/` on
+  # purpose: `agg/v1` is a frozen reader contract and this dataset is not, so a
+  # reader must not be able to assume the dataset's paths are as stable as the
+  # tier list's. The two trees also differ in what they would cost to lose. The
+  # raw archive is the only data here that cannot be regenerated - Riot keeps
+  # match payloads for two years and timelines for one - and it is the tree the
+  # restic snapshot in jobs/backup-archive.yaml exists for, whereas this dataset
+  # is derived and rebuilt by re-running `lolstats-aggregate features` over the
+  # archive. Separate roots are what keep those two retention decisions
+  # independent.
+  LOLSTATS_AGG_DATASET_ROOT: "/var/lib/lolstats/datasets"
 
   # The public origin of the site. It is declared here rather than left to a
   # default in code so that the hostname this project publishes is visible in
@@ -65,7 +78,6 @@ data:
   # is the origin the released artifacts describe themselves as living at, and it
   # is what a future serving workload should read instead of hardcoding it.
   LOLSTATS_SITE_URL: "https://lol.erik-schuetze.dev"
-
   # The DuckDB resource bounds the nightly aggregate Job runs under. They are
   # declared here because the value that matters is the one the deployed pod
   # gets: DuckDB sizes its own default memory limit from the *host's* RAM, so a

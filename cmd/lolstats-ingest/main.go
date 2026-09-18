@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Erik-Schuetze/league-of-legends/internal/config"
+	"github.com/Erik-Schuetze/league-of-legends/internal/contract"
 	"github.com/Erik-Schuetze/league-of-legends/internal/crawl"
 	"github.com/Erik-Schuetze/league-of-legends/internal/obs"
 	"github.com/Erik-Schuetze/league-of-legends/internal/raw"
@@ -54,6 +55,7 @@ subcommands:
   discover-seeds  enumerate seed summoner PUUIDs for the configured ladder
   static-sync     mirror Data Dragon versions and static data into the archive
   backfill        re-run a bounded key range through the crawl path
+  backfill-timelines  enqueue a bounded, reproducible sample of match timelines
   maintain        reclaim abandoned claims, prune the frontier, re-rank it,
                   replay dead letters with -replay-dead-letters
   migrate up      apply the forward migrations
@@ -90,6 +92,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runStaticSync(args[1:], stderr)
 	case "backfill":
 		return runBackfill(args[1:], stderr)
+	case "backfill-timelines":
+		return runBackfillTimelines(args[1:], stderr)
 	case "maintain":
 		return runMaintain(args[1:], stderr)
 	case "migrate":
@@ -341,7 +345,15 @@ func runWorker(args []string, stderr io.Writer) int {
 	jobTimeout := fs.Duration("job-timeout", crawl.DefaultJobTimeout, "timeout for one Riot fetch")
 	claimGrace := fs.Duration("claim-grace", crawl.DefaultClaimGrace,
 		"age at which a claim held by a dead process is reclaimed at startup")
+	kind := fs.String("kind", string(contract.KindMatch),
+		"what this loop fetches: match or timeline. A loop claims only its own kind")
 	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+
+	loopKind := contract.ParseQueueKind(*kind)
+	if loopKind.Stored() != strings.ToLower(strings.TrimSpace(*kind)) {
+		writeUsage(stderr, "lolstats-ingest worker: -kind must be match or timeline, got %q\n", *kind)
 		return exitUsage
 	}
 
@@ -412,6 +424,7 @@ func runWorker(args []string, stderr io.Writer) int {
 		RetryMax:      *retryMax,
 		JobTimeout:    *jobTimeout,
 		ClaimGrace:    *claimGrace,
+		Kind:          loopKind,
 	})
 	if err != nil {
 		return fail(stderr, "worker", err)
@@ -693,6 +706,81 @@ func runBackfill(args []string, stderr io.Writer) int {
 		"inserted", result.Inserted, "known", result.Known, "failed", result.Failed)
 	if err != nil {
 		return fail(stderr, "backfill", err)
+	}
+	return 0
+}
+
+// runBackfillTimelines enqueues timeline fetches for a bounded, reproducible
+// sample of the matches the control plane already holds.
+//
+// It deliberately needs no Riot key and makes no Riot request: enqueuing is a
+// control-plane write, and the fetch happens later in whichever worker is
+// running the timeline kind. That split is what makes a dry run free, and a
+// free dry run is what makes the rate-limit budget knowable before it is spent.
+func runBackfillTimelines(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("backfill-timelines", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	since := fs.Duration("since", crawl.DefaultTimelineSince,
+		"how far back the game's own creation time may be (timeline retention is one year)")
+	limit := fs.Int("limit", crawl.DefaultTimelineLimit, "maximum timelines enqueued in this run")
+	queue := fs.Int("queue", 420, "queue id filter for the candidate lookup")
+	minDuration := fs.Int("min-duration", crawl.DefaultTimelineMinDurationS,
+		"shortest game, in seconds, worth a timeline request")
+	includeShort := fs.Bool("include-short", false, "include games the duration floor would exclude")
+	dryRun := fs.Bool("dry-run", false, "report the selection without enqueuing it")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+
+	cfg, log, metrics, err := bootstrap()
+	if err != nil {
+		return fail(stderr, "backfill-timelines", err)
+	}
+	if err := require(cfg.Postgres); err != nil {
+		return fail(stderr, "backfill-timelines", err)
+	}
+
+	ctx, stop := signalContext()
+	defer stop()
+
+	ctrl, err := openStore(ctx, cfg, log, metrics)
+	if err != nil {
+		return fail(stderr, "backfill-timelines", err)
+	}
+	defer func() { _ = ctrl.Close() }()
+
+	result, err := crawl.BackfillTimelines(ctx, crawl.TimelineBackfillOptions{
+		Deps: crawl.Deps{
+			Store:   ctrl,
+			Region:  cfg.Riot.Region,
+			Log:     log,
+			Metrics: metrics,
+			Clock:   riot.RealClock{},
+		},
+		Since:        time.Now().Add(-*since),
+		Queue:        *queue,
+		MinDurationS: *minDuration,
+		IncludeShort: *includeShort,
+		Limit:        *limit,
+		DryRun:       *dryRun,
+	})
+	if err != nil {
+		return fail(stderr, "backfill-timelines", err)
+	}
+	attrs := []any{
+		"dry_run", result.DryRun,
+		"eligible", result.Eligible,
+		"ready", result.Ready,
+		"would_enqueue", result.WouldEnqueue,
+		"enqueued", result.Enqueued,
+		"short_excluded", result.ShortExcluded,
+		"already_queued", result.AlreadyQueued,
+		"already_done", result.AlreadyDone,
+		"limit", *limit,
+	}
+	log.Info("timeline backfill summary", attrs...)
+	if result.WouldEnqueue == 0 && !result.DryRun {
+		log.Warn("timeline backfill selected nothing; check -since, -queue and the control plane's coverage")
 	}
 	return 0
 }

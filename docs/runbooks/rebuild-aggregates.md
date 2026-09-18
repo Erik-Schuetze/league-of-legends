@@ -1,17 +1,28 @@
 # Runbook: rebuild the aggregates
 
-Covers the derived tree on the `lolstats-data` volume: `LOLSTATS_AGG_ROOT`
-(`/var/lib/lolstats/agg`). There is no second tree, and since the web tier was
-retired on 2026-09-18 (`docs/decisions/ADR-011-retire-the-web-tier.md`) nothing
-in this repository reads it either - the published tree is the end of the
-pipeline. The control plane has its own runbook (`restore-postgres.md`) and the
-archive has its own (`restore-raw.md`).
+Covers the two derived trees on the `lolstats-data` volume: `LOLSTATS_AGG_ROOT`
+(`/var/lib/lolstats/agg`), the nightly tier list, and `LOLSTATS_AGG_DATASET_ROOT`
+(`/var/lib/lolstats/datasets`), the timeline feature dataset. Since the web tier
+was retired on 2026-09-18 (`docs/decisions/ADR-011-retire-the-web-tier.md`)
+nothing in this repository reads either one - the published tree is the end of
+the pipeline. The control plane has its own runbook (`restore-postgres.md`) and
+the archive has its own (`restore-raw.md`).
 
-The chain is one step and no workflow engine:
+The chain has no workflow engine in it - every step is a command, on a schedule
+or by hand:
 
 | when | job | reads | writes |
 | --- | --- | --- | --- |
 | 01:00 | `lolstats-aggregate` (`lolstats-aggregate build`) | `raw/` | `agg/v1/**`, `agg/v1/manifest.json` |
+| by hand | `lolstats-aggregate features` | `raw/riot/match-v5/`, `raw/riot/match-v5-timeline/` | `datasets/timeline-v1/**` |
+
+Both rows publish transactionally and both leave the previous tree live when they
+fail, but they are otherwise independent on purpose: the first publishes a frozen
+reader contract, the second an exploratory dataset with no such promise, and a
+failed run of either leaves the other alone. The second tree is the one
+`docs/decisions/ADR-014-ingest-match-timelines.md` decided; it has its own
+section at the end of this file, and everything before that section is about
+`agg/v1` alone and is unchanged by the dataset's existence.
 
 Nothing renders ahead of anything, because nothing renders. A reader of the tree
 resolves the manifest and the partition it names at the moment it reads, so the
@@ -248,3 +259,293 @@ worth a line in the incident notes.
 - This runbook never touches the raw archive or the control plane: a rebuild that
   is failing because of missing inputs is an `ingest-down.md` or
   `restore-postgres.md` problem, and re-running the build harder will not fix it.
+
+## The second tree: the timeline feature dataset
+
+Everything above this heading is about `agg/v1`. This section is about the tree
+`docs/decisions/ADR-014-ingest-match-timelines.md` added beside it: match
+timelines are archived as a second raw payload (`raw/riot/match-v5-timeline/`,
+next to the summaries in `raw/riot/match-v5/`) and a separate Parquet dataset is
+derived from both. It follows the same shape as the sections above - when to use
+it, what a build does, how to re-run it, what to check, how to tell it worked,
+how to roll it back, what debris it leaves, what is destructive about it - and it
+shares nothing else: it has no `build_runs` ledger, no `verify` counterpart and no
+manifest repoint.
+
+### When to use it
+
+- The timeline archive has grown. `backfill-timelines` enqueues a bounded sample
+  weekly and the worker fetches it afterwards, so the dataset is rebuilt when
+  there is new material rather than on a timer.
+- A run failed on one of the gates in "What a build does" below, and the question
+  is whether the archive or the build is at fault.
+- You changed a build input: the dataset root (`LOLSTATS_AGG_DATASET_ROOT`), the
+  duration floor (`LOLSTATS_AGG_FEATURE_MIN_DURATION_S`, 600 by default) or the
+  DuckDB bounds in `deploy/base/config.yaml`.
+- You restored the raw archive (`restore-raw.md`). Nothing derived from a restored
+  archive is valid any more, and the dataset is derived from both archives.
+- You want the exclusion ledger re-derived. Riot defects change what the archive
+  holds - aborted games, games whose frames are missing under ten minutes - and
+  `match_index.exclusion_reason` is where each of them is recorded.
+
+**Nothing schedules this build, and that is the decision, not an omission.** The
+nightly job publishes `agg/v1` alone, so a bad timeline extract cannot fail the
+tier list; the dataset is built when its inputs have moved and read by hand. See
+ADR-014 for the tradeoff.
+
+### What a build does
+
+`lolstats-aggregate features` is a single DuckDB pass over **both** raw archives,
+joined on match id. It publishes six tables - each a directory of Parquet parts,
+not one file - plus the three documents that describe them, under
+`<LOLSTATS_AGG_DATASET_ROOT>/timeline-v1` (by default
+`/var/lib/lolstats/datasets/timeline-v1`):
+
+| table | one row per | what it carries |
+| --- | --- | --- |
+| `match_index` | match | the scope columns and the `exclusion_reason` ledger |
+| `participant_minutes` | participant-minute | the per-minute series |
+| `events` | event | the payload's events, as read |
+| `lane_matchups` | matchup | the two lane opponents, ten rows per five-a-side game |
+| `participant_early` | participant | the early-game summary |
+| `match_objectives` | objective | one row per objective take |
+
+Publishing is the same discipline as the nightly build - staging directory, then
+`rename(2)`, then the documents, then `manifest.json` last - so the same property
+follows: a failed run leaves the previous dataset live, and a first-ever run that
+fails leaves nothing live at all rather than a partial tree.
+
+**The manifest is a build receipt, not a reader contract**, and it says so in its
+own `notice` field. It records what one run read, excluded and wrote - including
+the row count it published per table - and promises nothing about its keys to a
+future reader. `schema.json` describes the columns, `README.md` carries the
+caveats and the query recipes, and the version lives in the directory name
+(`timeline-v1`) precisely so that a reshape publishes `timeline-v2` beside it
+rather than reinterpreting this one. Do not resolve this tree the way "Repointing
+`latest`" above resolves `agg/v1`'s manifest.
+
+Every gate fails closed, and a failure publishes nothing:
+
+- **`ErrNoTimelineArchive`** - the timeline archive holds no payload at all, so
+  the backfill has not run yet. It is deliberately distinct from
+  `ErrArchiveEmpty`, the *summary* archive being empty: one means the crawler has
+  not run, the other that this lane has not been filled in, and the dataset is
+  allowed to fail on the second where the tier list must not fail on the first.
+- **`ErrFeatureOrphans`** - a timeline whose match has no summary row. A hard
+  failure rather than a skip: both archives are written by the same crawler and
+  the same queue, so a disagreement about a match means one of them is wrong, and
+  dropping it quietly would shrink the dataset by an unknown amount.
+- **`ErrFeatureNoEligibleMatches`** - every match in scope was excluded. An empty
+  dataset is not published over a good one.
+- **`ErrFeatureReconciliation`** - `lane_matchups` is not ten rows per match for a
+  five-a-side game. This is the mis-join gate, and a mis-join would publish lane
+  differences against the wrong opponent.
+- **`ErrFeatureSchemaDrift`** - a built table's columns are not the ones
+  `schema.json` describes. The schema is generated from the same specification the
+  build is, so drift means the two were edited apart.
+
+### The numbers this build is sized on are estimates
+
+Two figures were adopted as estimates and must not be quoted later as
+measurements:
+
+- **the per-timeline payload size** - about 1.1 MB, against about 100 KB for a
+  summary, and both are third-party figures rather than Riot documentation. No
+  measured per-timeline figure exists yet; `docs/data-sources.md` says the same
+  and is where one is recorded once there is one.
+- **the extraction batch size** - `featureBatchParts`, four payload-carrying parts
+  per statement (`internal/aggregate/features_sql.go`). The constant was
+  re-measured for this payload class rather than inherited from the nightly
+  extraction, but what it was re-measured against is the estimate above, so it is
+  an estimate's estimate until a real batch confirms it.
+
+Measure both on a real bounded run, and take the sample size from a dry run of the
+backfill rather than guessing: `lolstats-ingest backfill-timelines -dry-run` prints
+the selection without enqueuing, so the size of the sample a measurement will be
+taken over is knowable before the rate-limit budget is spent.
+
+```
+# Payload bytes and part count. The archive is on the shared claim, and no
+# long-lived pod here has a shell in it, so this is a throwaway busybox pod that
+# mounts the claim read-only - the recipe deploy/README.md documents. Swap the
+# `sh -c` body for whichever of these lines you want:
+#
+#   kubectl -n lolstats run pvc-measure --rm -it --restart=Never --image=busybox \
+#     --overrides='{"spec":{"containers":[{"name":"pvc-measure","image":"busybox","command":["sh","-c","<body>"],"volumeMounts":[{"name":"d","mountPath":"/d","readOnly":true}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"lolstats-data"}}]}}'
+#
+#   # total size in KiB - busybox du has no byte flag - and compressed, because
+#   # parts are part-NNNNN.parquet.zst, so this is a floor on what the engine
+#   # reads rather than the figure itself
+#   du -sk /d/raw/riot/match-v5-timeline
+#   # parts, and the four that one batch reads (`featureBatchParts`)
+#   find /d/raw/riot/match-v5-timeline -name 'part-*.parquet.zst' | wc -l
+#   find /d/raw/riot/match-v5-timeline -name 'part-*.parquet.zst' | sort | head -4 | xargs ls -l
+
+# The payload count that total is divided by is not an estimate - the crawl
+# closes a fetch_queue row only after the archive flush, so a `done` row is one
+# payload on disk (`internal/crawl/worker.go`) - and it comes from the control
+# plane, where psql does exist.
+kubectl -n lolstats exec statefulset/lolstats-postgres -- psql -U lolstats -d lolstats -c "
+  select kind, status, count(*) from fetch_queue group by 1, 2 order by 1, 2"
+```
+
+A measured figure belongs in `docs/data-sources.md`, not here.
+
+### Re-run the build
+
+The verb is not something any CronJob runs, so re-running it in the cluster means
+creating a one-off Job from a template that does run an aggregate pass - but the
+`lolstats-aggregate` CronJob in `deploy/base/jobs/aggregate.yaml` carries
+`args: ["build"]`, and unlike the manual `backfill` instantiation above the
+default here is the wrong subcommand rather than an incomplete argument list, so
+the args have to be replaced. The `--dry-run=client -o json | python3 | kubectl
+create -f -` form documented in `deploy/base/jobs/backfill.yaml` is the idiom:
+
+```
+# Check nothing else is publishing this tree first: `concurrencyPolicy: Forbid`
+# stops the CronJob overlapping itself, not a hand-created Job overlapping it,
+# and two runs exchanging renames under one dataset root interleave their swaps.
+kubectl -n lolstats get jobs
+
+kubectl -n lolstats create job features-manual --from=cronjob/lolstats-aggregate \
+  --dry-run=client -o json \
+| python3 -c 'import json,sys; j=json.load(sys.stdin); j["spec"]["template"]["spec"]["containers"][0]["args"] = ["features"]; json.dump(j,sys.stdout)' \
+| kubectl create -f -
+kubectl -n lolstats logs -f job/features-manual
+```
+
+The manual Job inherits the aggregate template's image, its
+`activeDeadlineSeconds: 7200`, its resource limits and the data mount that
+carries `/var/lib/lolstats`. It is not tracked by ArgoCD (`prune: true` will not
+remove it), so delete it when you are done or let the TTL do it. Note that its
+sizing is the nightly build's: five of the six tables are unnested out of payloads
+roughly ten times the summaries', and the engine's own memory limit
+(`LOLSTATS_AGG_DUCKDB_MEMORY_LIMIT`, `-duckdb-memory-limit`) is what it will
+complain about first if the template is too thin. A kill by that limit says so in
+the log; raise the flag, keep the Job's own memory limit above it, and re-run.
+
+Over the archive on a workstation, with the pinned engine (`make duckdb`, which
+explains in the Makefile why the client is pinned to a version the build will
+accept), the same pass is:
+
+```
+LOLSTATS_RAW_ROOT=./raw LOLSTATS_AGG_DATASET_ROOT=./data/datasets \
+  LOLSTATS_DUCKDB_BIN="$PWD/bin/duckdb" make run-features
+```
+
+`-raw` and `-dataset` override those two roots, and `-min-duration` the duration
+floor, which is what the sample was chosen by - a dataset built with a different
+floor than the backfill used holds matches the crawl did not select.
+`-duckdb-allow-mismatch` is the deliberately-awkward escape hatch that exists for
+the nightly build's equivalence check and is not needed here.
+
+### Then check the tree
+
+```
+kubectl -n lolstats run pvc-ls --rm -it --restart=Never --image=busybox \
+  --overrides='{"spec":{"containers":[{"name":"pvc-ls","image":"busybox","command":["ls","-l","/d/datasets/timeline-v1"],"volumeMounts":[{"name":"d","mountPath":"/d","readOnly":true}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"lolstats-data"}}]}}'
+```
+
+That is the throwaway pod from the estimates section above with `ls` for the
+command, for the reason given there: the postgres pod is the control plane and
+does not mount this tree. The same tree is readable on the NFS host under
+`/nas-main/k3s-volumes`.
+
+The tree is six directories and three documents, and nothing else: a run that
+failed mid-publish cannot leave a partial tree here without also leaving its
+staging directory in "Debris" below. Read `manifest.json` for the receipt,
+`schema.json` for the columns of a table you are about to query, and `README.md`
+for what the build is and is not.
+
+### How to tell it worked
+
+```
+# 1. the run's own status line - `features: ok dataset=... matches=...
+#    with_timeline=... eligible=... excluded=... replaced=...`. A failure prints
+#    `features: failed ...` and publishes nothing.
+kubectl -n lolstats logs job/features-manual
+
+# 2. the receipt, per table: the row count each table was published with, and the
+#    `notice` that says what the document is and is not. Throwaway pod again,
+#    with `cat` for the command.
+kubectl -n lolstats run pvc-cat --rm -i --restart=Never --image=busybox \
+  --overrides='{"spec":{"containers":[{"name":"pvc-cat","image":"busybox","command":["cat","/d/datasets/timeline-v1/manifest.json"],"volumeMounts":[{"name":"d","mountPath":"/d","readOnly":true}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"lolstats-data"}}]}}'
+```
+
+`match_index` is where a data scientist checks which matches were excluded and
+why, and the ledger is a query rather than a document, so it needs the engine:
+everything outside the postgres control plane is distroless, and the image's
+pinned client is at `/usr/local/bin/duckdb` (`LOLSTATS_DUCKDB_BIN` in the
+Dockerfile). The same template as above, with the CLI in place of the aggregate
+binary:
+
+```
+kubectl -n lolstats create job features-ledger --from=cronjob/lolstats-aggregate \
+  --dry-run=client -o json \
+| python3 -c 'import json,sys; j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]; c["command"]=["/usr/local/bin/duckdb"]; c["args"]=["-c","select exclusion_reason, count(*) as matches from read_parquet(\"/var/lib/lolstats/datasets/timeline-v1/match_index/*.parquet\") group by 1 order by 2 desc"]; json.dump(j,sys.stdout)' \
+| kubectl create -f -
+kubectl -n lolstats logs job/features-ledger
+```
+
+The reasons it lists are `no_timeline` (the backfill has not reached this match),
+`aborted` (Riot's own flag for a remade or aborted game), `frame_interval_zero`
+(the payload's frames carry no usable interval), `too_short` (under the duration
+floor), `frames_null` (the timeline is present but empty) and `ok`, the only one
+that makes a match eligible. `timeline_eligible` is exactly
+`exclusion_reason = 'ok'`, and every other table in the dataset is a subset of
+those matches. A large `no_timeline` count is mostly a coverage statement rather
+than a fault - it is the backfill still filling in - but not entirely: the
+archive holds summaries for two years and timelines for one, so a match older than
+that window is permanently unfetchable rather than merely unfetched, and the
+dataset's own README says so. `-include-short` is the flag that lets the
+`too_short` bucket in if a question needs it.
+
+Finally, check the receipt against the tree: `tables[].rows` in `manifest.json`
+is what each table was published with, so a count taken from the Parquet parts
+that disagrees with it means the tree on disk is not the tree the receipt
+describes.
+
+### Roll back
+
+- **A run that failed.** Nothing to do. Publishing is stage-then-rename with the
+  manifest written last, so the failure left the previous dataset live, and the
+  only action is to fix the input and re-run.
+- **A run that succeeded with the wrong inputs.** Re-run with the inputs fixed.
+  The build is deterministic given its inputs and the archive, so the second run
+  produces the tree the first one should have.
+- **A dataset that was published and then damaged.** Re-run it; there is no older
+  copy to fall back to. Unlike `agg/v1`'s manifest, which can be repointed, the
+  receipt describes the one tree that is on disk and nothing backs this tree up on
+  purpose: the raw archive is the only data here that cannot be regenerated
+  (`jobs/backup-archive.yaml`), and this dataset is a pass over it.
+- **A dataset built from a restored archive.** Rebuild it. The receipt names the
+  source roots it read (`sources`), the part counts (`raw_parts`,
+  `timeline_parts`) and when the run happened (`generated_at`), so the fix is a
+  run over the restored archive.
+
+### Debris
+
+A run killed between its renames can leave `.staging-<pid>-<nanos>` or
+`.trash-<pid>-<nanos>` under `/var/lib/lolstats/datasets`, beside `timeline-v1/`.
+Nothing resolves a published path into them, so they cannot make a reader see a
+half-written table, and they are safe to delete once the run that made them is
+gone: `kubectl -n lolstats get jobs` is the whole check, because only a
+hand-created Job ever runs this build and a completed one shows as `Complete`
+rather than `Running`. A leftover trash directory is the fingerprint of a run that
+died mid-publish.
+
+### What is destructive here
+
+- `rm -rf /var/lib/lolstats/datasets/timeline-v1/...` deletes published tables.
+  Recoverable by re-running, at the cost of engine time and no Riot budget: the
+  payloads it reads are already in the archive.
+- Deleting a running Job SIGKILLs the pass mid-extraction. Survivable thanks to
+  the staging/trash discipline, but it wastes the work and leaves debris.
+- Pointing `LOLSTATS_AGG_DATASET_ROOT` (or `-dataset`) at the aggregate root, at
+  the raw root, or anywhere inside either one publishes `timeline-v1/` into a tree
+  with a different contract and a different retention decision. They are separate
+  roots on purpose: see the comment on `LOLSTATS_AGG_DATASET_ROOT` in
+  `deploy/base/config.yaml`.
+- The build writes only under the dataset root. It opens both raw archives
+  read-only and never writes to the control plane, so it cannot destroy an input
+  or the tier list.

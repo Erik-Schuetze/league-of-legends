@@ -321,6 +321,8 @@ func TestClientCallsEveryEndpointPath(t *testing.T) {
 		seen <- r.URL.EscapedPath()
 		setRateHeaders(w, "20:1,100:120", "1:1,1:120", "", "")
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/timeline"):
+			writeBody(w, `{"metadata":{"matchId":"EUW1_0000000000","participants":[]},"info":{"frameInterval":60000,"frames":[]}}`)
 		case strings.Contains(r.URL.Path, "/lol/match/v5/matches/"):
 			writeBody(w, `{"metadata":{"matchId":"EUW1_0000000000"},"info":{"queueId":420,"participants":[]}}`)
 		case strings.Contains(r.URL.Path, "/lol/league/v4/entries/"):
@@ -337,6 +339,16 @@ func TestClientCallsEveryEndpointPath(t *testing.T) {
 	ctx := context.Background()
 	if _, err := client.Match(ctx, "EUW1_0000000000"); err != nil {
 		t.Fatalf("Match: %v", err)
+	}
+	timeline, body, err := client.TimelineWithPayload(ctx, "EUW1_0000000000")
+	if err != nil {
+		t.Fatalf("TimelineWithPayload: %v", err)
+	}
+	if timeline.Metadata.MatchID != "EUW1_0000000000" || timeline.Info.FrameInterval != 60000 {
+		t.Fatalf("timeline = %+v", timeline)
+	}
+	if len(body) == 0 {
+		t.Fatal("the timeline body was not retained verbatim")
 	}
 	if _, err := client.LeagueEntries(ctx, LeagueQuery{Queue: "RANKED_SOLO_5x5", Tier: "GOLD", Division: "I", Page: 2}); err != nil {
 		t.Fatalf("LeagueEntries: %v", err)
@@ -360,6 +372,7 @@ func TestClientCallsEveryEndpointPath(t *testing.T) {
 
 	want := []string{
 		"/lol/match/v5/matches/EUW1_0000000000",
+		"/lol/match/v5/matches/EUW1_0000000000/timeline",
 		"/lol/league/v4/entries/RANKED_SOLO_5x5/GOLD/I",
 		"/lol/league/v4/challengerleagues/by-queue/RANKED_SOLO_5x5",
 		"/riot/account/v1/accounts/by-riot-id/Fixture%20Summoner/EUW",

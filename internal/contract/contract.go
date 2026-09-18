@@ -17,10 +17,19 @@ package contract
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Erik-Schuetze/league-of-legends/internal/riot"
 )
+
+// ErrMatchNotFound reports that the control plane holds no record of a match.
+//
+// It lives here because both layers that need it depend on this package and
+// neither should depend on the other: the store produces it when a lookup finds
+// no `matches` row, and the crawler treats it as terminal rather than as a
+// transient failure.
+var ErrMatchNotFound = errors.New("contract: match not found")
 
 // MatchStatus mirrors matches.status.
 type MatchStatus string
@@ -42,6 +51,43 @@ const (
 	JobRetry   JobStatus = "retry"
 	JobDead    JobStatus = "dead"
 )
+
+// QueueKind is the payload a fetch_queue row is for. One row is one request for
+// one match: a summary row and a timeline row for the same match are two
+// independent jobs with independent attempt budgets, because a timeline is a
+// second request and fails for its own reasons.
+//
+// The kind is what keeps the two backlogs apart. A worker must claim only the
+// kind it can fetch; without the filter a timeline worker would take summary
+// rows it has no handler for and the queue would trade jobs between the two
+// crawls.
+type QueueKind string
+
+const (
+	KindMatch    QueueKind = "match"
+	KindTimeline QueueKind = "timeline"
+)
+
+// ParseQueueKind maps a stored value to a kind. The empty string is a match,
+// because it is what every row written before the kind column existed means,
+// and an unrecognised value is treated the same way rather than silently
+// becoming a job no worker can claim.
+func ParseQueueKind(s string) QueueKind {
+	if s == string(KindTimeline) {
+		return KindTimeline
+	}
+	return KindMatch
+}
+
+// Stored renders the kind as it is written to fetch_queue. An unset kind is a
+// match summary, so a caller that does not care about kinds keeps writing what
+// it always wrote.
+func (k QueueKind) Stored() string {
+	if k == KindTimeline {
+		return string(KindTimeline)
+	}
+	return string(KindMatch)
+}
 
 // MatchMeta is the provenance the raw archive records next to a payload, and
 // the fields the control plane needs to describe it. Everything here is known
@@ -93,15 +139,77 @@ type MatchRecord struct {
 	Err string
 }
 
-// QueueItem is one row of `fetch_queue`.
+// QueueItem is one row of `fetch_queue`. Kind is the payload the row is for; an
+// empty Kind means a match summary.
 type QueueItem struct {
 	ID        int64
 	MatchID   string
+	Kind      QueueKind
 	Priority  int
 	Attempts  int
 	NotBefore time.Time
 	ClaimedAt time.Time
 	Status    JobStatus
+}
+
+// TimelineQuery selects matches that could still yield a timeline.
+//
+// The selection is deliberately not "the newest N". Riot retains timelines for
+// one year and summaries for two, so the eligible set is a window that closes;
+// taking the newest matches would sample the current patch and a handful of
+// champions, which answers meta questions about two weeks of one patch while
+// looking like a random sample. Instead the query orders by a hash of the match
+// id over the whole window, which is stable, unbiased and reproducible.
+// TimelineQuery is the selection rule a timeline backfill runs, as it is
+// recorded in ADR-014. The rule is frozen because the dataset's validity
+// depends on it: it is what makes the sample reproducible and unbiased rather
+// than whatever happened to be crawled most recently.
+type TimelineQuery struct {
+	Region       string
+	QueueID      int
+	Since        time.Time
+	MinDurationS int
+	Limit        int
+	// IncludeShort keeps games below MinDurationS in the candidate set. They
+	// are excluded by default because Riot emits no participant frames for a
+	// game that ended before the first frame boundary, so the fetch would
+	// spend rate-limit budget on a payload with nothing in it.
+	IncludeShort bool
+}
+
+// TimelineCandidate is one match the sample selected, carrying the provenance
+// the raw archive needs so a timeline can be written without re-reading the
+// summary.
+type TimelineCandidate struct {
+	MatchID       string
+	Region        string
+	QueueID       int
+	Patch         string
+	GameVersion   string
+	GameCreation  time.Time
+	GameDurationS int
+}
+
+// TimelineCandidates is the result of a candidate query: the selected matches,
+// and the counts that make the selection rule visible rather than implied.
+type TimelineCandidates struct {
+	Matches []TimelineCandidate
+	// Eligible is every match in the selection window, before the duration
+	// floor and before jobs already on the queue are discounted.
+	Eligible int
+	// Ready is the matches the limit is applied to: in the window, above the
+	// duration floor, and with no timeline row against them. It is the number
+	// a dry run exists to print, because it is the number of Riot calls the
+	// run would make.
+	Ready int
+	// ShortExcluded is how many eligible matches the duration floor removed.
+	// It is reported so the exclusion is a number an operator can see.
+	ShortExcluded int
+	// AlreadyQueued and AlreadyDone are the eligible matches a timeline row
+	// already covers. AlreadyDone is what makes a repeated backfill a no-op
+	// rather than a second helping of the same rate-limit bill.
+	AlreadyQueued int
+	AlreadyDone   int
 }
 
 // FrontierEntry is one row of `crawl_frontier`: a puuid the crawler may walk,
@@ -196,16 +304,14 @@ type LeagueQuery struct {
 	Page     int
 }
 
-// RiotClient is the Riot API surface v1 needs. It is deliberately three
-// methods wide.
+// RiotClient is the Riot API surface the pipeline needs.
 //
-// There is no Timeline method. Timelines are a second request per match for
-// data that only the optional skill-order section uses, and v1 ships without
-// that section, so adding the method now would buy a rate-limit cost and no
-// product. Skill orders appear when timelines are retained, and that is a
-// contract change with an ADR.
+// Match and Timeline are two requests for the same match id, not two halves of
+// one call: a summary is retained for two years and a timeline for one, so a
+// timeline can be gone for a match that has not aged out at all.
 type RiotClient interface {
 	Match(ctx context.Context, matchID string) (riot.MatchDTO, error)
+	Timeline(ctx context.Context, matchID string) (riot.TimelineDTO, error)
 	MatchIDsByPUUID(ctx context.Context, q MatchListQuery) ([]string, error)
 	LeagueEntries(ctx context.Context, q LeagueQuery) ([]riot.LeagueEntryDTO, error)
 }
@@ -213,9 +319,13 @@ type RiotClient interface {
 // RawWriter appends payloads to the immutable archive. It is append-only by
 // construction: there is no update or delete method, because the archive is
 // the copy that cannot be re-fetched - Riot retains match history for two
-// years and this project intends to outlive that.
+// years, timelines for one, and this project intends to outlive both.
 type RawWriter interface {
 	WriteMatch(ctx context.Context, match riot.MatchDTO, meta MatchMeta) error
+	// WriteTimeline takes the same Meta as WriteMatch, because a timeline is
+	// match-scoped and its provenance is the summary's: the same match id,
+	// region, patch and game. Only the archive directory differs.
+	WriteTimeline(ctx context.Context, timeline riot.TimelineDTO, meta MatchMeta) error
 	WriteLeagueEntries(ctx context.Context, entries []riot.LeagueEntryDTO, meta LeagueMeta) error
 	// Flush finalises the open part files. A writer that is not flushed by
 	// the end of a run has written nothing, which is why it is on the
@@ -238,10 +348,21 @@ type Store interface {
 
 	// fetch_queue.
 	EnqueueMatches(ctx context.Context, items []QueueItem) (enqueued int, err error)
+	// ClaimJobs claims match-summary work only. It is ClaimJobsOfKind with
+	// KindMatch, kept as a named method because it is what every existing
+	// caller means and the kind filter must not be something a caller can
+	// forget.
 	ClaimJobs(ctx context.Context, limit int, now time.Time) ([]QueueItem, error)
+	// ClaimJobsOfKind claims one kind of work. A worker may only claim the
+	// kind it can fetch.
+	ClaimJobsOfKind(ctx context.Context, kind QueueKind, limit int, now time.Time) ([]QueueItem, error)
 	CompleteJob(ctx context.Context, id int64) error
 	RetryJob(ctx context.Context, id int64, notBefore time.Time, cause string) error
 	DeadLetterJob(ctx context.Context, id int64, cause string) error
+
+	// TimelineBacklog: which matches still need a timeline, and what the
+	// queue already holds for them.
+	TimelineCandidates(ctx context.Context, q TimelineQuery) (TimelineCandidates, error)
 
 	// crawl_frontier.
 	UpsertFrontier(ctx context.Context, entries []FrontierEntry) (added int, err error)

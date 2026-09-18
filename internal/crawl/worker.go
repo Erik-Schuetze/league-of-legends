@@ -89,6 +89,11 @@ type Worker struct {
 	keys     KeySource
 	reporter PipelineReporter
 
+	// matchProvenance is required by the timeline loop and optional by the
+	// match loop, which never consults it. NewWorker refuses to build a
+	// timeline worker without it.
+	matchProvenance MatchProvenanceReader
+
 	lastReport  time.Time
 	warnedEmpty bool
 	rng         *rand.Rand
@@ -110,6 +115,17 @@ type Worker struct {
 // except Deps; normalize fills the rest in.
 type WorkerOptions struct {
 	Deps Deps
+
+	// Kind is the payload this loop fetches. The zero value is a match
+	// summary, which is what every existing caller means.
+	//
+	// It is not a flag on the fetch, it is the loop's identity: the claim is
+	// filtered by it, the frontier walk is skipped for anything else, and the
+	// job handler is chosen by it. A loop that could fetch both would need to
+	// know which of its two rate-limit buckets a job belongs to before it
+	// claimed it, which is a question the claim query answers for free by
+	// filtering.
+	Kind contract.QueueKind
 
 	// Queue filters a player's history page. 420 is ranked solo, which is the
 	// only queue the site publishes in v1; fetching other queues would cost
@@ -155,6 +171,7 @@ func NewWorker(opts WorkerOptions) (*Worker, error) {
 		return nil, errors.New("crawl: worker needs a raw writer")
 	}
 	opts.Queue = defaultInt(opts.Queue, 420)
+	opts.Kind = contract.ParseQueueKind(string(opts.Kind))
 	opts.JobBatch = defaultInt(opts.JobBatch, DefaultJobBatch)
 	opts.FrontierBatch = defaultInt(opts.FrontierBatch, DefaultFrontierBatch)
 	opts.HistoryCount = defaultInt(opts.HistoryCount, DefaultHistoryCount)
@@ -179,6 +196,17 @@ func NewWorker(opts WorkerOptions) (*Worker, error) {
 	}
 	if r, ok := opts.Deps.Store.(PipelineReporter); ok {
 		w.reporter = r
+	}
+	if reader, ok := opts.Deps.Store.(MatchProvenanceReader); ok {
+		w.matchProvenance = reader
+	}
+	if opts.Kind == contract.KindTimeline && w.matchProvenance == nil {
+		// Refused at construction rather than at the first job: without the
+		// summary's provenance a timeline row cannot be archived with the
+		// queue, patch or duration the dataset is keyed on, and every job this
+		// loop claimed would have to be released again. A wiring mistake that
+		// looks like a rate-limit problem is worth failing the process for.
+		return nil, errors.New("crawl: timeline worker needs a store that reports match provenance")
 	}
 	return w, nil
 }
@@ -236,6 +264,7 @@ type PipelineReporter interface {
 func (w *Worker) Run(ctx context.Context) error {
 	w.deps.Log.Info("crawl worker started",
 		"region", w.deps.Region,
+		"kind", string(w.opts.Kind),
 		"queue", w.opts.Queue,
 		"job_batch", w.opts.JobBatch,
 		"frontier_batch", w.opts.FrontierBatch,
@@ -346,6 +375,14 @@ func (w *Worker) Step(ctx context.Context) (int, error) {
 	if processed > 0 {
 		return processed, nil
 	}
+	if w.opts.Kind != contract.KindMatch {
+		// The frontier walk discovers matches, which is the match loop's job.
+		// A timeline worker that walked it would enqueue summary rows from a
+		// loop that never fetches summaries, and - because Step treats a walk
+		// that touched something as work - would report progress while
+		// retaining no payload at all.
+		return 0, nil
+	}
 	return w.walkFrontier(ctx)
 }
 
@@ -388,14 +425,14 @@ func (w *Worker) recoverClaims(ctx context.Context) error {
 
 // drainQueue claims and processes one batch of fetch_queue rows.
 func (w *Worker) drainQueue(ctx context.Context) (int, error) {
-	items, err := w.deps.Store.ClaimJobs(ctx, w.opts.JobBatch, w.deps.Now())
+	items, err := w.deps.Store.ClaimJobsOfKind(ctx, w.opts.Kind, w.opts.JobBatch, w.deps.Now())
 	if err != nil {
-		return 0, fmt.Errorf("claim jobs: %w", err)
+		return 0, fmt.Errorf("claim %s jobs: %w", w.opts.Kind, err)
 	}
 	if len(items) == 0 {
 		return 0, nil
 	}
-	w.deps.Log.Debug("claimed jobs", "count", len(items))
+	w.deps.Log.Debug("claimed jobs", "kind", string(w.opts.Kind), "count", len(items))
 
 	processed := 0
 	retained := make([]contract.QueueItem, 0, len(items))
@@ -512,6 +549,10 @@ func (w *Worker) abandonRetained(ctx context.Context, retained []contract.QueueI
 // holding the payload has been flushed. A crash can therefore lose at most a
 // claim, never a payload.
 func (w *Worker) processJob(ctx context.Context, item contract.QueueItem) (bool, error) {
+	if item.Kind == contract.KindTimeline {
+		return w.processTimelineJob(ctx, item)
+	}
+
 	jobCtx, cancel := context.WithTimeout(ctx, w.opts.JobTimeout)
 	defer cancel()
 
@@ -671,8 +712,9 @@ func (w *Worker) handleFetchFailure(ctx context.Context, item contract.QueueItem
 // replay with `maintain -replay-dead-letters`.
 func (w *Worker) handleArchiveFailure(ctx context.Context, item contract.QueueItem, err error, cause string) error {
 	if item.Attempts >= w.opts.MaxAttempts {
-		w.deps.Log.Error("match dead-lettered by a failed archive write",
-			"match_id", item.MatchID, "job_id", item.ID, "attempts", item.Attempts, "cause", cause)
+		w.deps.Log.Error("job dead-lettered by a failed archive write",
+			"match_id", item.MatchID, "job_id", item.ID, "kind", string(item.Kind),
+			"attempts", item.Attempts, "cause", cause)
 		return w.deps.Store.DeadLetterJob(ctx, item.ID, cause)
 	}
 	return w.requeue(ctx, item, err, cause)

@@ -20,8 +20,8 @@ code.
 
 | Path | What it is |
 |---|---|
-| `cmd/lolstats-ingest` | Crawler and scheduler jobs. Subcommands: `worker`, `discover-seeds`, `backfill`, `maintain` |
-| `cmd/lolstats-aggregate` | Nightly DuckDB build step. Subcommands: `build`, `verify`, `manifest` |
+| `cmd/lolstats-ingest` | Crawler and scheduler jobs. Subcommands: `worker`, `discover-seeds`, `backfill`, `backfill-timelines`, `maintain` |
+| `cmd/lolstats-aggregate` | Nightly DuckDB build step, plus the `timeline-v1` feature dataset. Subcommands: `build`, `verify`, `manifest`, `features` |
 | `cmd/gen-types` | Emits the JSON Schema and `.d.ts` for the artifact contract |
 | `internal/contract` | The frozen Go interfaces between the pipeline's components |
 | `internal/aggmodel` | The aggregate artifact types, path builders and schema emitter |
@@ -110,8 +110,39 @@ LOLSTATS_RIOT_API_KEY=... ./bin/lolstats-ingest worker
 The `worker` subcommand crawls continuously: it claims fetch jobs, calls Riot
 under an adaptive rate limiter, writes the raw archive and reports its progress
 on the stale-and-frozen numbers an operator watches. The `discover-seeds`,
-`backfill`, `maintain`, `migrate` and `static-sync` subcommands are the scheduled
-and repair jobs around it; `./bin/lolstats-ingest --help` is the list.
+`backfill`, `backfill-timelines`, `maintain`, `migrate` and `static-sync`
+subcommands are the scheduled and repair jobs around it;
+`./bin/lolstats-ingest --help` is the list.
+
+`backfill-timelines` enqueues match timelines as a second `fetch_queue` job kind,
+which a worker fetches with `-kind timeline`. Riot retains timelines for one year
+against two for a match summary, so the subcommand does not re-walk the archive:
+it takes a bounded, reproducible sample of the matches the control plane already
+holds - queue 420, the configured region, the game's own creation time within a
+330-day horizon, and games under the duration floor excluded unless
+`-include-short` says otherwise, because a game that ended inside the first frame
+interval has no frames. The sample is ordered by a hash of `match_id` rather than
+by recency, so it is stable and unbiased across the eligible year instead of
+describing the newest few weeks of one patch. `-limit` (default 1000) caps one
+run, `-min-duration` is the duration floor in seconds, and `-dry-run` reports the
+selection without enqueuing it, which is what makes the rate-limit budget
+knowable before it is spent.
+
+`lolstats-aggregate features` builds the `timeline-v1` Parquet dataset from both
+raw archives, the match summaries and the timelines, into
+`<LOLSTATS_AGG_DATASET_ROOT>/timeline-v1` (default root
+`/var/lib/lolstats/datasets`). It writes six tables - `match_index`,
+`participant_minutes`, `events`, `lane_matchups`, `participant_early` and
+`match_objectives` - plus a generated `README.md`, `schema.json` and
+`manifest.json`. The dataset is not part of the `agg/v1` reader contract and
+`agg/v1` is untouched: a lane matchup is two participants rather than a hundred,
+so the frozen contract's `min_cell_n` suppression cannot apply to a minute-level
+table, and the nightly build still reads the match summary archive alone.
+
+```sh
+./bin/lolstats-ingest backfill-timelines -dry-run   # report the sample without enqueuing it
+./bin/lolstats-aggregate features                   # build <LOLSTATS_AGG_DATASET_ROOT>/timeline-v1
+```
 
 ```sh
 make types        # regenerate schema/agg.{d.ts,schema.json} from the Go structs

@@ -120,6 +120,10 @@ What "no Riot key" actually means, because the answer is not uniform:
   buys today is an archive that is being filled rather than frozen.
 - The `backfill` job is suspended and stays that way; it is a manual tool, so a
   missing key only matters on the day someone runs it.
+- `backfill-timelines` needs no key either, and unlike the `backfill` path that is
+  structural rather than incidental: it enqueues a bounded sample of timeline
+  fetches into `fetch_queue` and makes no Riot request itself, so it spends the
+  rate-limit budget only when the worker drains what it wrote.
 - `static-sync`, which mirrored the public Data Dragon CDN and needed no Riot key,
   was deleted on 2026-09-17 with the rest of the static path. The
   `static-sync` subcommand still exists in `cmd/lolstats-ingest`; there is simply
@@ -147,7 +151,7 @@ Two properties are wanted at once, and only this shape gives both.
 else in this directory, so no workload can start against a schema that is behind
 the binary. The alternative - an initContainer on the workloads that touch
 Postgres - orders startup just as well, but it has to be replicated into the
-ingest Deployment and all seven job templates, and it makes a Postgres that is
+ingest Deployment and all eight job templates, and it makes a Postgres that is
 briefly unreachable into a crash-loop of every workload rather than one failed
 hook that says what went wrong.
 
@@ -234,6 +238,15 @@ One RWX volume, `lolstats-data` on the `nfs-client` StorageClass, mounted at
   system can reproduce it.
 - `agg/` - the published aggregates, published by renaming a directory into
   place, so a reader never sees a half-written tree.
+- `datasets/` - the timeline feature dataset, published the same way: every table
+  directory first, then the documents that describe them, then `manifest.json`
+  last, so a failed run leaves the previous dataset live. It is derived from
+  **both** raw archives and is rebuilt by hand with `lolstats-aggregate features`
+  - nothing schedules it, deliberately, so a bad timeline extract cannot fail the
+  nightly tier list. `base/jobs/backfill-timelines.yaml` is the weekly job that
+  fills the timeline half of the archive this dataset reads. See
+  `docs/decisions/ADR-014-ingest-match-timelines.md` and
+  `docs/runbooks/rebuild-aggregates.md`.
 - `site/` - the rendered HTML two deleted tiers used to serve. **Nothing writes
   it any more** (2026-09-17): `site-build` and the inner Caddy that served the
   tree are gone, and the Go tier that replaced them rendered from `agg/` per

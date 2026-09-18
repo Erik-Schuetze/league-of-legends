@@ -36,6 +36,37 @@ short. "Breaking" means something that used to work no longer does.
   in `deploy/` sets the variable, so the deployed nightly build still runs
   without the gate; adding the key to `deploy/base/config.yaml` is what turns it
   on. Fixture builds, offline verification and `demo` are unaffected either way.
+- The timeline ingest path: `contract.RiotClient.Timeline` and
+  `contract.RawWriter.WriteTimeline`, `internal/riot/timeline.go` (a
+  `TimelineDTO` scoped to the envelope, `info.frameInterval` and
+  `info.frames[]`, with the event array left as the verbatim payload), the
+  append-only archive directory `raw/riot/match-v5-timeline/dt=<fetch date>/`,
+  `sql/migrations/0004_timeline_jobs.up.sql` (`fetch_queue.kind` with
+  `UNIQUE (match_id, kind)`, so timeline fetches inherit the existing claim,
+  retry and dead-letter machinery), and `lolstats-ingest backfill-timelines`
+  (`internal/crawl/timeline_backfill.go`, `internal/store/timeline.go`), which
+  enqueues a bounded sample of the stored matches ordered by a hash of
+  `match_id` rather than by recency. A timeline `404` is terminal through the
+  existing `riot.IsNotFound` path, because Riot ages a timeline out after one
+  year.
+- `lolstats-aggregate features` - the `timeline-v1` Parquet dataset, built by
+  `internal/aggregate/features.go` from the match summary and timeline archives
+  into `<LOLSTATS_AGG_DATASET_ROOT>/timeline-v1` (default root
+  `/var/lib/lolstats/datasets`). Six tables - `match_index`,
+  `participant_minutes`, `events`, `lane_matchups`, `participant_early` and
+  `match_objectives` - plus a generated `README.md`, `schema.json` and
+  `manifest.json`. The dataset is published outside the `agg/v1` reader
+  contract, its `manifest.json` is a build receipt rather than a contract, and
+  the nightly build still reads `match-v5` alone, so a bad timeline extract
+  cannot fail the tier list.
+- `docs/decisions/ADR-014-ingest-match-timelines.md` - the second raw payload
+  and the feature dataset derived from it, including the sample-selection rule
+  the crawl and the build both depend on and why a minute-level dataset cannot
+  carry the frozen contract's `min_cell_n` suppression.
+- `fixtures/agg/timeline/` - a fixture root holding both archives for the
+  feature build, with `internal/aggregate/fixturetimeline_test.go`,
+  `internal/aggregate/features_fixture_test.go` and
+  `internal/crawl/timeline_backfill_test.go`.
 - `docs/frontend/` - the design system for the frontend that replaces the
   retired tier: `README.md` (the normative guide), `components.md` (52
   components with their props, states and state matrix), `a11y.md` (the WCAG 2.1
@@ -169,10 +200,6 @@ short. "Breaking" means something that used to work no longer does.
   a `TestEmbeddedProjectionsMatchTheRepository` drift test that does not exist
   (the two projection copies are byte-equal; nothing tests that they stay so).
 
-- `AGENTS.md` no longer frames the repository as a shared tree edited by several
-  concurrent agents, and no longer points at `docs/contracts.md` section 6 for
-  the ownership map that section 6 was. Its rules - the README's job, the ADR
-  rule, the house style, "before you say it works" - are unchanged.
 - Citations to a design document that is not in this repository were dropped
   from `deploy/`, `.github/`, `Dockerfile`, `Makefile`, `scripts/` and the docs -
   the `plan.md` and `plan section N` pointers, which named a file a reader could
@@ -181,6 +208,12 @@ short. "Breaking" means something that used to work no longer does.
   DuckDB engine, `plan section 14` on the restore gates, and so on). The `.zz-`,
   `files/` and `.lane-` ignore rules keep their patterns; only the coordinator-era
   narrative around them was cut back.
+- `docs/contracts.md` sections 2 and 4 carry the timeline change: the
+  `RiotClient.Timeline` and `RawWriter.WriteTimeline` interfaces, the second raw
+  archive directory, and the deletion of the rule that stated no timeline method
+  exists. Nothing in the frozen `agg/v1` reader contract changes, which is why
+  the dataset those payloads feed is published beside it rather than inside it;
+  ADR-014 is the decision of record.
 - The design freeze over the served CSS layer was retired with
   `DESIGN-FREEZE.md`: the token set, the contrast floors, the "is it still
   inlined last" checks and the byte ceiling are still asserted by

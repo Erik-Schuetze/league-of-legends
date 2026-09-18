@@ -42,7 +42,8 @@ resources:
   # Every scheduled unit of work, in the order they run during a night:
   # discover-seeds (00:10, before the build so the night's own discovery is in
   # it), aggregate (01:00), maintain (hourly), backfill (suspended, manual
-  # only). `static-sync` and `site-build` used to sit at 03:10 and 03:40 and
+  # only), backfill-timelines (weekly, Sunday 06:00). `static-sync` and
+  # `site-build` used to sit at 03:10 and 03:40 and
   # were deleted on 2026-09-17 with the static tier; the Go tier that replaced
   # them was itself retired on 2026-09-18 (docs/decisions/ADR-011), so nothing
   # writes a site tree at all and the aggregate job's output is the end of the
@@ -51,6 +52,17 @@ resources:
   - jobs/discover-seeds.yaml
   - jobs/maintain.yaml
   - jobs/backfill.yaml
+  # The timeline lane's scheduled half: it enqueues `kind='timeline'` fetches for
+  # a bounded sample of matches the control plane already holds, which the worker
+  # then fetches as a second request per match. It is a separate CronJob from
+  # `backfill` because it selects its own sample rather than replaying a key
+  # range, and it is weekly rather than nightly because every run spends
+  # rate-limit budget that the summary crawl also wants. The second half of the
+  # lane - the dataset built from those payloads - is `lolstats-aggregate
+  # features`, run by hand; nothing schedules it, so that a bad timeline extract
+  # cannot fail the nightly tier list. See
+  # docs/decisions/ADR-014-ingest-match-timelines.md.
+  - jobs/backfill-timelines.yaml
 
   # ---- additions: operations workstream (backups) ----
   # Further scheduled work, but described separately because these units

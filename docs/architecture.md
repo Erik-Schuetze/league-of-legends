@@ -19,6 +19,7 @@ alternative behind them live in `docs/decisions/`; this page is the map.
       |             |                                 |
       |             +--> raw archive (zstd Parquet, immutable, PVC)
       |                  raw/riot/match-v5/dt=.../            [PRIMARY DATA]
+      |                  raw/riot/match-v5-timeline/dt=.../   [PRIMARY DATA]
       v
    +-------------------------------------------+
    |  PostgreSQL - control plane only          |
@@ -73,9 +74,11 @@ it is an outage rather than a data loss.
 | `lolstats-ingest worker` | Deployment | Claim match-fetch jobs, call Riot, write raw archive, dedupe into Postgres, update frontier | continuous |
 | `lolstats-ingest discover-seeds` | CronJob | Pull LEAGUE-V4 ladder entries, upsert PUUIDs into the frontier with the seed tier recorded | daily |
 | `lolstats-ingest backfill` | CronJob, parameterised | Re-run fetch jobs over a bounded key range for repair or gap-filling | manual |
+| `lolstats-ingest backfill-timelines` | CronJob | Enqueue timeline fetches for the bounded sample that is already archived, in a separate `kind` of `fetch_queue` row | weekly |
 | `lolstats-ingest maintain` | CronJob | Frontier pruning, raw-archive compaction, key-age check, source-toggle review dates | daily |
 | `lolstats-aggregate build` | CronJob | DuckDB reads the raw archive, computes cells, suppresses thin ones, writes `agg/v1/**` and flips the manifest | nightly |
 | `lolstats-aggregate verify` | CronJob | Validate published artifacts against the schema and the gate rules; alert on staleness | after build |
+| `lolstats-aggregate features` | one-off Job | DuckDB reads **both** raw archives and writes the six-table `timeline-v1` feature dataset plus its schema, README and manifest. Never runs from the nightly job, so a bad timeline extract cannot fail the tier list | manual |
 | `lolstats-web` | Deployment, **retired 2026-09-18** | Rendered every route from `agg/v1` at request time, served `/agg/**` unchanged, answered `/healthz` and `/metrics`, and failed visibly (503 + error page) when the artifact tree was missing. Deleted with its tier; `deploy/base/web/service.yaml` is now unbaked | - |
 | shared Caddy (namespace `web`) | Deployment | Terminate TLS and reverse-proxy to the `lolstats-web` Service. It is the cluster's, not this project's, and its upstream no longer resolves | continuous |
 

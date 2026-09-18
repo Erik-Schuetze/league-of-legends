@@ -88,12 +88,13 @@ type Writer struct {
 	opts    Options
 	metrics obs.MetricsRecorder
 
-	mu           sync.Mutex
-	matchParts   map[string]*partWriter[MatchRow]
-	leagueParts  map[string]*partWriter[LeagueRow]
-	staticParts  map[string]*partWriter[StaticRow]
-	accountParts map[string]*partWriter[AccountRow]
-	closed       bool
+	mu            sync.Mutex
+	matchParts    map[string]*partWriter[MatchRow]
+	timelineParts map[string]*partWriter[TimelineRow]
+	leagueParts   map[string]*partWriter[LeagueRow]
+	staticParts   map[string]*partWriter[StaticRow]
+	accountParts  map[string]*partWriter[AccountRow]
+	closed        bool
 }
 
 // Writer implements the frozen archive interface.
@@ -118,12 +119,13 @@ func New(opts Options) (*Writer, error) {
 		opts.Now = time.Now
 	}
 	return &Writer{
-		opts:         opts,
-		metrics:      opts.Metrics,
-		matchParts:   map[string]*partWriter[MatchRow]{},
-		leagueParts:  map[string]*partWriter[LeagueRow]{},
-		staticParts:  map[string]*partWriter[StaticRow]{},
-		accountParts: map[string]*partWriter[AccountRow]{},
+		opts:          opts,
+		metrics:       opts.Metrics,
+		matchParts:    map[string]*partWriter[MatchRow]{},
+		timelineParts: map[string]*partWriter[TimelineRow]{},
+		leagueParts:   map[string]*partWriter[LeagueRow]{},
+		staticParts:   map[string]*partWriter[StaticRow]{},
+		accountParts:  map[string]*partWriter[AccountRow]{},
 	}, nil
 }
 
@@ -149,6 +151,37 @@ func (w *Writer) WriteMatch(ctx context.Context, match riot.MatchDTO, meta contr
 	if !ok {
 		part = newPartWriter[MatchRow](dir, w.opts, w.metrics)
 		w.matchParts[dir] = part
+	}
+	return part.append(row)
+}
+
+// WriteTimeline appends one fetched timeline to the timeline partition of its
+// fetch date.
+//
+// It is on the frozen RawWriter surface, unlike WriteStatic and WriteAccount,
+// because a timeline is a step of the crawl loop rather than an operator
+// action: the queue holds timeline jobs, and the worker that handles one writes
+// the payload here before it closes the row - the same archive-first ordering
+// WriteMatch has, for the same reason.
+func (w *Writer) WriteTimeline(ctx context.Context, timeline riot.TimelineDTO, meta contract.MatchMeta) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if meta.FetchedAt.IsZero() {
+		return fmt.Errorf("raw: timeline %s has no fetch time", meta.MatchID)
+	}
+	row := timelineRow(timeline, meta)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return ErrClosed
+	}
+	dir := TimelineDir(w.opts.Root, meta.PartitionDate())
+	part, ok := w.timelineParts[dir]
+	if !ok {
+		part = newPartWriter[TimelineRow](dir, w.opts, w.metrics)
+		w.timelineParts[dir] = part
 	}
 	return part.append(row)
 }
@@ -294,6 +327,9 @@ func (w *Writer) Close() error {
 func (w *Writer) finalizeAll() error {
 	var errs []error
 	for _, part := range w.matchParts {
+		errs = append(errs, part.finalize())
+	}
+	for _, part := range w.timelineParts {
 		errs = append(errs, part.finalize())
 	}
 	for _, part := range w.leagueParts {
@@ -519,6 +555,39 @@ func matchRow(match riot.MatchDTO, meta contract.MatchMeta) MatchRow {
 		GameVersion:    gameVersion,
 		GameCreationMS: gameCreation.UnixMilli(),
 		GameDurationS:  narrowInt32(int64(duration)),
+		PayloadVersion: payloadVersion,
+		FetchedAt:      meta.FetchedAt.UTC(),
+		Payload:        string(payload),
+		PayloadSHA256:  sha256Hex(payload),
+	}
+}
+
+// timelineRow maps metadata onto the timeline archive schema.
+//
+// Unlike matchRow there is no fallback to the payload for anything but the
+// match id: a timeline does not carry the queue, the patch, the duration or the
+// creation time at all - it knows only its match id and a frame timeline - so
+// every other column comes from the summary's metadata or is left zero. That is
+// also why the dataset's scope columns are read from the summary archive rather
+// than from a timeline row.
+func timelineRow(timeline riot.TimelineDTO, meta contract.MatchMeta) TimelineRow {
+	matchID := meta.MatchID
+	if matchID == "" {
+		matchID = timeline.Metadata.MatchID
+	}
+	payloadVersion := meta.PayloadVersion
+	if payloadVersion == "" {
+		payloadVersion = TimelinePayloadVersion
+	}
+	payload := timeline.TimelineRawPayload()
+	return TimelineRow{
+		MatchID:        matchID,
+		Region:         strings.ToUpper(meta.Region),
+		QueueID:        narrowInt32(int64(meta.QueueID)),
+		Patch:          meta.Patch,
+		GameVersion:    meta.GameVersion,
+		GameCreationMS: meta.GameCreation.UnixMilli(),
+		GameDurationS:  narrowInt32(int64(meta.GameDurationS)),
 		PayloadVersion: payloadVersion,
 		FetchedAt:      meta.FetchedAt.UTC(),
 		Payload:        string(payload),

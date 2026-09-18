@@ -8,6 +8,7 @@
 //	build     derive and publish the artifacts for a patch, region, queue and bracket
 //	verify    check published artifacts against the agg/v1 JSON Schema and the gate rules
 //	manifest  rewrite agg/v1/manifest.json from the published tree
+//	features  derive the timeline feature dataset (not part of the agg/v1 contract)
 //	demo      write a deterministic simulated artifact set, labelled as demo data
 //
 // The raw archive is read by a pinned DuckDB process rather than by a linked
@@ -57,6 +58,7 @@ subcommands:
   build     derive and publish the artifacts for a patch, region, queue and bracket
   verify    check published artifacts against the agg/v1 JSON Schema and the gate rules
   manifest  rewrite agg/v1/manifest.json from the published tree
+  features  derive the timeline feature dataset (not part of the agg/v1 contract)
   demo      write a deterministic simulated artifact set, labelled as demo data
 
 Every subcommand defaults its flags from the same environment the other lolstats
@@ -91,6 +93,8 @@ func runEnv(args []string, stdout, stderr io.Writer, getenv config.Getenv) int {
 		return runManifest(args[1:], stdout, stderr, getenv)
 	case "demo":
 		return runDemo(args[1:], stdout, stderr, getenv)
+	case "features":
+		return runFeatures(args[1:], stdout, stderr, getenv)
 	default:
 		printUsage(stderr, "lolstats-aggregate: unknown subcommand %q\n\n%s", args[0], usage)
 		return exitUsage

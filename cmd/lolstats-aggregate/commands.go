@@ -174,6 +174,118 @@ func runBuild(args []string, stdout, stderr io.Writer, getenv config.Getenv) int
 	return exitOK
 }
 
+// runFeatures derives the timeline feature dataset.
+//
+// It is a separate subcommand rather than a flag on build for the reason the
+// dataset is a separate tree: the nightly build publishes a frozen contract and
+// this one publishes an exploratory dataset, and an operator must be able to run
+// one without the risk of touching the other. Nothing here opens the aggregate
+// root at all.
+func runFeatures(args []string, stdout, stderr io.Writer, getenv config.Getenv) int {
+	env, err := newEnvironment(getenv)
+	if err != nil {
+		return fail(stderr, "features", err)
+	}
+	cfg := env.cfg
+
+	var (
+		seg         segFlags
+		rawRoot     = cfg.Raw.Root
+		datasetRoot = cfg.Aggregate.DatasetRoot
+		minDuration = cfg.Aggregate.FeatureMinDurationS
+		duckdbBin   string
+		allowMism   bool
+		metricsAddr = cfg.MetricsAddr
+
+		duckdbMemoryLimit = cfg.Aggregate.DuckDBMemoryLimit
+		duckdbThreads     = cfg.Aggregate.DuckDBThreads
+		duckdbTempDir     = cfg.Aggregate.DuckDBTempDir
+		duckdbMaxTempSize = cfg.Aggregate.DuckDBMaxTempSize
+	)
+	fs := flag.NewFlagSet("features", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addSegFlags(fs, &seg, cfg)
+	fs.StringVar(&rawRoot, "raw", rawRoot,
+		"raw archive root, the parent of riot/match-v5 and riot/match-v5-timeline")
+	fs.StringVar(&datasetRoot, "dataset", datasetRoot,
+		"dataset root the feature tables are published under; the dataset itself is <root>/"+aggregate.FeatureDatasetDir)
+	fs.IntVar(&minDuration, "min-duration", minDuration,
+		"games shorter than this are recorded as excluded rather than published")
+	fs.StringVar(&duckdbBin, "duckdb-bin", "",
+		"pinned duckdb client, empty means $LOLSTATS_DUCKDB_BIN or PATH")
+	fs.BoolVar(&allowMism, "duckdb-allow-mismatch", false,
+		"run even when the client is not the pinned DuckDB release")
+	fs.StringVar(&duckdbMemoryLimit, "duckdb-memory-limit", duckdbMemoryLimit,
+		"hard DuckDB memory ceiling such as 2GiB; a timeline is roughly ten times a summary, so this is not the nightly build's value")
+	fs.IntVar(&duckdbThreads, "duckdb-threads", duckdbThreads,
+		"DuckDB thread pool size, zero means the default rather than the host's core count")
+	fs.StringVar(&duckdbTempDir, "duckdb-temp-dir", duckdbTempDir,
+		"parent of the DuckDB spill directory, empty means the system temporary directory")
+	fs.StringVar(&duckdbMaxTempSize, "duckdb-max-temp-size", duckdbMaxTempSize,
+		"bound on the DuckDB spill directory such as 10GiB")
+	fs.StringVar(&metricsAddr, "metrics-addr", metricsAddr,
+		"prometheus listen address, empty disables the endpoint")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() > 0 {
+		printUsage(stderr, "lolstats-aggregate features: unexpected argument %q\n", fs.Arg(0))
+		return exitUsage
+	}
+
+	ctx, stop := signalContext()
+	defer stop()
+	defer serveMetrics(ctx, env.log, metricsAddr, env.metrics)()
+
+	result, featureErr := aggregate.Features(ctx, aggregate.FeatureOptions{
+		DatasetRoot:  datasetRoot,
+		RawRoot:      rawRoot,
+		Region:       seg.region,
+		Platform:     seg.platform,
+		Queue:        seg.queue,
+		MinDurationS: minDuration,
+		GitSHA:       gitSHA(getenv),
+		DuckDBBin:    duckdbBin,
+		DuckDB: aggregate.DuckDBSettings{
+			MemoryLimit: duckdbMemoryLimit,
+			Threads:     duckdbThreads,
+			TempDir:     duckdbTempDir,
+			MaxTempSize: duckdbMaxTempSize,
+		},
+		AllowVersionMismatch: allowMism,
+		Log:                  env.log,
+	})
+	if featureErr != nil {
+		statusLine(stdout, "features", "failed",
+			"matches", result.Counts.Matches,
+			"eligible", result.Counts.Eligible,
+			"staging", result.StagingDir)
+		return fail(stderr, "features", featureErr)
+	}
+	statusLine(stdout, "features", "ok",
+		"dataset", result.Dir,
+		"matches", result.Counts.Matches,
+		"with_timeline", result.Counts.TimelinePresent,
+		"eligible", result.Counts.Eligible,
+		"excluded", excludedTotal(result.Counts.Excluded),
+		"replaced", result.Published.ReplacedExisting)
+	return exitOK
+}
+
+// excludedTotal sums the ledger's exclusion breakdown for the status line.
+//
+// The breakdown itself is in the dataset's README and in the manifest; the sum
+// is what an operator watching a run wants, because a sudden jump in it is the
+// difference between "the backfill is still filling in" and "the extract is
+// rejecting everything".
+func excludedTotal(excluded map[string]int) int {
+	total := 0
+	for _, rows := range excluded {
+		total += rows
+	}
+	return total
+}
+
 func runVerify(args []string, stdout, stderr io.Writer, getenv config.Getenv) int {
 	env, err := newEnvironment(getenv)
 	if err != nil {

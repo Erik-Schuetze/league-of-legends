@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Erik-Schuetze/league-of-legends/internal/contract"
@@ -64,6 +65,55 @@ func (s *Store) UpsertMatch(ctx context.Context, rec contract.MatchRecord) (bool
 	s.metrics.AddMatchesPersisted(1)
 	return true, nil
 }
+
+// matchProvenanceSQL reads the archived summary's record for one match.
+//
+// It selects the columns a timeline archive row inherits and nothing else: the
+// timeline's own fetch does not consume the summary's payload, its URI or its
+// parse state, and pulling a payload-sized row into memory to read five
+// scalars is a cost with no answer behind it.
+const matchProvenanceSQL = `
+SELECT match_id, region, queue_id, patch, game_version, game_creation,
+       game_duration_s, payload_version, fetched_at
+FROM matches
+WHERE match_id = $1`
+
+// MatchProvenance returns the provenance a timeline row is archived with.
+//
+// It reports contract.ErrMatchNotFound when the control plane has no summary
+// for the match, which the crawl worker reads as a terminal condition: the
+// summary archive is append-only and the control plane only gains rows, so a
+// timeline that arrives for a match with no summary is an orphan rather than a
+// race.
+func (s *Store) MatchProvenance(ctx context.Context, matchID string) (contract.MatchRecord, error) {
+	var (
+		rec         contract.MatchRecord
+		version     int
+		gameCreated time.Time
+		fetchedAt   sql.NullTime
+	)
+	err := s.db.QueryRowContext(ctx, matchProvenanceSQL, matchID).Scan(
+		&rec.MatchID, &rec.Region, &rec.QueueID, &rec.Patch, &rec.GameVersion, &gameCreated,
+		&rec.GameDurationS, &version, &fetchedAt,
+	)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return contract.MatchRecord{}, fmt.Errorf("store: MatchProvenance %s: %w", matchID, errMatchNotFound)
+	case err != nil:
+		return contract.MatchRecord{}, fmt.Errorf("store: MatchProvenance %s: %w", matchID, err)
+	}
+	rec.GameCreation = gameCreated.UTC()
+	rec.PayloadVersion = strconv.Itoa(version)
+	if fetchedAt.Valid {
+		rec.FetchedAt = fetchedAt.Time.UTC()
+	}
+	return rec, nil
+}
+
+// errMatchNotFound is the store-side absence. It is contract.ErrMatchNotFound
+// so that the crawl worker can match it with errors.Is without the storage
+// layer importing the crawler.
+var errMatchNotFound = contract.ErrMatchNotFound
 
 const markMatchParsedSQL = `
 UPDATE matches SET status = $2, parsed_at = $3, error = NULL WHERE match_id = $1`
