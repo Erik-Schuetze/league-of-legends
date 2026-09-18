@@ -20,6 +20,35 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    # sha-5e08b23: the revision that opens the explorer on 50 rows instead of 100, so
+    #   the default /explore document fits the 300 KiB page-quality budget.
+    #   - measured before this change, with an exhaustive instrument rather than a
+    #     markup enumeration, the default /explore request was 1,281 B OVER the
+    #     307,200 B ceiling: 141,790 (document) + 10,645 (the _astro base CSS that
+    #     carries all six @font-face targets) + 1,755 (preload-helper module) + 157
+    #     (TableIsland module) + 334 (favicon.svg) + 153,800 (six woff2 faces) =
+    #     308,481 B = 301.25 KiB. This is the complete `resourceSize` sum and it
+    #     reproduces the perf lane's independently measured 308,481 B exactly.
+    #   - the 1,755 B term is /_astro/preload-helper.DJSjwBkS.js, which is
+    #     DYNAMICALLY imported and therefore appears in no href/src attribute. An
+    #     enumeration driven by the document's markup misses it and sums 306,726 B,
+    #     i.e. 474 B under the ceiling - which is how this defect read as a pass.
+    #     Rule: enumerate subresources from the browser's own request list.
+    #   - the field matters: `transferSize` for the same page is 178,559 B, so
+    #     reading the compressed field would report a 128,641 B margin on a page
+    #     that is over budget. The ceiling is a source-byte budget; read
+    #     `resourceSize`.
+    #   - why 50 and not 25: explorePerOptions is BOTH the GUI "Rows per page" list
+    #     and the URL allowlist (query.go MinPer/MaxPer), so the default must be a
+    #     member - only 25 and 50 comply - and both terms of the sum grow, with the
+    #     row term growing with the published dataset (900.9 B/row over 51,695 B of
+    #     chrome: 25 -> 240,910; 50 -> 263,504; 100 -> 308,481; 200 -> 398,705).
+    #     50 leaves 14.2% headroom where 100 had none.
+    #   - the exports are structurally untouched: ExploreExportJSON and
+    #     ExploreExportCSV read only .Patch from ParseQuery and never consume .Per,
+    #     so the window cannot move a published export byte.
+    #   - measured after: the default document is 96,813 B at ?per=50, and 74,219 B
+    #     at ?per=25. No route, indexability or data changes.
     # sha-11866c4: the revision that stops quoting the partition's withheld count as
     #   a matchup count.
     #   - every matchup page printed the document's `suppressed_cells` as `(513
@@ -168,7 +197,7 @@ metadata:
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:cee0f1032a533d5e23ec9c2a732db9d9c2b095f518e7268d45f76d6aebeef12d
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:69cba3bb6e5cbb326d38b62a59028ed2e4f37007a98c46abc79abe63a6241dd6
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
