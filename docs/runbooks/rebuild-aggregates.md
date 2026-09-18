@@ -73,11 +73,9 @@ listed survives every re-index; a stale partition can only be repointed away fro
 or overwritten in place. And a partition that is deleted while the manifest still
 advertises it makes the tier **fail closed**: every page route and `/readyz`
 answer `503` with `data-fault="artifact"` rather than serving the previous
-patch's numbers under the new one's label. Both behaviours are measured - with
-the commands, the timings and the served responses - in
-`docs/PATCH-ROLLOVER-EVIDENCE.md` (§10, §16.2), and
-`scripts/verify-patch-rollover.sh` reproduces the whole transition, including
-both, in a namespace of its own.
+patch's numbers under the new one's label. The first is a property of
+`internal/aggregate`'s index; the second is asserted by
+`TestMissingArtifactIs503WithAPage` in `internal/webtier/server_test.go`.
 
 ## Re-run the build
 
@@ -215,7 +213,7 @@ does not validate, and on a manifest that disagrees with the tree. Adding
   tier renders whatever is on disk, so a partition deleted or truncated under
   `v1/` is served as a fault - a page route and `/readyz` answer `503` with
   `data-fault="artifact"` rather than the previous patch's numbers under the new
-  one's label. Re-run the build (`docs/PATCH-ROLLOVER-EVIDENCE.md` §10, §16.2).
+  one's label. Re-run the build.
 
 ## Debris
 

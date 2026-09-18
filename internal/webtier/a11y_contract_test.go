@@ -10,10 +10,10 @@ import (
 	"testing"
 )
 
-// a11y_contract_test.go is the executable form of design-tokens.md §3: the eight
-// accessibility behaviours the ported design language must have and upstream did
-// not. §3 says "fix, do not inherit", so each item is asserted against the bytes
-// the tier actually serves -- not against a stylesheet in isolation -- because
+// a11y_contract_test.go is the executable form of the design layer's accessibility
+// contract: the eight accessibility behaviours the ported design language must have
+// and upstream did not. Each item is asserted against the bytes the tier serves
+// -- not against a stylesheet in isolation -- because
 // the interesting failures (a lost aria-current, an overflow clip that eats the
 // table, an h1 that became an h2) live in the join between markup and CSS.
 //
@@ -299,7 +299,7 @@ func mainBody(html string) string {
 	return ""
 }
 
-// The eight fixes. Order follows design-tokens.md §3.
+// The eight fixes, in the order the contract lists them.
 func a11yFixes() []a11yFix {
 	return []a11yFix{
 		{

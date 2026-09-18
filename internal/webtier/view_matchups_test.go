@@ -16,7 +16,7 @@ import (
 // stored: the demo tree holds 179 cells for its 28 champions, and the live
 // artifact holds one cell for its 164. Rendering the frame rather than the data
 // made the live page 2.7 MB of HTML against a 150 KiB ceiling
-// (scripts/perf/extract-lh.mjs), which is the defect these tests hold shut.
+// (measured out of band), which is the defect these tests hold shut.
 //
 // They are the only thing that does. The byte-parity gate that used to compare
 // this page against the reference build was retired with web/ (docs/contracts.md
@@ -612,9 +612,8 @@ func emptyOf(page string) string {
 	return page[start : start+end]
 }
 
-// The plan's HTML ceiling and the brief's target for the default view. They are
-// written as bytes because that is the unit the budget is stated in and the unit
-// the live harness measures (scripts/perf/extract-lh.mjs).
+// The page HTML ceiling, and the tighter target the default view is held to.
+// They are written as bytes because that is the unit the budget was measured in.
 const (
 	planHTMLBudget  = 150_000
 	defaultViewGoal = 100_000
@@ -626,8 +625,8 @@ const (
 // the grid, and a shape is not a budget - a page of published pairings costs 224 B
 // a cell where the same page of dashes costs 99 B, so the same 276 cells are 67 KB
 // or 27 KB depending on the artifact. Every query shape the route answers has to
-// come in under the plan's ceiling, and the default view - the one the harness
-// (scripts/perf/lighthouse-routes.sh) measures - under the brief's target for it.
+// come in under the plan's ceiling, and the default view - the one the budget
+// was measured on - under the target for it.
 // A filtered view is held to the plan's ceiling rather than the target: the target
 // is stated for the default view, and a complete row across the whole axis is a
 // deliberately larger answer than the window. The numbers here are the demo

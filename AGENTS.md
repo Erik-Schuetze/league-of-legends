@@ -33,15 +33,14 @@ it like this?" belongs somewhere else.
 | A decision with a rejected alternative behind it | `docs/decisions/ADR-nnn-*.md` |
 | What every datum comes from, and its legal basis | `docs/data-sources.md` |
 | Riot policy conformance and its evidence | `docs/compliance.md` |
-| Work deliberately deferred, with the context to pick it up later | `backlog.md` |
-| Verbose output from an agent run | `.agent-artifacts/` (gitignored) |
+| Scratch: tool downloads, captured pages, gate output | `.agent-artifacts/` (gitignored) |
 
 ## Frozen contracts
 
 `docs/contracts.md` is normative. It fixes the aggregate artifact shapes, the
-route table, the Go interfaces in `internal/contract`, the frontend component API
-and the image contract, because several agents write this project in parallel
-against interfaces they cannot see each other's code for.
+route table, the Go interfaces in `internal/contract` and the image contract,
+because the ingest, aggregate and serving tiers are written against them and
+cannot all be held in one head at once.
 
 **Changing anything in a frozen section requires an ADR first.** Not a
 "compatible" tweak, and not a rename that only looks local. If you believe a
@@ -75,17 +74,11 @@ verified on the strength of having read it carefully.
 If a tool cannot be made to run locally, say so explicitly rather than reporting a
 pass you did not observe. A false pass costs more than a known gap.
 
-## Scope and shared working tree
+## Scope
 
-Several agents edit this repository at once. Each path has an owner; the table is
-in `docs/contracts.md` section 6. Do not restructure another agent's files, and do
-not assume a file is yours because it looks inconsistent - check whether it is
-work in progress first.
-
-Things that are deliberately not part of the scaffold: crawler and aggregator
-logic beyond a compiling stub, `deploy/**` manifests (an infra agent owns those;
-this repository carries the Kustomize output and `homecluster` carries the ArgoCD
-`Application`), and any real Riot DTO field beyond what Match-V5 summaries carry.
+`deploy/**` holds the Kustomize output this repository owns; the ArgoCD
+`Application` lives in `homecluster`. The Riot DTO carries no field beyond what
+Match-V5 summaries need (see `docs/contracts.md` section 2).
 
 Never commit secrets. The Riot key is an environment variable; `deploy/*/secret.yaml`
 and `.env` are gitignored.

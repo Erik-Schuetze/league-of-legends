@@ -1,10 +1,10 @@
 # Contracts
 
-Everything on this page is normative and frozen. Three agents are writing this
-project against these interfaces at the same time and cannot see each other's
-code. A change to anything here is an interface change and requires an ADR in
-`docs/decisions/` before the code changes - not a quiet edit, and not a
-"compatible" tweak that turns out to be incompatible.
+Everything on this page is normative and frozen. It fixes the shapes two
+components written separately have to agree on, so a change to anything here is
+an interface change and requires an ADR in `docs/decisions/` before the code
+changes - not a quiet edit, and not a "compatible" tweak that turns out to be
+incompatible.
 
 The Go declarations in section 2 exist verbatim in `internal/contract`, and the
 Go structs behind section 1 exist verbatim in `internal/aggmodel`. This page
@@ -16,10 +16,14 @@ Sections:
 
 1. Aggregate artifact shapes and the route table
 2. Go interfaces
-3. Frontend component API
 4. `agg/v1` filesystem layout
 5. CI image contract
-6. Ownership map
+
+Sections 3 (frontend component API) and 6 (ownership map) were removed on
+2026-09-18: the Astro tree they described and the concurrent-agent arrangement
+they assigned paths for are both gone. The design authority is now the Go
+renderer in `internal/webtier` and its asset tree; the git history still carries
+both sections if the reasoning is ever wanted.
 
 ## 1. Aggregate artifact shapes and the route table
 
@@ -262,258 +266,6 @@ summaries carry: `championId`, `teamPosition`, `individualPosition`, `win`,
 `teams[].bans`, and the match metadata/goal fields. Nothing else may be added to
 the DTO without an ADR, because anything added is a field the aggregator will be
 tempted to read and the archive contract will then have to carry.
-
-## 3. Frontend component API
-
-**Retired 2026-09-17.** This section froze file paths, component names and props
-for the Astro tree in `web/`. That tree is deleted - the frontend is now the Go
-renderer in `internal/webtier`, whose templates are its component API, and whose
-design layer is the asset tree under `internal/webtier/assets/` - so the paths
-below name files that no longer exist. They are kept because they are the
-provenance of the port: `internal/webtier` was written as a port of these
-components, and the wording and layout decisions recorded here are the reason it
-renders what it does. Nothing here is binding on new code, and no path below may
-be recreated without an ADR.
-
-The data types (`Cell`, `TierList`, `Champion`, `Manifest`, `StaticChampion`,
-`Role`, `Tier`, `Bracket`, `Window`) are generated into `schema/agg.d.ts` by
-`make types`, which is owned by the contract owner; nobody edits it by hand.
-
-### `web/src/styles/tokens.css`
-
-A plain CSS file of custom properties, imported once by `BaseLayout.astro`. It
-declares exactly these names and no others at `:root`:
-
-```
---bg-color: #efdbbf;  --surface: #f1eae0;
---primary-color: #0b162a;  --accent-color: #1b4bc6;  --text-color: #242a2b;
---font-heading; --font-body; --font-mono;
---grid-line: rgba(27, 75, 202, 0.06);  --grid-size: 27px;
---border-width: 2px;  --shadow-offset-sm: 8px;  --shadow-offset-md: 12px;
---radius: 0;
-```
-
-`--surface` was `--bg-light` upstream: the design freeze renamed it
-(`internal/webtier/assets/css/DESIGN-FREEZE.md`), because the token is the raised
-surface fill and the served Go sheet is now the design authority. The name above
-is the frozen one; `web/src/styles/tokens.css` still spells it `--bg-light`, and
-`--fallback-bg-light` in the frozen sheet aliases it for that reason. (The
-retired `web/src/styles/tokens.css` is the file this paragraph quotes; it is
-history, not an input to the served sheet.)
-
-No border radius anywhere. The focus ring is `0 0 0 2px var(--accent-color)`.
-That is a `box-shadow` value: `outline: var(--focus-ring)` is silently dropped by
-CSS, so a component draws the ring as `outline: var(--border-width) solid
-var(--accent-color)` and only ever uses `--focus-ring` in a `box-shadow`. Inside
-a surface painted in `--primary-color` (the masthead, the footer) the ring
-recolours to `--accent-on-dark` (`#a6b2d7`, 8.58:1), because the accent is only
-2.47:1 there, below the 3:1 WCAG 2.2 SC 1.4.11 asks of a focus indicator. Both
-are declared in `global.css`; the thirteen names above are unchanged.
-Components read tokens and never hard-code a colour, so the whole surface can be
-re-themed in one file. The opt-in utility classes `global.css` adds on top of the
-frozen block (`.ds-container`, `.ds-panel`, `.ds-table-scroll`, `.ds-num`,
-`.ds-visually-hidden`, `.ds-navbar`, `.ds-on-dark`) are documented in
-`docs/design-system.md`; they widen no component's prop surface.
-
-### `web/src/layouts/BaseLayout.astro`
-
-```ts
-interface Props {
-  title: string;
-  description: string;
-  patch: string;
-  canonical?: string;
-  generatedAt?: string;   // ISO 8601, rendered by Footer
-  active?: string;        // pathname, for Nav's aria-current
-  noindex?: boolean;
-}
-```
-
-Renders `<html>`, imports `tokens.css`, renders `Nav` from `active`, the default
-slot, then `Footer` from `patch` and `generatedAt`. It performs no data fetching:
-every page passes already-loaded values.
-
-### `web/src/components/Nav.astro`
-
-```ts
-interface Props {
-  patch: string;
-  active?: string;
-  roles?: Role[];   // default: all five
-}
-```
-
-Renders the role links `/tier-list/<slug>` plus `/matchups/<slug>` and the patch
-label. Sets `aria-current="page"` where `active` matches.
-
-### `web/src/components/Footer.astro`
-
-```ts
-interface Props {
-  patch: string;
-  generatedAt?: string;
-  sourceWindow?: Window;
-}
-```
-
-Renders the data provenance line and links to `/about`, `/legal/terms`,
-`/legal/privacy` and `/disclaimer`. Those four links are the Riot compliance
-surface and are not removable by a page.
-
-### `web/src/components/Card.astro`
-
-```ts
-interface Props {
-  title: string;
-  href?: string;
-  tone?: 'default' | 'accent';   // default: 'default'
-  sampleN?: number;              // renders SampleSizeNotice when set
-}
-```
-
-Renders a bordered, hard-shadow surface. Uses the default slot as its body.
-When `href` is set the whole card is a single link; there is no nested
-interactive element inside it.
-
-### `web/src/components/DataTable.astro`
-
-```ts
-type CellValue = string | number | null;
-type Row = Record<string, CellValue>;
-
-interface Column {
-  key: string;
-  label: string;
-  align?: 'start' | 'end';       // default: 'start'
-  sortable?: boolean;            // default: false
-  format?: 'text' | 'percent' | 'integer' | 'decimal';
-  digits?: number;               // default: 2, used by 'decimal'
-}
-
-interface Props {
-  columns: Column[];
-  rows: Row[];
-  caption?: string;
-  initialSortKey?: string;
-  initialSortDir?: 'asc' | 'desc';   // default: 'desc'
-  emptyMessage?: string;             // default: 'No data for this selection.'
-  dense?: boolean;                   // default: false
-}
-```
-
-Server-renders a complete `<table>` in `initialSortKey` order, so the page is
-correct with JavaScript disabled. It emits no client script; sortable behaviour
-comes from `TableIsland`, which provides its own markup.
-
-### `web/src/components/TierBadge.astro`
-
-```ts
-interface Props { tier: Tier; n?: number; }
-```
-
-### `web/src/components/StatValue.astro`
-
-```ts
-interface Props {
-  value: number;
-  format?: 'percent' | 'integer' | 'decimal';   // default: 'percent'
-  digits?: number;                               // default: 2
-  label?: string;
-  n?: number;                                    // renders the sample size beside the value
-  unavailable?: boolean;                         // renders an em dash and the reason
-}
-```
-
-`unavailable` exists so a suppressed or absent statistic is shown as explicitly
-missing rather than as `0`.
-
-### `web/src/components/SampleSizeNotice.astro`
-
-```ts
-interface Props {
-  n: number;
-  minCellN: number;
-  suppressedCells?: number;
-  role?: Role;
-}
-```
-
-Renders the sample size, the threshold it is judged against, and - when
-`suppressedCells` is non-zero - a sentence saying how many cells were withheld
-for being too thin. Its output is a compliance requirement, not decoration.
-
-### `web/src/components/FilterBar.astro`
-
-```ts
-interface FilterOption { value: string; label: string; }
-
-interface FilterSpec {
-  name: string;                  // query parameter name
-  label: string;
-  options: FilterOption[];
-  selected?: string;
-}
-
-interface Props {
-  filters: FilterSpec[];
-  action?: string;               // default: current pathname
-  method?: 'get' | 'post';       // default: 'get'
-  hidden?: Record<string, string>;
-}
-```
-
-A plain `<form>` of `<select>` elements with a submit button. No JavaScript: a
-filter is a navigation, and a navigation is a URL that can be shared.
-
-### `web/src/components/BuildList.astro`
-
-```ts
-interface Props {
-  title: string;
-  builds: Build[];
-  kind: 'items' | 'runes' | 'spells';
-  limit?: number;                // default: 10
-  emptyMessage?: string;
-}
-```
-
-Renders `Build.label` with the icon row derived from `Build.key`, plus `n` and
-`win_rate` for each entry. Entries are already sorted by `n` descending by the
-aggregator; the component does not re-sort.
-
-### `web/src/components/TableIsland.astro`
-
-```ts
-interface Props {
-  tierList: TierList;
-  champions: StaticChampion[];
-  role?: Role;                   // undefined: every role in one table
-  initialSortKey?: string;       // default: 'tier'
-  initialSortDir?: 'asc' | 'desc';   // default: 'desc'
-}
-```
-
-The sortable, filterable tier list. It is the island the `/tier-list/<role>`
-routes hydrate with `client:visible`. It must accept its props as one
-serializable object, must not read `window` or `document` at module scope, and
-must render a complete server-side table that is correct before hydration.
-
-### `web/src/components/HeatmapIsland.astro`
-
-```ts
-interface Props {
-  matchups: Matchups;
-  champions: StaticChampion[];
-  role: Role;
-  minCellN: number;
-}
-```
-
-The champion-vs-champion explorer. Used by `/matchups/<role>` and by the matchup
-section of the champion page. Same island rules as `TableIsland`: serializable
-props, no module-scope DOM access, correct markup before hydration. Cells below
-`minCellN` are not present in `matchups.cells` and are rendered as unavailable,
-never as zero.
 
 ## 4. `agg/v1` filesystem layout
 
@@ -789,25 +541,10 @@ variant and its mutation control. It required the Go tier's rendered bytes to
 equal those of `web/dist` - the Astro build of the tree this tier replaced - and
 the served design layer had, deliberately and by recorded decision, diverged from
 that tree in three ways: the frozen CSS layer inlined into every document (14,178
-raw / 5,015 gzip bytes, `DESIGN-FREEZE.md` §"Selector budget"), the `--bg-light`
--> `--surface` rename recorded in section 3 above, and one added nav entry. A
+raw / 5,015 gzip bytes), the `--bg-light` -> `--surface` rename, and one added
+nav entry. A
 byte comparison against a retired tree cannot be a pass/fail gate for the tree
 that superseded it, so the gate was deleted rather than mirrored. On 2026-09-18
 the tree itself was deleted as well: the compliance gate above now scans the
 pages the running tier serves, nothing compares the two renderers any more, and
 the Go tier is the design authority.
-
-## 6. Ownership map
-
-| Path | Owner |
-| --- | --- |
-| `docs/**`, `sql/**`, `internal/aggmodel/**`, `internal/contract/**`, `internal/riot/dto.go`, root scaffolding | contract owner |
-| `internal/riot/**` (client), `internal/raw/**`, `internal/store/**`, `cmd/lolstats-ingest/**`, `internal/crawl/**` | ingest agent |
-| `cmd/lolstats-aggregate/**`, `internal/aggregator/**`, `internal/parquet/**` | aggregate agent |
-| `internal/webtier/assets/**` | design-system agent |
-| `internal/webtier/**` except `assets/**` and `*_test.go` | renderer owner |
-| `schema/**` | generated by `make types`; nobody edits it |
-| `deploy/**` | infra engineer; not written by the scaffold |
-
-A file that is not listed is owned by whoever needs it first, and adding a file
-is additive. Changing a path that is listed above is a contract change.
