@@ -818,22 +818,9 @@ func TestOpenRefusesToStartWithoutADSN(t *testing.T) {
 	}
 }
 
-func TestOpenFailsFastWhenTheDatabaseIsUnreachable(t *testing.T) {
-	// The whole point of pinging in Open is that a process which logs "ready"
-	// and only then discovers the database is wrong is a process whose readiness
-	// signal lied. Port 1 is reserved and never listening.
-	s, err := Open(context.Background(), Options{
-		DSN:         "postgres://nobody@127.0.0.1:1/nothing?sslmode=disable&connect_timeout=1",
-		ConnTimeout: 2 * time.Second,
-	})
-	if err == nil {
-		_ = s.Close()
-		t.Fatal("Open succeeded against a port that cannot be listening")
-	}
-	if !strings.Contains(err.Error(), "connect") {
-		t.Fatalf("error = %v, want it to name the connection failure", err)
-	}
-}
+// The startup connect against an unreachable database is covered in
+// connect_test.go: it retries for a bounded window and then gives up loudly,
+// which is the behaviour a single fail-fast test asserted the opposite of.
 
 func TestPingFailsOnceTheStoreIsClosed(t *testing.T) {
 	s, mock, _ := newTestStore(t, nil)

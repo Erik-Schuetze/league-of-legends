@@ -140,13 +140,20 @@ func fail(stderr io.Writer, sub string, err error) int {
 }
 
 // openStore connects the control plane.
-func openStore(ctx context.Context, cfg config.Config, metrics obs.MetricsRecorder) (*store.Store, error) {
+//
+// The logger is passed through because the first thing to fail in a cluster
+// event is this connect, and the retry it runs is only useful if the operator
+// can see it happening rather than watching a pod that looks stuck. The window
+// itself is the store's default: only the workload knows the budget it fits in,
+// and every caller here has minutes of it.
+func openStore(ctx context.Context, cfg config.Config, log *slog.Logger, metrics obs.MetricsRecorder) (*store.Store, error) {
 	return store.Open(ctx, store.Options{
 		DSN:         cfg.Postgres.DSN,
 		MaxConns:    int(cfg.Postgres.MaxConns),
 		ConnTimeout: cfg.Postgres.ConnTimeout,
 		Region:      cfg.Riot.Region,
 		Metrics:     metrics,
+		Logger:      log,
 	})
 }
 
@@ -359,7 +366,7 @@ func runWorker(args []string, stderr io.Writer) int {
 		}
 	}()
 
-	ctrl, err := openStore(ctx, cfg, metrics)
+	ctrl, err := openStore(ctx, cfg, log, metrics)
 	if err != nil {
 		return fail(stderr, "worker", err)
 	}
@@ -494,7 +501,7 @@ func runDiscoverSeeds(args []string, stderr io.Writer) int {
 		return fail(stderr, "discover-seeds", err)
 	}
 	defer func() { _ = archive.Close() }()
-	ctrl, err := openStore(ctx, cfg, metrics)
+	ctrl, err := openStore(ctx, cfg, log, metrics)
 	if err != nil {
 		return fail(stderr, "discover-seeds", err)
 	}
@@ -647,7 +654,7 @@ func runBackfill(args []string, stderr io.Writer) int {
 		return fail(stderr, "backfill", err)
 	}
 	defer func() { _ = archive.Close() }()
-	ctrl, err := openStore(ctx, cfg, metrics)
+	ctrl, err := openStore(ctx, cfg, log, metrics)
 	if err != nil {
 		return fail(stderr, "backfill", err)
 	}
@@ -746,7 +753,7 @@ func runMaintain(args []string, stderr io.Writer) int {
 	ctx, stop := signalContext()
 	defer stop()
 
-	ctrl, err := openStore(ctx, cfg, metrics)
+	ctrl, err := openStore(ctx, cfg, log, metrics)
 	if err != nil {
 		return fail(stderr, "maintain", err)
 	}

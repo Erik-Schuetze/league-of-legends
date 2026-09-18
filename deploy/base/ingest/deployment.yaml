@@ -139,12 +139,21 @@ spec:
           # Both probes hit the metrics listener, which is the only port the
           # worker opens. It is a real dependency: the process serves metrics
           # from the same goroutine that would be serving work.
+          #
+          # The startup budget is a pair with the store's startup connect
+          # window (store.defaultConnectWindow, 60s): the listener does not
+          # exist until the store has connected, so a kubelet that gives up
+          # before the window does kills the container at the moment the
+          # retry would have succeeded. 24 x 5s = 120s is the window plus room
+          # for opening the archive and building the client. Raising the
+          # window without raising this is a silent regression; see
+          # internal/store/connect.go.
           startupProbe:
             httpGet:
               path: /metrics
               port: metrics
             periodSeconds: 5
-            failureThreshold: 12
+            failureThreshold: 24
           readinessProbe:
             httpGet:
               path: /metrics
