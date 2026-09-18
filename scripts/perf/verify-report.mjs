@@ -559,12 +559,17 @@ checkTrue(
   missed.map((i) => `${i.url.split('/').pop()} ${i.resourceSize}`).join(' | '),
 );
 // The distinction the coordinator asked to be unmistakable to someone who reads only the table: §5's
-// own heading says which round is the edge round, and the §5.1 table is the one taken there.
+// own heading says which round is the edge round, and the §5.1 table is the one taken there. This
+// check *used to* require §5's row to say it was "not superseded" by the later rounds — which pinned
+// the inverted framing, presenting the oldest round (r1/r2, 17:15Z) as the current live state while
+// r4 (18:34Z, post-removal) was called a projection. Corrected: the round order is asserted, the row
+// must state r9 is the current state, and the retired phrasing must be gone from the document.
 checkTrue(
-  '§5 states in-table that §5.1 is its only edge measurement',
+  '§5 states in-table that §5.1 is its only edge measurement, and which round is current',
   doc.includes('§5.1\'s table is the only measurement in') &&
     doc.includes('against the public edge') &&
-    doc.includes('not** superseded by them'),
+    doc.includes('The current state is **r9**') &&
+    !doc.includes('superseded by them'),
 );
 
 // §11.8's invocation: the two inputs that make the round reproducible (the origin and the auth) and
@@ -676,16 +681,136 @@ checkTrue(
   row('total first-load ≤300 KB uncompressed').includes('**FAIL**') &&
     row('total first-load ≤300 KB uncompressed').includes('1013.3'),
 );
+// §5's row must keep the r1/r2 measurement as labelled history *and* state the current round. This
+// check used to demand the row call itself "not superseded" by the later rounds, which is the defect
+// the coordinator found: the row presented the OLDEST round as the present state and the newest
+// measurement as a projection. Corrected to assert the timestamps and the direction of travel.
+const firstLoadRow = row('total first-load ≤300 KB uncompressed');
 checkTrue(
-  '§5 first-load row still refuses the §11 projection',
-  row('total first-load ≤300 KB uncompressed').includes('not** superseded by them') ||
-    row('total first-load ≤300 KB uncompressed').includes('**not** superseded by them'),
-  row('total first-load ≤300 KB uncompressed').slice(0, 80),
+  '§5 first-load row states the current round and labels the r1/r2 figures as the "before" state',
+  firstLoadRow.includes('the current state is r9') &&
+    firstLoadRow.includes('before §11.2 removed the images') &&
+    firstLoadRow.includes('2026-09-17T17:15Z') &&
+    !firstLoadRow.includes('superseded'),
+  firstLoadRow.slice(0, 80),
 );
 checkTrue(
   '§5 HTML row keeps the later rounds that broke it',
   row('HTML ≤150 KB uncompressed').includes('164,502') && row('HTML ≤150 KB uncompressed').includes('2,768,758'),
 );
+
+// --------------------------------------------- §5.2 / the round ordering: the correction, guarded
+// The coordinator's finding was a direction-of-travel inversion: §5 presented r1/r2 (17:15Z — the
+// OLDEST round, taken before §11.2 removed the images) as the current live state, and demoted r4
+// (18:34Z, a measurement) to "a projection". A correction that is not itself guarded can be
+// re-inverted by the next edit, so the ordering is derived from the reports' own `fetchTime` rather
+// than trusted from the prose, and the document is required to agree with it.
+const section52 = sectionOf('### 5.2 ');
+checkTrue('§5.2 exists and is the correction section', section52.length > 800, `${section52.length} chars`);
+
+const roundTimes = (round) => {
+  const p = `${EV}/lh-summary-r${round}.json`;
+  if (!existsSync(p)) return [];
+  return json(p).map((r) => json(r.file).fetchTime);
+};
+const newest = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+  .flatMap((k) => roundTimes(k))
+  .sort()
+  .at(-1);
+checkTrue(
+  'the newest committed round by fetchTime is r9, which is what §5 calls the current state',
+  /^2026-09-18T02:4/.test(newest),
+  `${newest} (r1/r2 open at ${roundTimes('1').sort()[0]})`,
+);
+checkTrue(
+  '§5.2 states the round order by fetchTime and names the growth it is about',
+  section52.includes('r1/r2') &&
+    section52.includes('r4') &&
+    section52.includes('r9') &&
+    section52.includes('fetchTime') &&
+    section52.includes('moving target'),
+);
+// The document bytes §5.2 uses for the growth argument are the reports' own figures for one route.
+const docBytes = (round, route) => {
+  const p = `${EV}/lh-summary-r${round}.json`;
+  if (!existsSync(p)) return NaN;
+  return json(p).find((r) => r.route === route)?.weight?.htmlRawBytes ?? NaN;
+};
+const growth = [
+  docBytes('4', '/tier-list/top/'),
+  docBytes('5', '/tier-list/top/'),
+  docBytes('9', '/tier-list/top/'),
+];
+checkTrue(
+  '§5.2 quotes the document growth with the committed rounds\' own bytes',
+  growth.every((b) => Number.isFinite(b)) &&
+    growth[0] < growth[1] &&
+    growth[1] < growth[2] &&
+    growth.every((b) => section52.includes(thousands(b))),
+  growth.join(' -> '),
+);
+checkTrue(
+  '§5.2 names /explore pagination as the lever and keeps font subsetting closed',
+  section52.includes('pagination') &&
+    section52.includes('Font subsetting is closed') &&
+    section52.includes('150.2 KiB on every route'),
+);
+checkTrue(
+  '§5.2 states the instrument gap that makes the /explore verdict FAIL rather than PASS',
+  section52.includes('299.2 KiB') && section52.includes('301.3 KiB') && section52.includes('2,246 B'),
+);
+// §6.1's second table is the "after" leg — r4, the first round taken after the images were removed —
+// and it is what the correction added to §6.1. Derived here so the "after" rows cannot be edited to
+// numbers the reports do not hold.
+const r4after = ['/tier-list/top/', '/tier-list/mid/', '/champions/ahri/top/', '/champions/ahri/mid/'].map(
+  (route) => {
+    const rec = json(`${EV}/lh-summary-r4.json`).find((r) => r.route === route);
+    const raw = json(rec.file).audits['network-requests'].details.items ?? [];
+    const images = raw.filter((i) => i.resourceType === 'Image');
+    return {
+      route,
+      total: rec.weight.firstLoadBytes,
+      count: images.length,
+      imageBytes: images.reduce((n, i) => n + (i.resourceSize || 0), 0),
+    };
+  },
+);
+for (const r of r4after) {
+  checkTrue(
+    `§6.1's r4 "after" row for ${r.route} matches the r4 report`,
+    section61.includes(`| \`${r.route}\` | ${r.count} |`) &&
+      section61.includes(`${kib(r.total)} KiB`) &&
+      (r.count === 0 || section61.includes(`${kib(r.imageBytes)} KiB`)),
+    `${r.count} image(s) / ${kib(r.imageBytes)} KiB / ${kib(r.total)} KiB total`,
+  );
+}
+// §5's row now states a range per post-removal round instead of one blurred range, because the
+// rounds are not comparable: r4 and r5 still carried the pre-§11.9 grid. Each range is derived here.
+const rangeOf = (round) => {
+  const p = `${EV}/lh-summary-r${round}.json`;
+  if (!existsSync(p)) return null;
+  const b = json(p).map((r) => r.weight.firstLoadBytes).sort((x, y) => x - y);
+  return [b[0], b[b.length - 1]];
+};
+const r4range = rangeOf('4');
+const r5range = rangeOf('5');
+const r6range = rangeOf('6');
+const r8range = rangeOf('8');
+const r7range = rangeOf('7');
+const r5max = json(`${EV}/lh-summary-r5.json`).reduce((a, b) => (b.weight.firstLoadBytes > a.weight.firstLoadBytes ? b : a));
+checkTrue(
+  '§5 first-load row\'s per-round ranges are the reports\' own bounds',
+  firstLoadRow.includes(`${kib(r4range[0])}–${kib(r4range[1])} KiB`) &&
+    firstLoadRow.includes(`${kib(r5range[0])}–${kib(r5range[1])} KiB`) &&
+    firstLoadRow.includes(`${kib(Math.min(r6range[0], r8range[0]))}–${kib(Math.max(r6range[1], r8range[1]))} KiB`) &&
+    firstLoadRow.includes(`${kib(r7range[0])}–${kib(r7range[1])} KiB`) &&
+    firstLoadRow.includes(thousands(r5max.weight.firstLoadBytes)),
+  `r4 ${kib(r4range[0])}-${kib(r4range[1])} r5 ${kib(r5range[0])}-${kib(r5range[1])} r7 ${kib(r7range[0])}-${kib(r7range[1])} r5max ${r5max.route} ${r5max.weight.firstLoadBytes}`,
+);
+// The retired framing must be gone from the document, not merely contradicted somewhere later: the
+// DoD is that `grep -n 'not superseded' docs/PERF-EVIDENCE.md` cannot find a stale present-tense
+// claim sitting next to the 1013.3 KiB figure.
+checkTrue('the retired "not superseded" framing is gone from the report', !/not\*\* superseded|not superseded/.test(doc));
 checkTrue(
   '§5 HTML row conditions its PASS on the deploying image, not on a projection',
   row('HTML ≤150 KB uncompressed').includes('once the image carrying §11.9 is deployed') &&
