@@ -555,7 +555,7 @@ func (r *Renderer) ExplorePage(values url.Values, interactive bool) (*Page, erro
 	page := &Page{
 		Title:         title,
 		Description:   exploreDescription(snap),
-		CanonicalPath: path + "/",
+		CanonicalPath: CanonicalPath(path),
 		Active:        path,
 		Partition:     snap.Partition,
 		Noindex:       snap.Partition == nil,

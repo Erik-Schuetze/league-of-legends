@@ -458,7 +458,7 @@ func (r *Renderer) championPage(slug string, roleSlug string) (*Page, error) {
 	}
 	partition := snap.Partition
 	if role == nil {
-		page.CanonicalPath = "/champions/" + champion.Slug + "/"
+		page.CanonicalPath = CanonicalPath("/champions/" + champion.Slug)
 		page.Active = "/champions/" + champion.Slug
 		page.Title = champion.Name + " statistics - League of Legends - " + SiteName
 		page.Description = champion.Name + " statistics are not published yet: no aggregate snapshot exists for " +
@@ -472,7 +472,7 @@ func (r *Renderer) championPage(slug string, roleSlug string) (*Page, error) {
 	} else {
 		label := RoleLabel(*role)
 		slug := RoleSlugString(*role)
-		page.CanonicalPath = "/champions/" + champion.Slug + "/" + slug + "/"
+		page.CanonicalPath = CanonicalPath("/champions/" + champion.Slug + "/" + slug)
 		page.Active = "/champions/" + champion.Slug + "/" + slug
 		page.Title = champion.Name + " " + label + " statistics - League of Legends - " + SiteName
 		page.Description = champion.Name + " " + strings.ToLower(label) + " statistics are not published yet: no " +

@@ -1,7 +1,10 @@
 package webtier
 
 import (
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -66,7 +69,9 @@ func servedRoutes(t *testing.T, site *Site) []copyRoute {
 }
 
 // sitemapPaths reads the <loc> elements out of /sitemap.xml and returns them as
-// site-relative paths, which is the form the routes are served under.
+// site-relative paths in canonical form, which is the form the pages address
+// themselves by and the form the route names in servedRoutes are normalised to
+// before they are compared.
 func sitemapPaths(t *testing.T, body string) []string {
 	t.Helper()
 
@@ -82,7 +87,7 @@ func sitemapPaths(t *testing.T, body string) []string {
 		if path == "" {
 			path = "/"
 		}
-		paths = append(paths, path)
+		paths = append(paths, CanonicalPath(path))
 	}
 	return paths
 }
@@ -124,12 +129,12 @@ func TestSitemapAdvertisesExactlyTheRoutesThatAskToBeIndexed(t *testing.T) {
 			routes := servedRoutes(t, site)
 			served := map[string]bool{}
 			for _, route := range routes {
-				served[route.path] = true
+				served[CanonicalPath(route.path)] = true
 			}
 
 			listed, omitted, faulted := 0, 0, 0
 			for _, route := range routes {
-				inSitemap := advertised[route.path]
+				inSitemap := advertised[CanonicalPath(route.path)]
 				if inSitemap {
 					listed++
 				} else {
@@ -201,7 +206,7 @@ func TestSitemapAdvertisesExactlyTheRoutesThatAskToBeIndexed(t *testing.T) {
 					t.Errorf("the %s posture has no snapshot, yet /sitemap.xml advertises %d route(s), want the %d prose routes",
 						posture.name, len(advertised), len(proseRoutes))
 				}
-				if advertised["/explore"] {
+				if advertised[CanonicalPath("/explore")] {
 					t.Errorf("the %s posture has no snapshot, so /explore asks not to be indexed, yet /sitemap.xml advertises it",
 						posture.name)
 				}
@@ -218,11 +223,270 @@ func TestSitemapAdvertisesExactlyTheRoutesThatAskToBeIndexed(t *testing.T) {
 			// advertised. /explore is the route this file's own regression lost,
 			// so it is named here rather than left to the sweep.
 			for _, path := range []string{"/explore", "/tier-list/top", "/matchups/top"} {
-				if !advertised[path] {
+				if !advertised[CanonicalPath(path)] {
 					t.Errorf("%s is an indexable page of statistics in the %s posture, but /sitemap.xml does not advertise it",
 						path, posture.name)
 				}
 			}
 		})
+	}
+}
+
+// The sitemap's <loc> entries are absolute URLs under DefaultSiteURL, built from
+// the path CanonicalPath produced for the route.
+func sitemapLocs(t *testing.T, body string) []string {
+	t.Helper()
+
+	parts := strings.Split(body, "<loc>")
+	locs := make([]string, 0, len(parts))
+	for _, part := range parts[1:] {
+		end := strings.Index(part, "</loc>")
+		if end < 0 {
+			t.Fatalf("sitemap has a <loc> with no closing tag: %s", firstLine(body))
+		}
+		locs = append(locs, strings.TrimSpace(part[:end]))
+	}
+	return locs
+}
+
+// canonicalOf reads the rel=canonical the page declares as its own address. An
+// empty result means the page declares none, which the check below treats as a
+// disagreement rather than as agreement.
+func canonicalOf(body string) string {
+	const marker = `<link rel="canonical" href="`
+	start := strings.Index(body, marker)
+	if start < 0 {
+		return ""
+	}
+	rest := body[start+len(marker):]
+	end := strings.Index(rest, `"`)
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
+}
+
+// locFetch is one fetch of one advertised URL: the status it answered with, how
+// many redirects it took to get there, and the canonical the page claims.
+type locFetch func(loc string) (status int, redirects int, canonical string, err error)
+
+// locFaults is the whole check. It is a function returning the reasons a
+// sitemap's promise fails to hold rather than a chain of assertions so that the
+// controls at the bottom of this file can run the identical logic over inputs
+// that must be rejected. Without that, "the check passes" would only mean "the
+// check is not looking": this file's own subject shipped for months with every
+// entry pointing at a URL that was not the canonical of the page behind it, and
+// a check that cannot say so is not evidence.
+//
+// The three things asserted of every entry are the three clauses of the
+// promise: the URL is at the site's canonical shape, a crawler reaches the page
+// in one request without being redirected first, and the page agrees that is
+// where it lives.
+func locFaults(locs []string, fetch locFetch) []string {
+	if len(locs) == 0 {
+		return []string{"the sitemap lists no <loc> at all, so it promises a crawler nothing and satisfies that trivially"}
+	}
+
+	var faults []string
+	for _, loc := range locs {
+		if !strings.HasPrefix(loc, DefaultSiteURL+"/") {
+			faults = append(faults, loc+" is not an absolute URL under "+DefaultSiteURL)
+			continue
+		}
+		if loc != DefaultSiteURL+"/" && !strings.HasSuffix(loc, "/") {
+			faults = append(faults, loc+" is not in the site's canonical shape, which ends in /")
+		}
+
+		status, redirects, canonical, err := fetch(loc)
+		if err != nil {
+			faults = append(faults, loc+": "+err.Error())
+			continue
+		}
+		if redirects != 0 {
+			faults = append(faults, fmt.Sprintf("%s took %d redirect(s) to arrive, so the sitemap advertises a URL that is not served there", loc, redirects))
+		}
+		if status != http.StatusOK {
+			faults = append(faults, fmt.Sprintf("%s -> %d, so the sitemap promises a crawler a page it cannot fetch", loc, status))
+			continue
+		}
+		if canonical != loc {
+			faults = append(faults, fmt.Sprintf("%s answers with rel=canonical %q, so the sitemap advertises a URL that is not the canonical of the page it points at", loc, canonical))
+		}
+	}
+	return faults
+}
+
+// locFetcherFor fetches advertised URLs from a test server. It counts redirects
+// instead of refusing them, so a redirecting entry is reported as the defect it
+// is rather than being followed silently into a 200 and read as agreement.
+func locFetcherFor(t *testing.T, live *httptest.Server) locFetch {
+	t.Helper()
+
+	return func(loc string) (int, int, string, error) {
+		path := strings.TrimPrefix(loc, DefaultSiteURL)
+		if path == "" {
+			path = "/"
+		}
+
+		redirects := 0
+		client := *live.Client()
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			redirects++
+			return nil
+		}
+
+		res, err := client.Get(live.URL + path)
+		if err != nil {
+			return 0, redirects, "", err
+		}
+		defer res.Body.Close()
+
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return 0, redirects, "", err
+		}
+		return res.StatusCode, redirects, canonicalOf(string(body)), nil
+	}
+}
+
+// TestSitemapEntriesAreTheCanonicalURLOfThePageTheyPointAt is the invariant.
+//
+// The defect it was written for: every page declared rel=canonical with the
+// trailing slash, while every one of the sitemap's 448 <loc> entries named the
+// bare path - and, on the tier that served a redirect there, arriving at the
+// advertised URL took a 308 before the crawler saw the page. The page said one
+// address, the sitemap said another, and nothing compared them.
+//
+// It is run in all three postures because the shape of a URL is the one claim
+// in the sitemap that must not vary with the snapshot: a route that is canonical
+// in the preview posture is canonical in the live one.
+func TestSitemapEntriesAreTheCanonicalURLOfThePageTheyPointAt(t *testing.T) {
+	t.Parallel()
+
+	liveRoot, _, _, _, _, _, _ := republishedSnapshot(t)
+	postures := []struct {
+		name string
+		opts Options
+	}{
+		{name: "demo", opts: fixtureOptions()},
+		{name: "live", opts: Options{AggRoot: liveRoot, FixturesMode: FixturesOff, DataDir: fixtureDataDir()}},
+		{name: "no-data", opts: Options{AggRoot: t.TempDir(), FixturesMode: FixturesOff, DataDir: fixtureDataDir()}},
+	}
+
+	for _, posture := range postures {
+		t.Run(posture.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, live := newTestServer(t, posture.opts)
+
+			feed := get(t, live, "/sitemap.xml")
+			if feed.status != http.StatusOK {
+				t.Fatalf("GET /sitemap.xml in the %s posture -> %d, want 200", posture.name, feed.status)
+			}
+
+			locs := sitemapLocs(t, feed.text())
+			if len(locs) == 0 {
+				t.Fatalf("the sitemap in the %s posture lists no <loc>, so this check has nothing to compare", posture.name)
+			}
+
+			for _, fault := range locFaults(locs, locFetcherFor(t, live)) {
+				t.Errorf("%s posture: %s", posture.name, fault)
+			}
+
+			// The trailing-slash form is the one asserted above, so say which
+			// shape was chosen rather than leaving it implied by the sweeps.
+			for _, path := range sitemapPaths(t, feed.text()) {
+				if path != "/" && !strings.HasSuffix(path, "/") {
+					t.Errorf("the sitemap in the %s posture lists %s, which is not the canonical shape", posture.name, path)
+				}
+			}
+		})
+	}
+}
+
+// TestSitemapCanonicalCheckCanFail is the check's own control, and it is the
+// reason the test above is evidence. Each case is an input the check must
+// reject; if any of them came back clean, TestSitemapEntriesAreTheCanonicalURLOf
+// thePageTheyPointAt would be reporting on something other than what it claims.
+func TestSitemapCanonicalCheckCanFail(t *testing.T) {
+	t.Parallel()
+
+	_, live := newTestServer(t, fixtureOptions())
+	fetch := locFetcherFor(t, live)
+
+	cases := []struct {
+		name   string
+		locs   []string
+		want   string
+		reason string
+		fetch  locFetch
+	}{
+		{
+			name:   "a sitemap with no loc entries",
+			locs:   nil,
+			want:   "no <loc>",
+			reason: "an empty sitemap must fail, or an empty sitemap would pass",
+		},
+		{
+			name:   "a loc that does not exist",
+			locs:   []string{DefaultSiteURL + "/no-such-route-abcdefgh/"},
+			want:   "404",
+			reason: "a 404ing entry must fail, or a sitemap could advertise anything",
+		},
+		{
+			name:   "the bare-path shape this tier used to emit",
+			locs:   []string{DefaultSiteURL + "/about"},
+			want:   "canonical shape",
+			reason: "the shape of the defect must fail, or this check cannot see the defect it was written for",
+		},
+		{
+			name:   "a loc that redirects before it answers",
+			locs:   []string{DefaultSiteURL + "/about"},
+			want:   "redirect",
+			reason: "counting redirects is only worth it if a redirect is a fault",
+			fetch: func(string) (int, int, string, error) {
+				// This tier redirects nothing: it serves /about and /about/ as
+				// 200 so a pre-cutover URL keeps working, which is the property
+				// that makes the cutover non-breaking. A redirecting entry
+				// therefore has to be simulated to show the counter is wired at
+				// all - it is the one fault below the tier cannot currently
+				// produce for real.
+				return http.StatusOK, 1, DefaultSiteURL + "/about", nil
+			},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := fetch
+			if testCase.fetch != nil {
+				f = testCase.fetch
+			}
+
+			faults := locFaults(testCase.locs, f)
+			if len(faults) == 0 {
+				t.Fatalf("the check accepted %s: %s", testCase.name, testCase.reason)
+			}
+			joined := strings.Join(faults, "\n")
+			if !strings.Contains(joined, testCase.want) {
+				t.Fatalf("the check rejected %s for the wrong reason; want a fault mentioning %q, got:\n%s",
+					testCase.name, testCase.want, joined)
+			}
+		})
+	}
+
+	// A loc whose page claims a different canonical cannot be produced from a
+	// working tier, so it is the one case driven by a stub: the comparison
+	// itself, with the fetch taken out of the way.
+	faults := locFaults([]string{DefaultSiteURL + "/about/"}, func(string) (int, int, string, error) {
+		return http.StatusOK, 0, DefaultSiteURL + "/tier-list/mid/", nil
+	})
+	if len(faults) == 0 {
+		t.Fatal("the check accepted an entry whose page declares a different canonical, so its central comparison does not run")
+	}
+	if !strings.Contains(strings.Join(faults, "\n"), "not the canonical of the page it points at") {
+		t.Fatalf("the check rejected a disagreeing canonical for the wrong reason:\n%s", strings.Join(faults, "\n"))
 	}
 }

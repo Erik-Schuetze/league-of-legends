@@ -48,7 +48,7 @@ func (r *Renderer) HomePage() (*Page, error) {
 	return &Page{
 		Title:         title,
 		Description:   description,
-		CanonicalPath: "/",
+		CanonicalPath: CanonicalPath("/"),
 		Active:        "/",
 		Body:          body,
 		JSONLD:        jsonld,

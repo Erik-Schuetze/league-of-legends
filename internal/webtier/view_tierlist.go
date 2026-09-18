@@ -269,7 +269,7 @@ func (r *Renderer) tierListPage(role aggmodel.Role, patch string, query Query, i
 	page := &Page{
 		Title:         title,
 		Description:   tierListDescription(label, titlePatch, archived, snap),
-		CanonicalPath: path + "/",
+		CanonicalPath: CanonicalPath(path),
 		Active:        path,
 		Partition:     snap.Partition,
 		Noindex:       snap.Partition == nil,

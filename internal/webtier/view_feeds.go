@@ -65,16 +65,24 @@ func (r *Renderer) RouteList() ([]Route, error) {
 // Nothing here is a copy of what a page does. That is the point: the earlier
 // version of this function appended every champion and every champion/role route
 // whatever the pages said, and the invariant was only in the comment above.
+//
+// The paths below are written bare and normalised through CanonicalPath, the
+// same function every page builder uses to name itself. The sitemap used to emit
+// the bare path while every page declared the trailing-slash form as its
+// rel=canonical, so all 448 entries advertised a URL that was not the canonical
+// of the page behind it - and on the tier that redirected, not the URL that
+// answered either. The shape of a URL is not a per-page decision, so it is
+// settled in one place.
 func routeList(site *Site) ([]Route, error) {
 	lastmod := ""
 	if generated := site.ManifestGeneratedAt(); len(generated) >= 10 {
 		lastmod = generated[:10]
 	}
 	dataRoute := func(path string, priority float64) Route {
-		return Route{Path: path, Lastmod: lastmod, Priority: fixed1(priority), Changefreq: "daily"}
+		return Route{Path: CanonicalPath(path), Lastmod: lastmod, Priority: fixed1(priority), Changefreq: "daily"}
 	}
 	page := func(path string, priority float64) Route {
-		return Route{Path: path, Priority: fixed1(priority), Changefreq: "monthly"}
+		return Route{Path: CanonicalPath(path), Priority: fixed1(priority), Changefreq: "monthly"}
 	}
 
 	routes := []Route{
