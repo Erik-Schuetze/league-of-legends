@@ -167,7 +167,7 @@ and the site volume are mounts. The runtime image is distroless and nonroot.
 ## What is deliberately not here
 
 No query-serving database, no request-time aggregation, no CDN by default, no
-message broker, no workflow engine, no tracing, and no deployment manifests in
-the scaffold - the Kustomize output under `deploy/` is an infra agent's, and the
-ArgoCD `Application` that reconciles it lives in the `homecluster` repository
-(ADR-004).
+message broker, no workflow engine, and no tracing. The Kustomize output is in
+`deploy/` in this repository and is the single source of truth for the cluster
+(`deploy/README.md`); the ArgoCD `Application` that reconciles it lives in the
+`homecluster` repository (ADR-004).

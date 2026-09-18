@@ -15,8 +15,10 @@ import (
 // layout) and from this embedded copy otherwise, which is what makes the
 // deployed binary self-contained: a container has no checkout, and a build row
 // whose item names were silently missing would be a worse outcome than a larger
-// binary. The copies are byte-identical to projection/*.json and
-// TestEmbeddedProjectionsMatchTheRepository fails when they drift.
+// binary. The copies are byte-identical to projection/*.json today, and
+// **nothing tests that they stay that way**: an earlier version of this comment
+// named a TestEmbeddedProjectionsMatchTheRepository that does not exist, and
+// docs/compliance.md records the absence. Correct both copies together.
 //
 //go:embed data
 var checkedInFS embed.FS
@@ -27,9 +29,11 @@ const (
 	spellsDataIn = "spells.json"
 )
 
-// regenerateHint is build-lookup.ts's REGENERATE. The projection is generated,
-// so the error text names the command that regenerates it.
-const regenerateHint = `Run "npm run data:champions" to regenerate it from Data Dragon.`
+// regenerateHint is the remedy appended to a projection fault. There is no
+// generator in this repository: the files are checked in from Data Dragon, and
+// the deployed binary reads this package's embedded copy, so the two have to be
+// corrected together.
+const regenerateHint = "Re-fetch it from Data Dragon and keep internal/webtier/data/ byte-identical to projection/."
 
 // checkedInData reads one checked-in projection and reports where it came from,
 // so an error can name the file that is wrong rather than a directory.

@@ -46,10 +46,46 @@ short. "Breaking" means something that used to work no longer does.
   retarget commits landed directly after the deletion rather than before it, so
   CI was red for that interval; both commits are recorded on 2026-09-18. No Node
   toolchain is required to build, test or publish this repository any more.
+- `internal/webtier/templates/pages/{about,privacy,terms}.body.tmpl` and
+  `internal/webtier/gen_body_templates.py` - the reference page bodies and the
+  one-shot porting script that produced the Go templates from the Astro build.
+  The port is committed (`about.tmpl`, `privacy.tmpl`, `terms.tmpl` are what is
+  served) and the input tree `web/dist` is gone, so nothing could re-run it.
+  `docs/compliance.md` cited the reference bodies as its evidence for the legal
+  pages; it now cites the templates that are actually served.
 - `make web-install`, `web-build`, `web-deps` and `web-dist`. The gate's corpus
   is captured from a running tier by `make served-pages`; `make compliance`
   depends on it. `make compliance-served` is kept as an alias of `make
   compliance`, because there is one corpus now instead of two.
+
+### Changed
+
+- Documents that described the deleted static tier as live were corrected on
+  2026-09-18, without a behaviour change: the README no longer calls the
+  pipeline a scaffold, `CHANGELOG.md`'s own notes no longer say the ingest and
+  aggregate subcommands exit 3, `docs/architecture.md` no longer places the
+  deployment manifests outside this repository,
+  `docs/runbooks/rebuild-aggregates.md` describes the one-step chain the tier
+  actually has instead of the `site-build` render that no longer exists,
+  `deploy/base/config.yaml` describes `LOLSTATS_AGG_FIXTURES` as the Go tier
+  reads it (including that the public tier forces `off` in its own `env`), and
+  the Data Dragon projection fault in `internal/webtier/data.go` names a remedy
+  that exists - there is no `package.json` in this repository, so the `npm run
+  data:champions` it used to print could not be run.
+- The documents and comments that still described the retired static tier as
+  live were corrected on 2026-09-18, again without a behaviour change.
+  `docs/runbooks/site-integrity.md` was deleted - it was 324 lines of
+  instructions for a Caddy and a `site-build` job that no longer exist - and the
+  `site-build`/`caddyfile.yaml`/`astro.config.mjs` citations behind the compliance
+  and data-source evidence rows now point at the Go tier's own code.
+  `docs/data-sources.md` keeps its 2026-09-17 serving measurements but marks them
+  retired rather than presenting them as the deployed posture. Two statements
+  about the tier were simply wrong and are now right: it falls back to
+  `DefaultSiteURL` instead of refusing a reserved hostname, and the deployment
+  does declare `LOLSTATS_SITE_URL`. The served `/about` page no longer names
+  `web/scripts/fetch-ddragon.mjs`, and `internal/webtier/data.go` no longer claims
+  a `TestEmbeddedProjectionsMatchTheRepository` drift test that does not exist
+  (the two projection copies are byte-equal; nothing tests that they stay so).
 
 ### Fixed
 
@@ -367,8 +403,7 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Notes
 
-- The ingest `worker` subcommand starts, serves metrics and shuts down cleanly,
-  but the crawl loop is not implemented. `discover-seeds`, `backfill` and
-  `maintain` exit 3 with a not-implemented notice.
-- No aggregation logic exists yet, so `lolstats-aggregate` exits 3 for every
-  subcommand.
+- Every subcommand of `lolstats-ingest` and `lolstats-aggregate` is implemented.
+  The scaffold's placeholder exits were removed as the crawl loop, the ingest
+  jobs and the DuckDB build step landed; the entries above record those
+  changes.

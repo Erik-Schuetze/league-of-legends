@@ -31,14 +31,12 @@ import (
 
 // The environment this command reads on top of the data layer's own variables.
 const (
-	// envRiotToken is the variable the reference build reads for the same
-	// purpose (webtier.RiotTokenEnv): the site's astro.config.mjs publishes
-	// dist/riot.txt when and only when it is set, and the paragraphs that
-	// explain an unverified site read the same variable, so the two
-	// implementations must not disagree about whether the site is verified.
-	// Unset means /riot.txt is not published at all, which is answered as a
-	// 404: a 200 with no token would assert a verification that has not
-	// happened.
+	// envRiotToken is the variable that decides whether /riot.txt is published at
+	// all (webtier.RiotTokenEnv): the tier serves the token at /riot.txt when it
+	// is set and answers 404 when it is not, and the paragraphs that explain an
+	// unverified site read the same variable, so the route and the prose cannot
+	// disagree about whether the site is verified. A 200 with no token would
+	// assert a verification that has not happened.
 	envRiotToken = webtier.RiotTokenEnv // #nosec G101 -- an environment variable name, not a credential value
 	// envRiotTokenFile is the mounted-Secret form of the same value. The Secret
 	// is read from the file, never from the environment.

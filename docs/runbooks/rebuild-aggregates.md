@@ -1,20 +1,22 @@
-# Runbook: rebuild the aggregates (and the site from them)
+# Runbook: rebuild the aggregates
 
-Covers the derived trees on the `lolstats-data` volume: `LOLSTATS_AGG_ROOT`
-(`/var/lib/lolstats/agg`) and, because a rebuild is not finished until the site
-serves it, `site/`. The control plane has its own runbook
-(`restore-postgres.md`) and the archive has its own (`restore-raw.md`).
+Covers the derived tree on the `lolstats-data` volume: `LOLSTATS_AGG_ROOT`
+(`/var/lib/lolstats/agg`). There is no second tree - the tier renders pages from
+this one at request time, so a build that publishes is a build that is served.
+The control plane has its own runbook (`restore-postgres.md`) and the archive has
+its own (`restore-raw.md`).
 
-The chain is three steps and no workflow engine:
+The chain is one step and no workflow engine:
 
 | when | job | reads | writes |
 | --- | --- | --- | --- |
 | 01:00 | `lolstats-aggregate` (`lolstats-aggregate build`) | `raw/` | `agg/v1/**`, `agg/v1/manifest.json` |
-| 03:40 | `site-build` (`npm run build`) | `agg/` | `site/` |
-| always | `lolstats-web` (Caddy) | `site/` | - |
+| always | `lolstats-web` | `agg/v1` | pages, rendered per request |
 
-The ordering is expressed as ordering in the night, not as a dependency: the
-aggregate job is bounded by `activeDeadlineSeconds: 7200`, well below 03:40.
+Nothing renders ahead of the request. The tier reads the manifest and the
+partition it names on each request, so the number a reader sees is the number the
+last successful build published, and a build that fails to publish changes
+nothing.
 
 ## When to use it
 
@@ -98,21 +100,22 @@ delete it when you are done, or let the TTL do it.
 Its log is the build's own output. The numbers it reports are also written to the
 `build_runs` table, which is what the alerts and the verification below read.
 
-## Then rebuild the site
+## Then check that it is being served
 
-The aggregate tree is not served; `site/` is. If the aggregate job was the only
-thing that ran, the web tier is still serving the previous render.
+There is nothing to rebuild after the aggregate job: the tier reads the tree it
+just published. What can still be wrong is the tier's own copy of a page, which
+it caches for up to 60 seconds.
 
 ```
-kubectl -n lolstats create job site-build-manual --from=cronjob/site-build
-kubectl -n lolstats logs -f job/site-build-manual
+sh scripts/verify-serving.sh https://lol.erik-schuetze.dev
 ```
 
-`site-build` renders into `/site/dist`, copies that to
-`/var/lib/lolstats/.site-staging`, moves the current `site/` aside to
-`.site-previous`, and only then renames the new tree in. A request can never land
-in a half-rendered tree, and a failed build leaves the previous one serving - so
-running this twice is harmless and interrupting it is survivable.
+The script reads the pages rather than the status line, and fails on the two
+things a `200` hides: a body that does not end in `</html>`, and a page missing
+the labelling its own data state declares. The tier caches a rendered page for up
+to 60 seconds and revalidates it on `ETag`, so a publish is visible after at most
+one `max-age` window. A `503` with a visible error page means the tree is missing
+or unreadable, not stale.
 
 ## How to tell it worked
 
@@ -128,11 +131,7 @@ kubectl -n lolstats exec statefulset/lolstats-postgres -- psql -U lolstats -d lo
 kubectl -n lolstats apply -f aggregate-verify.job.yaml   # template below
 kubectl -n lolstats logs job/aggregate-verify
 
-# 3. the site
-curl -sSI https://lol.erik-schuetze.dev/ | head -1
-#    ...and then read the pages, not just the status line: the web tier caches
-#    its own responses, and a damaged cache entry answers 200 with a short body.
-#    See docs/runbooks/site-integrity.md.
+# 3. the site (see "Then check that it is being served" above)
 sh scripts/verify-serving.sh https://lol.erik-schuetze.dev
 ```
 
@@ -212,15 +211,18 @@ does not validate, and on a manifest that disagrees with the tree. Adding
   `deploy/base/config.yaml` (owned by the deployment workstream) or the run will
   silently use the old value. A build is deterministic given its inputs and the
   archive, so the second run produces the tree the first one should have.
-- **Site rendered from a bad tree.** Re-run `site-build` after the aggregate tree
-  is right. There is no previous site to restore: `site-build` deletes
-  `.site-previous` at the end of a successful publish.
+- **A tree that was published and then damaged.** Nothing to roll back to: the
+  tier renders whatever is on disk, so a partition deleted or truncated under
+  `v1/` is served as a fault - a page route and `/readyz` answer `503` with
+  `data-fault="artifact"` rather than the previous patch's numbers under the new
+  one's label. Re-run the build (`docs/PATCH-ROLLOVER-EVIDENCE.md` §10, §16.2).
 
 ## Debris
 
 A build that was killed between its two renames can leave `.staging-<pid>-<nanos>`
 or `.trash-<pid>-<nanos>` under `/var/lib/lolstats/agg`. Both sit **beside** `v1/`,
-never under it, so they are never served by Caddy and cannot break the site. They
+never under it, so the tier never resolves a path into them and they cannot break
+the site. They
 are safe to delete once `kubectl -n lolstats get jobs -l
 app.kubernetes.io/component=aggregate` shows nothing running - and a leftover
 trash directory is the fingerprint of a build that died mid-publish, which is
@@ -228,11 +230,10 @@ worth a line in the incident notes.
 
 ## What is destructive here
 
-- `rm -rf /var/lib/lolstats/agg/v1/...` deletes published pages. Until the next
-  build, that path 404s; the raw archive is untouched, so it is recoverable by
-  re-running, at the cost of a full pass.
-- `rm -rf /var/lib/lolstats/site` makes the site a 404 - the web tier serves
-  whatever is at that path. `site-build` recreates it; nothing else does.
+- `rm -rf /var/lib/lolstats/agg/v1/...` deletes published pages. The tier answers
+  `503` with a visible error page (and `data-fault="artifact"`), not a `404` and
+  not the previous patch's numbers; the raw archive is untouched, so it is
+  recoverable by re-running, at the cost of a full pass.
 - Deleting a running Job (`kubectl -n lolstats delete job aggregate-manual`)
   SIGKILLs the build mid-pass. Survivable thanks to the staging/trash discipline,
   but it wastes the work and leaves debris.

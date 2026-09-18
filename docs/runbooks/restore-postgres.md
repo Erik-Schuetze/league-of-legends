@@ -150,11 +150,11 @@ job's next run record whether it worked.
 ## Running one of the binaries by hand
 
 `kubectl create job --from=cronjob/<name>` covers the CronJobs (`maintain`,
-`site-build`, `static-sync`, `discover-seeds`, `lolstats-aggregate`,
-`backup-postgres`, `backup-archive`). It does not cover `migrate up` or
-`lolstats-aggregate verify`, because no CronJob runs those arguments and a Job's
-pod template cannot be patched to change them afterwards. Write the Job out,
-apply it, delete it:
+`backfill`, `discover-seeds`, `lolstats-aggregate`, `backup-postgres`,
+`backup-archive`). It does not cover `migrate up` or `lolstats-aggregate verify`,
+and the `static-sync` subcommand has no CronJob of its own, because no CronJob
+runs those arguments and a Job's pod template cannot be patched to change them
+afterwards. Write the Job out, apply it, delete it:
 
 ```yaml
 # migrate-up.job.yaml

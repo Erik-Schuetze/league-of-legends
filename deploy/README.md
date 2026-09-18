@@ -429,9 +429,7 @@ kubectl -n lolstats logs -f job/backup-postgres-now
 ```
 
 Runbooks: `docs/runbooks/restore-postgres.md`, `docs/runbooks/restore-raw.md`,
-`docs/runbooks/rebuild-aggregates.md`, `docs/runbooks/site-integrity.md` (the
-served-response integrity check and the cache-handler defect it exists for),
-`docs/runbooks/key-rotation.md`,
+`docs/runbooks/rebuild-aggregates.md`, `docs/runbooks/key-rotation.md`,
 `docs/runbooks/enable-alert-delivery.md` (the opt-in Alertmanager procedure), plus
 the pre-existing `ingest-down.md`.
 

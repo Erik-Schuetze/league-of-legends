@@ -486,22 +486,20 @@ would be indistinguishable from real data afterwards.
 The modes are named in `internal/aggregate/perms.go`, which carries the full
 argument; the short version is that the writer and the reader are different
 uids with different groups. The aggregate job runs as `65532:65532` with
-`fsGroup: 65532` (`deploy/base/jobs/aggregate.yaml`). Two other workloads read
-the same tree: the `site-build` job prerenders it as `1000:1000` with
-`fsGroup: 1000` - the `node` user of `node:22-alpine`
-(`deploy/base/jobs/site-build.yaml`) - and Caddy serves `/var/lib/lolstats/agg`
-with `file_server` as `1000:1000` on a read-only mount
-(`deploy/base/web/deployment.yaml`, `deploy/base/web/caddyfile.yaml`). The
-volume is the `nfs-client` StorageClass, and the kubelet cannot chown an NFS
+`fsGroup: 65532` (`deploy/base/jobs/aggregate.yaml`), and the serving tier reads
+the same tree as the image's distroless nonroot uid, which is the same `65532`
+(`deploy/base/web/go-deployment.yaml`). Two other workloads used to read it - the
+`site-build` job (`1000:1000`) and the inner Caddy serving `/var/lib/lolstats/agg`
+with `file_server` - and both were deleted with the static tier (plan.md D-9).
+The volume is the `nfs-client` StorageClass, and the kubelet cannot chown an NFS
 export, so `fsGroup` is not honoured there: the group on disk stays whatever the
-writer left and the two workloads do not share one. That is why the pre-existing
+writer left and two workloads do not share one. That is why the pre-existing
 persistent volumes on that provisioner are mode `0777`, and it is why a
-group-only mode (`0o750`/`0o640`) would publish artifacts that uid 1000 can see
-the name of but not open: the aggregate build would pass, the nightly site build
-would fail with `EACCES`, and the failure would look like a bug in the site
-build. The tree is public web content with no secret in it, so the modes that
-always work are the ones with the other bits set. Only the owner can write;
-nobody else can.
+group-only mode (`0o750`/`0o640`) published artifacts that uid 1000 could see the
+name of but not open, while the aggregate build itself passed - a failure that
+looked like a bug in the site build. The tree is public web content with no
+secret in it, so the modes that always work are the ones with the other bits set.
+Only the owner can write; nobody else can.
 
 The **root needs the served mode as well as the directories under it**, and it
 is the easy one to get wrong: `os.MkdirAll` gives every directory it creates the
@@ -524,8 +522,8 @@ still on disk for the moment the rename takes, and a reader should reach the
 live tree or nothing, never the previous copy under a temporary name), the
 decompressed raw-archive scratch (which lives at `<staging>/.scratch` and is
 removed with the staging tree), and the on-disk `build-runs/` breadcrumbs, which
-live beside the aggregate root and are not under any path the site build or
-Caddy reads.
+live beside the aggregate root and are not under any path the serving tier
+reads.
 
 ## 8. The audit row
 

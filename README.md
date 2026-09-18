@@ -9,10 +9,10 @@ Not endorsed by Riot Games.
 
 ## What is here
 
-This repository currently contains the scaffold: the frozen interfaces, the
-control-plane schema, the toolchain and a placeholder site. The crawler and the
-aggregator are written against these interfaces by separate agents and are not
-implemented yet.
+The pipeline is implemented end to end: `lolstats-ingest` crawls Riot's API into
+an append-only raw archive and a Postgres control plane, `lolstats-aggregate`
+turns that archive into the published `agg/v1` tree, and `lolstats-web` renders
+every page from that tree at request time.
 
 | Path | What it is |
 |---|---|
@@ -103,11 +103,11 @@ LOLSTATS_RIOT_API_KEY=... ./bin/lolstats-ingest worker
 ./bin/lolstats-ingest --help        # every subcommand
 ```
 
-The `worker` subcommand currently starts, serves metrics and shuts down cleanly
-on a signal. The crawl loop is not written yet, so it logs a notice and does
-nothing else. The `discover-seeds`, `backfill` and `maintain` subcommands validate
-their configuration, report that they are unimplemented and exit 3 - deliberately
-not 0, so an unimplemented CronJob cannot look healthy.
+The `worker` subcommand crawls continuously: it claims fetch jobs, calls Riot
+under an adaptive rate limiter, writes the raw archive and reports its progress
+on the stale-and-frozen numbers an operator watches. The `discover-seeds`,
+`backfill`, `maintain`, `migrate` and `static-sync` subcommands are the scheduled
+and repair jobs around it; `./bin/lolstats-ingest --help` is the list.
 
 ```sh
 make types        # regenerate schema/agg.{d.ts,schema.json} from the Go structs

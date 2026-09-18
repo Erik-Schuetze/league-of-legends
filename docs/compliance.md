@@ -402,10 +402,10 @@ free and ungated; no MMR/ELO calculator anywhere; no data-broker behaviour.
 
 | Sub-requirement | Status | Reason and evidence |
 | --- | --- | --- |
-| Terms of Service published | met | `internal/webtier/templates/pages/terms.body.tmpl` is served at `/legal/terms`; the page carries the 13 required sections, from acceptable use to a "Governing law" clause and an explicit Riot non-endorsement section |
-| Privacy Policy published | met | `internal/webtier/templates/pages/privacy.body.tmpl` is served at `/legal/privacy` |
+| Terms of Service published | met | `internal/webtier/templates/pages/terms.tmpl` is served at `/legal/terms`; the page carries the 13 required sections, from acceptable use to a "Governing law" clause and an explicit Riot non-endorsement section |
+| Privacy Policy published | met | `internal/webtier/templates/pages/privacy.tmpl` is served at `/legal/privacy` |
 | Non-endorsement disclaimer visible | met | `internal/webtier/templates/pages/disclaimer.tmpl` is served at `/disclaimer`; 4 of 4 compliance pages render the frozen sentence verbatim, and every page in the served corpus links to `/disclaimer` |
-| `riot.txt` hosted | **pending, and deliberately not a gate** | `astro.config.mjs` publishes `dist/riot.txt` only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set, and the tier republishes it the same way. It is unset, so **no `riot.txt` exists and none is offered** - a placeholder would be a false claim, and the live tier returns 404 for it. The token is issued to the domain owner after they start a production-key application, so this is owner action, not code work. Gate check 5 is the gate that fires on a *false* claim, not on the honest absence - see the `/riot.txt` decision in amendment 2 |
+| `riot.txt` hosted | **pending, and deliberately not a gate** | The tier publishes `/riot.txt` only when `LOLSTATS_RIOT_VERIFICATION_TOKEN` is set (`cmd/lolstats-web/main.go`, `envRiotToken`). It is unset, so **no `riot.txt` exists and none is offered** - a placeholder would be a false claim, and the live tier returns 404 for it. The token is issued to the domain owner after they start a production-key application, so this is owner action, not code work. Gate check 5 is the gate that fires on a *false* claim, not on the honest absence - see the `/riot.txt` decision in amendment 2 |
 | Free tier genuinely free and ungated | met | gate check 4: no password or email field, no sign-in, registration, subscription or checkout route, no paywall in any page of the served corpus; every form the tier serves is a `method="get"` form with an on-origin `action` (3 of them, all filter bars) whose named controls are inside them, and every control it offers provably changes the document without JavaScript (digests in amendment 2) - see the amendments below |
 | No MMR/ELO calculator anywhere | met | gate check 1: 1370 files scanned, 4 rating mentions, all 4 exempt negations of the standing prohibition, 0 rating-like identifiers or keys. The count moves as the other workstreams add files; the run in the evidence log, not this number, is the evidence |
 | No data-broker behaviour | met | gate check 9: the published artifact schema (`schema/agg.d.ts` and `schema/agg.schema.json`, generated from `internal/aggmodel` by `go run ./cmd/gen-types`) declares no PUUID and no served JSON file carries one; the served corpus contains no raw-archive path |
@@ -558,9 +558,11 @@ link, and finds none; it separately requires that every form in those pages is a
 no-JS GET form with an on-origin action and that every named control sits inside
 one, which is what keeps a form from becoming a gate by accident (the 2026-09-17
 amendment below). There is no auth code in the repository, no session
-cookie, and the deployment has no identity provider: `deploy/base/web/` serves
-the tier's HTTP surface through Caddy, and `caddyfile.yaml` contains no
-`basic_auth`, `forward_auth` or other authentication directive. Twenty
+cookie, and the deployment has no identity provider: `lolstats-web` serves the
+HTTP surface itself (`deploy/base/web/go-deployment.yaml`; the shared edge Caddy
+lives in the `homecluster` repository and only terminates TLS for it), and
+neither `internal/webtier/` nor the manifests under `deploy/base/web/` contains
+`basic_auth`, `forward_auth` or any other authentication directive. Twenty
 `<input type="search">` elements exist and are deliberately excluded from the
 pattern - they are the islands' own same-origin table filters, they carry no
 `name` and therefore submit nothing, they filter data the reader has already
@@ -619,7 +621,7 @@ nothing is collected.
 | No analytics, advertising, tracking pixel or third-party embed | gate check 3 over the whole captured corpus (1063 pages in the 2026-09-18 capture) | no executable third-party resource; every script, embed and preconnect is same-origin |
 | No accounts, logins, forms or user submissions | gate check 4 | no form, credential field or auth route |
 | Nothing stored on the device | nothing in the served corpus and nothing in the tier: `grep -rniE 'document\.cookie\|localStorage\|sessionStorage' internal/webtier/ bin/served-pages` returns no match | absent |
-| The access log is the only processing | `deploy/base/web/caddyfile.yaml:80` - `log { output stdout }`, and `grep -rniE 'fluent\|vector\|promtail\|filebeat\|logstash' deploy/` | logs go to container stdout; **no log shipper, no log store and no retention configuration exists**, which is why the policy says the practical retention is days, until the container is replaced |
+| The access log is the only processing | `internal/webtier/server.go` - the tier's `slog` logger writes to the container's own stream (`os.Stderr`), one line per request only at `LOLSTATS_LOG_LEVEL=debug` (the deployed value is `info`, so a served page writes nothing), and `grep -rniE 'fluent\|vector\|promtail\|filebeat\|logstash' deploy/` | logs go to the container's stdout/stderr; **no log shipper, no log store and no retention configuration exists**, which is why the policy says the practical retention is days, until the container is replaced |
 | The Data Dragon icon request is disclosed | the privacy policy names `ddragon.leagueoflegends.com`, states that it receives the visitor's IP address and user agent, that Riot Games is established in the United States, and that this is therefore a transfer outside the EEA | disclosed rather than omitted |
 
 The policy also discloses a near miss deliberately: the operator runs a
@@ -735,17 +737,18 @@ successes is not a register.
    wording. The `web/src/layouts/fallback/Footer.astro` wording quoted here
    before the fix is no longer published anywhere, and the file itself went with
    the Astro tree on 2026-09-18.
-2. ~~**The build names a reserved placeholder hostname.**~~ **Closed in the
-   code, open in the deployment.** With `LOLSTATS_SITE_URL` unset the 1063 built
-   pages used to carry `lolstats.example.invalid` in their canonicals and the
-   sitemap, disagreeing with the legal copy. `web/astro.config.mjs` now publishes
-   `https://lol.erik-schuetze.dev` - the address this deployment is served from -
-   and logs that it fell back, and it refuses a reserved or relative value with a
-   build error instead of publishing a wrong canonical. Gate check 8 **fails** on
-   a reserved hostname with or without the variable. What remains open is not code:
-   the deployed job still does not set `LOLSTATS_SITE_URL`
-   (`deploy/base/config.yaml`), so the release depends on the deliberate default
-   rather than on a declared value.
+2. ~~**The build names a reserved placeholder hostname.**~~ **Closed.**
+   With `LOLSTATS_SITE_URL` unset the built pages used to carry
+   `lolstats.example.invalid` in their canonicals and the
+   sitemap, disagreeing with the legal copy. The fix lived in
+   `web/astro.config.mjs`, which went with the Astro tree on 2026-09-18; the Go
+   tier owns it now - an empty or relative value falls back to
+   `DefaultSiteURL` (`internal/webtier/artifacts.go:76`, the address this
+   deployment is served from), the trailing slash is stripped, and every
+   canonical and structured-data node is built from the result - and the
+   deployment declares the value instead of leaning on that default
+   (`deploy/base/config.yaml`, `LOLSTATS_SITE_URL`). Gate check 8 **fails** on
+   a reserved hostname with or without the variable.
 3. **`riot.txt` cannot be published yet - and is not a gate.** Reported under
    checkpoint 1, with the decision recorded under amendment 2: the honest
    absence is a documented open operational requirement owned by the deploy lane,
