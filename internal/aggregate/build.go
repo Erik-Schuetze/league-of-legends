@@ -183,13 +183,15 @@ func Build(ctx context.Context, opts BuildOptions) (result BuildResult, err erro
 	generatedAt := opts.Now().UTC()
 	// The root is created explicitly, and it is created served. In deployment it
 	// is /var/lib/lolstats/agg, a subdirectory of the shared PVC rather than a
-	// mount point, so whichever job touches the volume first creates it - and
-	// creating it private would deny the site-build job (uid 1000) traversal to
-	// everything below it, failing the nightly site build while this job passed.
-	// os.MkdirAll would otherwise create it with the staging mode as a side
-	// effect. The staging directory inside it stays private: only this process
-	// reads a partial build. See perms.go.
-	if err := os.MkdirAll(opts.AggRoot, publishedDirPerm); err != nil { //nolint:gosec // G301: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
+	// mount point, so whichever job touches the volume first creates it - and a
+	// private mode here would deny traversal to everything below it to any reader
+	// that is not this uid. No uid-1000 reader remains since the static tier was
+	// deleted, so the private mode would now be sufficient; the value is kept
+	// because the mode is as much a property of the bytes already on the volume as
+	// of this call, and perms.go owns that argument. os.MkdirAll would otherwise
+	// create it with the staging mode as a side effect. The staging directory
+	// inside it stays private: only this process reads a partial build.
+	if err := os.MkdirAll(opts.AggRoot, publishedDirPerm); err != nil { //nolint:gosec // G301: a published tree served over HTTP, on a volume that does not honour fsGroup; perms.go.
 		return result, fmt.Errorf("create aggregate root: %w", err)
 	}
 	staging := filepath.Join(opts.AggRoot, fmt.Sprintf("%s%d-%d", stagingPrefix, os.Getpid(), generatedAt.UnixNano()))

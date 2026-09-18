@@ -83,7 +83,7 @@ func (p Publisher) Publish(stagingRoot string, relativeDirs []string, manifestRe
 	// Publish can be reached without a preceding Build call, so it creates the
 	// root itself - served, because MkdirAll on the trash path would otherwise
 	// create the root private. See perms.go.
-	if err := os.MkdirAll(p.AggRoot, publishedDirPerm); err != nil { //nolint:gosec // G301: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
+	if err := os.MkdirAll(p.AggRoot, publishedDirPerm); err != nil { //nolint:gosec // G301: gosec sees a variable mode; publishedDirPerm is 0755 on purpose - see perms.go.
 		return PublishResult{}, fmt.Errorf("publish: create aggregate root: %w", err)
 	}
 	// Private: the trash holds displaced artifacts for the microseconds a
@@ -106,7 +106,7 @@ func (p Publisher) Publish(stagingRoot string, relativeDirs []string, manifestRe
 	var result PublishResult
 	for i, rel := range relativeDirs {
 		live := filepath.Join(p.AggRoot, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(live), publishedDirPerm); err != nil { //nolint:gosec // G301: read by the site-build job as uid 1000 on an NFS volume where fsGroup is not honoured; see perms.go.
+		if err := os.MkdirAll(filepath.Dir(live), publishedDirPerm); err != nil { //nolint:gosec // G301: gosec sees a variable mode; publishedDirPerm is 0755 on purpose - see perms.go.
 			return result, p.rollback(fmt.Errorf("publish: create parent of %s: %w", rel, err), result, trashRoot, i)
 		}
 		moved, err := displace(live, filepath.Join(trashRoot, fmt.Sprintf("old-%d", i)))
