@@ -120,12 +120,16 @@ jobs:
       - name: Compliance negative controls
         run: make compliance-negative-control
 
-      # The controls for the two gates that could not fail: an origin that serves
+      # The controls for the gates that could not fail: an origin that serves
       # the Data Dragon projection with no cache policy and a 404 under the
       # reserved prefix that a cache would keep (the serving gate must reject
-      # both), and docker hidden from PATH for real (make compliance-gnu must
-      # fail and name the missing tool). Both fail closed when they cannot create
-      # their condition.
+      # both), docker hidden from PATH for real (make compliance-gnu must fail and
+      # name the missing tool), and a live posture rendered from the checked-in
+      # fixtures (the live-state half of check 11 must pass while naming the live
+      # pages it scanned, and must fail on a live page stripped of its banner by
+      # that page's real path). The corpus CI scans is all-demo, so the live half
+      # of that scan is only exercised there. Every control fails closed when it
+      # cannot create its condition.
       - name: Gate controls (fail closed)
         run: make gate-controls
 

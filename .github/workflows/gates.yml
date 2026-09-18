@@ -74,14 +74,19 @@ jobs:
       - name: Compliance negative controls
         run: make compliance-negative-control
 
-      # The controls for the two gates that could not fail. `make gate-controls`
-      # does two things a green run alone cannot: it stands in an origin serving
+      # The controls for the gates that could not fail. `make gate-controls`
+      # does four things a green run alone cannot: it stands in an origin serving
       # the Data Dragon projection with no cache policy and a 404 under the
       # reserved prefix that a cache would keep, and requires the serving gate to
-      # reject both; and it hides docker from PATH for real and requires
-      # `make compliance-gnu` to fail and name the missing tool. Both controls
-      # fail closed when they cannot create the condition they need, so none of
-      # this can quietly stop testing anything.
+      # reject both; it hides docker from PATH for real and requires
+      # `make compliance-gnu` to fail and name the missing tool; and it renders a
+      # *live* posture from the checked-in fixtures to require the live-state half
+      # of check 11 to pass by naming the live pages it scanned, then to fail on a
+      # live page stripped of its banner by that page's real path. The corpus the
+      # gate scans in CI is all-demo, so that half of the scan is only ever
+      # exercised here - and it is the half that reported a phantom
+      # "(standard input)" page when it was broken. Every control fails closed
+      # when it cannot create the condition it needs, which the same step proves.
       - name: Gate controls (fail closed)
         run: make gate-controls
 
