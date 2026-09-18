@@ -67,6 +67,10 @@ can change without a migration. The published `agg/v1` tree is a third thing
 again: derived, disposable and rebuildable from the archive, which is why losing
 it is an outage rather than a data loss.
 
+Column listings for the payloads and for the control plane are in
+[`docs/data-analysis/`](data-analysis/README.md), which names every modelled Riot
+field and every Postgres column.
+
 ## Components
 
 | Component | Kind | Responsibility | Trigger |
