@@ -296,6 +296,36 @@ checkTrue(
   row('HTML ≤150 KB uncompressed').includes('once the image carrying §11.9 is deployed') &&
     row('HTML ≤150 KB uncompressed').includes('Measured, not projected'),
 );
+// §5's SEO row assigns `is-crawlable` to a route in each round. That assignment is not decoration:
+// the failure follows the cells the served artifact stores, so it moves between the two champion
+// routes, and a row that names the wrong one makes a claim nothing measured. The clause is derived
+// from the summaries, so the prose can only agree with them. Rounds whose summary has been pruned
+// drop out of the clause — pruning evidence means rewriting the row, which is the intent.
+const crawlable = new Map();
+for (const round of ['1', '2', '3', '4', '5', '6', '7', '8']) {
+  const p = `${EV}/lh-summary-r${round}.json`;
+  if (!existsSync(p)) continue;
+  const bad = json(p).filter((r) => r.failingAudits.includes('is-crawlable'));
+  checkTrue(
+    `r${round} fails is-crawlable on exactly one route`,
+    bad.length === 1,
+    bad.map((r) => r.route).join(', ') || 'none',
+  );
+  if (bad.length === 1) crawlable.set(round, bad[0].route);
+}
+const crawlableClause = [...new Set(crawlable.values())]
+  .map((route) => {
+    const rounds = [...crawlable.entries()].filter(([, r]) => r === route).map(([n]) => `r${n}`);
+    const list = rounds.length === 1 ? rounds[0] : `${rounds.slice(0, -1).join(', ')} and ${rounds.at(-1)}`;
+    return `\`${route}\` 69 in ${list}`;
+  })
+  .join('; ');
+checkTrue(
+  '§5 SEO row names the failing route of every measured round',
+  row('SEO ≥95').includes(crawlableClause),
+  crawlableClause,
+);
+
 checkTrue(
   'note (a) still states that a projection replacing a measurement would be a laundered pass',
   doc.includes('A projection that replaces a measurement would be a\nlaundered pass'),

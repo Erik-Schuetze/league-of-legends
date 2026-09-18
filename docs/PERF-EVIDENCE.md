@@ -94,7 +94,7 @@ because the namespace was shared with other agents' pods.
 | Performance ≥90 | 99–100, all 9 routes × 2 rounds | **PASS** (margin ≥9) |
 | Accessibility =100 | 100, all 9 routes × 2 rounds | **PASS** |
 | Best Practices ≥95 | 100, all 9 routes × 2 rounds | **PASS** |
-| SEO ≥95 | 100 on 8 of 9; **69** on `/champions/ahri/top/` | **FAIL** (1 route) — on later rounds the *same* failure sits on the other role, `/champions/ahri/mid/`, because it follows the served artifact's cells and not the route. The route named here is the one r1/r2 measured; the later rounds measured it again and it is unchanged: **r3, r4, r5, r7 and r8 all score `/champions/ahri/mid/` 69** (`failingAudits: ["is-crawlable"]`) while every other sampled route scores 100, i.e. this row fails **without any weight being over budget**. See §6.2 (fix routed to another lane; measured here, not fixed here) |
+| SEO ≥95 | 100 on 8 of 9; **69** on `/champions/ahri/top/` | **FAIL** (1 route) — and it is the only row here that fails for a reason other than weight: **`/champions/ahri/top/` 69 in r1, r2 and r5; `/champions/ahri/mid/` 69 in r3, r4, r6, r7 and r8** (`failingAudits: ["is-crawlable"]` in every one of those rounds, and every other sampled route 100 in every one of them). Which of the two roles goes *noindex* follows the cells the served artifact stores rather than the route, so the failure **moves between the pair instead of closing**: `/champions/ahri/mid/` is a route r1/r2 measured at 100, and r5 measured *it* at 100 while failing the mirror. Compare the first-load row above, which fails for weight — this one fails with every byte under budget. See §6.2 (fix routed to another lane; measured here, not fixed here) |
 | LCP ≤2.5 s | worst 1,849 ms | **PASS** (margin 651 ms) |
 | CLS ≤0.1 | worst 0.002 | **PASS** |
 | TBT ≤200 ms | 0 ms on every route and round | **PASS** |
@@ -260,7 +260,7 @@ gunzip -c docs/evidence/lh-r1-home.json.gz | jq '.categories.performance.score'
 node scripts/perf/extract-lh.mjs docs/evidence/lh-r1-*.json.gz
 node scripts/perf/extract-lh.mjs --json docs/evidence/lh-r1-*.json.gz > docs/evidence/lh-summary-r1.json
 
-# verify every number in this document against the raw evidence (176 checks; exit 1 on drift)
+# verify every number in this document against the raw evidence (185 checks; exit 1 on drift)
 node scripts/perf/verify-report.mjs
 
 # axe-core, WCAG 2.1 A/AA, 412x915
@@ -522,7 +522,7 @@ bash scripts/perf/lighthouse-routes.sh --round 9 --base https://lol.erik-schuetz
 gzip -9 docs/evidence/lh-r9-*.json                        # archive the raw reports
 node scripts/perf/summarize-lh.mjs 9                      # -> docs/evidence/lh-summary-r9.json
 node scripts/perf/extract-lh.mjs docs/evidence/lh-r9-*.json.gz   # read the first-load column
-node scripts/perf/verify-report.mjs                       # 176 checks at this writing, exit 1 on drift
+node scripts/perf/verify-report.mjs                       # 185 checks at this writing, exit 1 on drift
 ```
 
 Then read the r9 first-load column and **either** write it into §5's row **or** leave the row FAIL —
