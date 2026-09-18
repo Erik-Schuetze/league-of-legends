@@ -281,9 +281,10 @@ documents **byte-identical to r10's**: `/tier-list/top/` **91,139**, `/explore/`
 `/champions/ahri/top/` **34,603 B**. The tier had not moved underneath the bytes either: the two
 `lolstats-go-web` pods that r10 measured (started **2026-09-18T03:20:09Z** and **03:20:15Z**, both before
 r10's first fetch at 03:23:14Z) are still the two pods serving at **03:38:31Z**, both on
-`sha256:69cba3bb…` with `restarts=0`, and Argo's `lolstats` application reads `Synced`/`Healthy` — at
-`21dc103`, the commit that carries this section, so the document of record and the delivery have not
-diverged. The round therefore still describes the tier as it runs now, and
+`sha256:69cba3bb…` with `restarts=0`, and Argo's `lolstats` application read `Synced`/`Healthy` at
+`21dc103` when that was checked — a commit that only edits this document advances that revision without
+changing a pod, which is exactly why the pods are the reliable half of this sentence. The round therefore
+still describes the tier as it runs now, and
 the invocation and target for repeating it are the ones §11.8 already records — nothing about the
 instrument has to be reconstructed.
 
