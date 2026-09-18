@@ -490,7 +490,7 @@ uids with different groups. The aggregate job runs as `65532:65532` with
 the same tree as the image's distroless nonroot uid, which is the same `65532`
 (`deploy/base/web/go-deployment.yaml`). Two other workloads used to read it - the
 `site-build` job (`1000:1000`) and the inner Caddy serving `/var/lib/lolstats/agg`
-with `file_server` - and both were deleted with the static tier (plan.md D-9).
+with `file_server` - and both were deleted with the static tier.
 The volume is the `nfs-client` StorageClass, and the kubelet cannot chown an NFS
 export, so `fsGroup` is not honoured there: the group on disk stays whatever the
 writer left and two workloads do not share one. That is why the pre-existing

@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/backup-verify.sh - the restore drill. It is the evidence behind the
 # launch gate "Postgres and the raw archive have both been restored from backup
-# in a test" (plan section 14).
+# in a test".
 #
 #   sh scripts/backup-verify.sh --docker    # a throwaway Postgres in Docker
 #   sh scripts/backup-verify.sh --cluster   # the real Postgres in the cluster

@@ -36,7 +36,7 @@ overwrites good parts, a corrupted file, a mistake in an aggregate or site build
 `bee01`-`bee03`) being lost, or a node or the cluster dying in a way that takes
 the export with it. In those cases the archive and its only snapshot go together.
 
-R6 is a launch gate in plan section 14. Until media exists it is
+R6 is a launch gate. Until media exists it is
 **accepted and unmet**, and the gate does not pass. The job says so in its own
 log every night:
 

@@ -4,7 +4,7 @@
 #          copy, and the only data here that cannot be regenerated
 #   agg/   published aggregates, raw/ transformed into what the site reads
 #   site/  the rendered HTML the deleted static tier used to serve over
-#          file_server. Nothing writes it any more (plan.md D-9, 2026-09-17);
+#          file_server. Nothing writes it any more (deleted 2026-09-17);
 #          the Go tier answers from agg/ per request. The tree, if one is still
 #          on the volume, is inert - it is not read, and nothing prunes it.
 #

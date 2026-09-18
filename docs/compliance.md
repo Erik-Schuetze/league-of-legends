@@ -388,8 +388,8 @@ without a token and fails if it is not published once
 
 ## Checkpoint register
 
-The seven triggers are from plan section 13. "Status" is the state today, with
-the reason, not an aspiration.
+The seven triggers are below. "Status" is the state today, with the reason, not
+an aspiration.
 
 ### 1. Before any public launch
 

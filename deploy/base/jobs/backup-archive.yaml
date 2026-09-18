@@ -38,7 +38,7 @@
 # 05:00 Europe/Berlin: after the nightly window and the 04:30 postgres dump, so the
 # two backups are not competing for the same NFS client and neither is running
 # while the aggregate job rewrites agg/. The window it waits out used to end at
-# 03:40 with site-build (deleted with the static tier, plan.md D-9); the time was
+# 03:40 with site-build (deleted with the static tier); the time was
 # not moved, because a one-hour margin after the 04:30 dump is what it is for.
 #
 # The image is the official public one, pinned by digest. It runs as 65532 like

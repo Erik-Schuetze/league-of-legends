@@ -95,7 +95,7 @@ clean:
 .PHONY: archive-verify
 
 # The restore drill for Postgres - one half of the launch gate "Postgres and the
-# raw archive have both been restored from backup in a test" (plan section 14).
+# raw archive have both been restored from backup in a test".
 # The raw-archive half is `make archive-verify` below; this target says nothing
 # about it. It is what CI should run: a throwaway Postgres in Docker, the
 # repository's own migrations, a real pg_dump, a restore into a fresh database,

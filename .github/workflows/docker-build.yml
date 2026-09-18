@@ -3,8 +3,8 @@ name: Build and push
 # Publishes the one image this project runs (docs/contracts.md section 5): the
 # Go binaries. Until 2026-09-17 this was a matrix of three - the Go image, the
 # Node/Astro source the nightly site build rendered from, and Caddy with the
-# cache-handler module (plan section 11, gate G0.5) - and the static tier was
-# deleted outright rather than kept as a fallback (plan.md D-9), so the other two
+# cache-handler module (gate G0.5) - and the static tier was deleted outright
+# rather than kept as a fallback, so the other two
 # entries and their contexts went with it. The `verify` job gates the publish:
 # nothing is published unless the Go and compliance checks pass.
 on:

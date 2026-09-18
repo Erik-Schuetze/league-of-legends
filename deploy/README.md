@@ -54,8 +54,8 @@ That Service's selector is the whole cutover, and it is a separate one-line edit
 to `base/web/service.yaml`. Until 2026-09-17 it selected `component: web`, an
 inner Caddy Deployment that served a pre-rendered tree off the data volume with a
 response cache in front of it; both that Deployment and its Caddyfile ConfigMap
-(`lolstats-site-config`) were deleted rather than kept as a fallback (plan.md
-D-9), together with the two CronJobs that produced the tree. The surviving tier is
+(`lolstats-site-config`) were deleted rather than kept as a fallback, together
+with the two CronJobs that produced the tree. The surviving tier is
 `component: web-go`, the Go server-rendered tier, which answers from the published
 aggregate snapshot per request - so read the selector in `base/web/service.yaml`
 itself to see which of the two acts has landed in your checkout, because this
@@ -120,7 +120,7 @@ What "no Riot key" actually means, because the answer is not uniform:
 - The `backfill` job is suspended and stays that way; it is a manual tool, so a
   missing key only matters on the day someone runs it.
 - `static-sync`, which mirrored the public Data Dragon CDN and needed no Riot key,
-  was deleted on 2026-09-17 with the rest of the static path (plan.md D-9). The
+  was deleted on 2026-09-17 with the rest of the static path. The
   `static-sync` subcommand still exists in `cmd/lolstats-ingest`; there is simply
   no CronJob for it, and its egress rule in `base/network/allow.yaml` went with
   it. Re-adding the job is what re-adds both.
@@ -234,7 +234,7 @@ One RWX volume, `lolstats-data` on the `nfs-client` StorageClass, mounted at
 - `agg/` - the published aggregates, published by renaming a directory into
   place, so a reader never sees a half-written tree.
 - `site/` - the rendered HTML the deleted static tier used to serve. **Nothing
-  writes it any more** (plan.md D-9, 2026-09-17): `site-build` and the inner Caddy
+  writes it any more** (2026-09-17): `site-build` and the inner Caddy
   that served the tree are gone, and the Go tier renders from `agg/` per request.
   Whatever tree is still on the volume is inert - it is not read, and nothing here
   prunes it, so removing it is a manual `rm` on the volume if you want the space.
@@ -291,9 +291,9 @@ the check that matters before a change to this directory is pushed.
 ## Open TODOs
 
 - **Images are pinned by tag only.** Every image reference is `:latest` until the
-  first tags exist. When they do, replace each one with `tag@sha256:...` (plan
-  section 12, R13) at the reference in `base/` and in `overlays/homelab`, which
-  is where the tag lives. A tag can be re-pushed; a digest cannot.
+  first tags exist. When they do, replace each one with `tag@sha256:...` at the
+  reference in `base/` and in `overlays/homelab`, which is where the tag lives.
+  A tag can be re-pushed; a digest cannot.
 
 <!-- Everything from here to the end of the file was added by the operations
      workstream (backups, alerts, runbooks). It changes nothing above it. -->
@@ -419,7 +419,7 @@ kubectl -n lolstats logs -f job/backup-postgres-now
 # Look at the tree. This used to be an `exec` into lolstats-web, then into the
 # inner Caddy, because that Caddy was the only workload with a shell that mounted
 # the data volume. That Deployment was deleted with the static tier on
-# 2026-09-17 (plan.md D-9) and the Go images are distroless, so there is no pod
+# 2026-09-17 and the Go images are distroless, so there is no pod
 # left to exec into: use a throwaway pod that mounts the claim read-only, e.g.
 #
 #   kubectl -n lolstats run pvc-ls --rm -it --restart=Never \

@@ -41,7 +41,7 @@ resources:
   # its own Service and its own ingress policy; the `lolstats-web` selector above
   # is the one thing that chooses between it and nothing else, and that choice is
   # not made in this file. The static tier it replaced was deleted outright on
-  # 2026-09-17 (plan.md D-9) rather than kept as a fallback.
+  # 2026-09-17 rather than kept as a fallback.
   - web/go-deployment.yaml
   - web/go-service.yaml
   - web/go-networkpolicy.yaml
@@ -51,7 +51,7 @@ resources:
   # discover-seeds (00:10, before the build so the night's own discovery is in
   # it), aggregate (01:00), maintain (hourly), backfill (suspended, manual
   # only). `static-sync` and `site-build` used to sit at 03:10 and 03:40 and
-  # were deleted on 2026-09-17 with the static tier (plan.md D-9); the Go tier
+  # were deleted on 2026-09-17 with the static tier; the Go tier
   # renders from the published snapshot per request, so nothing writes a site
   # tree any more.
   - jobs/aggregate.yaml

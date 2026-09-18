@@ -12,7 +12,7 @@
 #
 # Until 2026-09-17 this also had to finish before static-sync (03:10) and
 # site-build (03:40), the two jobs that turned the aggregate tree into a rendered
-# one. Both were deleted with the static tier (plan.md D-9); the Go tier reads the
+# one. Both were deleted with the static tier; the Go tier reads the
 # snapshot this job publishes directly, so there is no longer a downstream unit to
 # stay ahead of. The 01:00 slot is otherwise unchanged.
 apiVersion: batch/v1
@@ -104,7 +104,7 @@ spec:
                 readOnlyRootFilesystem: true
           containers:
             - name: aggregate
-              # TODO(plan section 10, Phase 1): pin to a digest once a tag exists.
+              # TODO: pin to a digest once a tag exists.
               image: ghcr.io/erik-schuetze/league-of-legends:latest
               command: ["/lolstats-aggregate"]
               # `build` with its patch and bracket from LOLSTATS_AGG_PATCH and

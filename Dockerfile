@@ -49,8 +49,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lolstat
 # libpthread.so.0 (verified with readelf on the release artifacts).
 #
 # Version policy: v1.4.5 is an LTS release and is deliberately not `latest`,
-# because plan section 4-D2 and ADR-002 forbid re-validating the analytics
-# engine inside a build. Bumping this ARG is an explicit, reviewable act, and
+# because ADR-002 forbids re-validating the analytics engine inside a build.
+# Bumping this ARG is an explicit, reviewable act, and
 # the download is verified against a per-architecture sha256 of the release
 # zip, so a repointed or tampered release asset fails the build instead of
 # shipping. See docs/aggregation.md and docs/decisions/ADR-007.

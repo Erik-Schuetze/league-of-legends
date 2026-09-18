@@ -112,7 +112,7 @@ spec:
                 readOnlyRootFilesystem: true
           containers:
             - name: backfill
-              # TODO(plan section 10, Phase 1): pin to a digest once a tag exists.
+              # TODO: pin to a digest once a tag exists.
               image: ghcr.io/erik-schuetze/league-of-legends:latest
               command: ["/lolstats-ingest"]
               args: ["backfill"]
