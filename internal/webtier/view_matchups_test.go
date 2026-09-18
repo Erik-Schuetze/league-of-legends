@@ -155,6 +155,110 @@ func TestDenseMatrixStaysInsideTheBudget(t *testing.T) {
 	}
 }
 
+// emptyMatrixSnapshot rewrites the demo tree's mid matrix into the shape a role
+// has before its lane publishes anything: the pool is listed, no cell is stored,
+// and the artifact reports the pairs it counted and withheld. It is the state
+// /matchups/top served at 33,881 B until its lane filled in with two pairings,
+// and the state every role passes through, so it has to be an honest empty state
+// rather than a frame.
+func emptyMatrixSnapshot(t *testing.T) string {
+	t.Helper()
+	return matrixSnapshotWithCells(t, []any{}, 177)
+}
+
+// thinMatrixSnapshot is the same artifact one step later: a stored pairing whose
+// sample is under the artifact's own min_cell_n (500 in the demo tree), so the
+// artifact has a cell and still has nothing to publish.
+func thinMatrixSnapshot(t *testing.T) string {
+	t.Helper()
+	return matrixSnapshotWithCells(t, []any{map[string]any{
+		"champion_id":     1,
+		"opponent_id":     55,
+		"n":               json.Number("120"),
+		"wins":            json.Number("61"),
+		"win_rate":        0.5083,
+		"ci95_half_width": 0.09,
+	}}, 0)
+}
+
+func matrixSnapshotWithCells(t *testing.T, cells []any, suppressed int) string {
+	t.Helper()
+	dst := filepath.Join(t.TempDir(), "agg")
+	copyTree(t, fixtureDir(), dst)
+	path := filepath.Join(dst, "v1", "p", "16.18", "EUW", "420", "all", "matchups", "mid.json")
+	document := readJSONDocument(t, path)
+	document["cells"] = cells
+	document["suppressed_cells"] = json.Number(IntegerAny(float64(suppressed)))
+	writeJSONDocument(t, path, document)
+	return dst
+}
+
+// TestEmptyMatrixSaysNothingIsPublishedInsteadOfDrawingTheFrame holds the empty
+// state. The defect these tests exist for was a frame sized to the pool, and the
+// frame is at its worst when nothing is stored: the pool's dashes with no data in
+// them at all. The live top role served this page at 33,881 B, which is the
+// measurement the frame would have replaced with 784 dashes.
+//
+// The empty state also has to be true about why it is empty. Both shapes here
+// carry an artifact: one with every pair withheld below the threshold, one with a
+// stored pair that is itself too thin. Neither is a missing artifact, and neither
+// may be described as one - the count the artifact holds is the only honest
+// reason the grid is not drawn.
+func TestEmptyMatrixSaysNothingIsPublishedInsteadOfDrawingTheFrame(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		root    func(*testing.T) string
+		because string
+	}{
+		{
+			name:    "every pair withheld",
+			root:    emptyMatrixSnapshot,
+			because: "every pair it counted was withheld below n = 500 games (177 withheld in total)",
+		},
+		{
+			name:    "a stored pair below the threshold",
+			root:    thinMatrixSnapshot,
+			because: "stores one pairing for this role, and it is below n = 500 games",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			opts := OptionsFromEnv()
+			opts.AggRoot = test.root(t)
+			opts.FixturesMode = FixturesOff
+			_, live := newTestServer(t, opts)
+
+			page := get(t, live, "/matchups/mid/").text()
+			if got := matrixCells(page); got != 0 {
+				t.Errorf("a role with nothing published renders %d cells, want the empty state and no frame", got)
+			}
+			if got := matrixRowHeads(page) + matrixColumns(page); got != 0 {
+				t.Errorf("a role with nothing published renders %d axis headers, want none", got)
+			}
+			if strings.Contains(page, `rel="next"`) || strings.Contains(page, "pager") {
+				t.Error("a role with nothing published pages an empty axis")
+			}
+			if got, want := len(page), planHTMLBudget; got > want {
+				t.Errorf("the empty state is %d B of HTML, over the %d B ceiling", got, want)
+			}
+			if strings.Contains(page, "has no matchup artifact for this role") {
+				t.Errorf("the empty state calls a present artifact a missing one:\n%s", emptyOf(page))
+			}
+			if !strings.Contains(page, "No mid matchup cells published") {
+				t.Error("the empty state does not say no cell is published")
+			}
+			if !strings.Contains(page, test.because) {
+				t.Errorf("the empty state does not carry %q:\n%s", test.because, emptyOf(page))
+			}
+			if !strings.Contains(page, "A rate is published only for a cell with at least n = 500 games") {
+				t.Error("the empty state does not carry the threshold the artifact uses")
+			}
+			t.Logf("%s: the empty state is %d B of HTML in %d cells", test.name, len(page), matrixCells(page))
+		})
+	}
+}
+
 // TestMatchupMatrixRendersAWindowOfTheAxis is the core assertion: a stored axis
 // longer than the window is served as the window, with the pager carrying the
 // rest, and the champion list under the grid still describing the whole pool.
@@ -451,6 +555,23 @@ func noteOf(page string) string {
 		return page[start:]
 	}
 	return page[start : start+end+4]
+}
+
+// emptyOf returns the empty state the page carries, for the same reason: an
+// empty page has no note to print.
+func emptyOf(page string) string {
+	start := strings.Index(page, `class="fallback-empty"`)
+	if start < 0 {
+		return noteOf(page)
+	}
+	if open := strings.Index(page[start:], ">"); open >= 0 {
+		start += open + 1
+	}
+	end := strings.Index(page[start:], `</div>`)
+	if end < 0 {
+		return page[start:]
+	}
+	return page[start : start+end]
 }
 
 // The plan's HTML ceiling and the brief's target for the default view. They are

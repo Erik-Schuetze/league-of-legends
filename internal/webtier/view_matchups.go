@@ -189,7 +189,7 @@ func (r *Renderer) matchupsPage(role aggmodel.Role, query Query, interactive boo
 			IntegerAny(float64(sorted[0])) + " to n = " + IntegerAny(float64(sorted[len(sorted)-1])) +
 			" games over " + IntegerAny(float64(len(sorted))) + " published pairs."
 	} else {
-		view.Empty = matchupEmpty(label, snap, minCellN)
+		view.Empty = matchupEmpty(label, snap, minCellN, matchups)
 	}
 	if interactive && hasSample {
 		view.HasBar = true
@@ -277,18 +277,37 @@ func matchupDescription(label string, snap snapshotView) string {
 		"thin pairs withheld."
 }
 
-// matchupEmpty is MatchupBody.astro's EmptyState for this route.
-func matchupEmpty(label string, snap snapshotView, minCellN int) emptyView {
+// matchupEmpty is MatchupBody.astro's EmptyState for this route. An artifact
+// that exists with no cell above the threshold is not a missing artifact, and
+// the empty state may not say it is: the count the artifact holds is the only
+// true description of why the grid is not drawn. Every role passes through this
+// state before its lane publishes, and /matchups/top served it at 33,881 B.
+func matchupEmpty(label string, snap snapshotView, minCellN int, matchups *aggmodel.Matchups) emptyView {
 	if snap.Partition == nil {
 		return emptyFor("No sample yet", emptyReason(snap.Site), nil)
 	}
 	threshold := minCellN
-	return emptyFor(
-		"No "+strings.ToLower(label)+" matchup cells published",
-		"The snapshot for patch "+snap.Patch+" has no matchup artifact for this role, so no pair is shown rather "+
-			"than an estimate.",
-		&threshold,
-	)
+	body := "The snapshot for patch " + snap.Patch + " has no matchup artifact for this role, so no pair is shown " +
+		"rather than an estimate."
+	if matchups != nil {
+		thresholdText := IntegerAny(float64(minCellN))
+		if stored := len(cellsOf(matchups)); stored == 1 {
+			body = "The snapshot for patch " + snap.Patch + " stores one pairing for this role, and it is below n = " +
+				thresholdText + " games, so no pair is shown rather than an estimate" + suppressedClause(matchups) + "."
+		} else if stored > 1 {
+			body = "The snapshot for patch " + snap.Patch + " stores " + IntegerAny(float64(stored)) +
+				" pairings for this role, and every one of them is below n = " + thresholdText + " games, so no pair " +
+				"is shown rather than an estimate" + suppressedClause(matchups) + "."
+		} else if matchups.SuppressedCells > 0 {
+			body = "The snapshot for patch " + snap.Patch + " stores no pairing for this role: every pair it " +
+				"counted was withheld below n = " + thresholdText + " games" + suppressedClause(matchups) +
+				", so no pair is shown rather than an estimate."
+		} else {
+			body = "The snapshot for patch " + snap.Patch + " stores no pairing for this role and reports none " +
+				"withheld, so no pair is shown rather than an estimate."
+		}
+	}
+	return emptyFor("No "+strings.ToLower(label)+" matchup cells published", body, &threshold)
 }
 
 // The matrix is quadratic in the champion pool: every pair in a role is a cell,
