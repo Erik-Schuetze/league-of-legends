@@ -228,15 +228,19 @@ func (r *Renderer) errorRoutes() ([]linkView, string) {
 }
 
 // errorRouteNote says what the 404's list leaves out. The count and the list
-// come from the one pass over the routes above, so they cannot disagree.
+// come from the one pass over the routes above, so they cannot disagree. The
+// second sentence names the pages that are in neither: /sitemap.xml advertises
+// only the routes whose pages ask to be indexed, so a reader who takes the note
+// for the whole of the site would be wrong about the pages that ask not to be.
 func errorRouteNote(champions int, patches int) string {
+	const unlisted = " The champion and role pages that ask not to be indexed are left out of both."
 	switch {
 	case champions > 0 && patches > 0:
 		return "Also not listed above: " + IntegerAny(float64(champions)) + " champion pages and " +
-			IntegerAny(float64(patches)) + " archived patch pages. /sitemap.xml lists every route this site serves."
+			IntegerAny(float64(patches)) + " archived patch pages, which /sitemap.xml lists in full." + unlisted
 	case champions > 0:
 		return "Also not listed above: " + IntegerAny(float64(champions)) +
-			" champion pages, which /sitemap.xml lists in full."
+			" champion pages, which /sitemap.xml lists in full." + unlisted
 	case patches > 0:
 		return "Also not listed above: " + IntegerAny(float64(patches)) +
 			" archived patch pages, which /sitemap.xml lists in full."
@@ -254,7 +258,7 @@ func routeLabel(route Route) string {
 	case "/about":
 		return "About the data (how the statistics are produced)"
 	case "/sitemap.xml":
-		return "sitemap.xml (every route, for crawlers)"
+		return "sitemap.xml (every indexable route, for crawlers)"
 	case "/robots.txt":
 		return "robots.txt (crawler policy)"
 	}
