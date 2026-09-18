@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -178,10 +179,20 @@ func isNameByte(c byte) bool {
 	return c == '-' || c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-// pathKey normalises a link target: no patch prefix and no trailing slash, so
-// /patch/16.18/tier-list/top and /tier-list/top compare equal -- the same page
-// one patch-switcher click apart.
+// pathKey normalises a link target to the page it opens: no query, no fragment,
+// no patch prefix, no trailing slash. /patch/16.18/tier-list/top and
+// /tier-list/top compare equal -- the same page one patch-switcher click apart.
+//
+// The query is dropped for the same reason, and the data explorer is why. This
+// site carries the patch in two shapes: the tier list and the matchups put it in
+// the path, and the explorer has no per-patch path at all, so its switcher sends
+// the same page as /explore?patch=16.18&per=30 (view_explore.go's explorePatches).
+// A marker whose only difference from the route is view state still names the
+// page being served, and the canonical the explorer publishes is path-only.
 func pathKey(p string) string {
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		p = p[:i]
+	}
 	p = rePatchPfx.ReplaceAllString(p, "")
 	if p = strings.TrimSuffix(p, "/"); p == "" {
 		return "/"
@@ -190,10 +201,17 @@ func pathKey(p string) string {
 }
 
 // samePage compares two link targets the way this site's routes do: without the
-// trailing slash. Unlike pathKey it does not drop the patch prefix, because a
-// nav link to the unpatched route is a different page from a patched one.
+// trailing slash and without the query, which selects a view of a page and not
+// the page. Unlike pathKey it keeps the patch prefix, because a nav link to the
+// unpatched route is a different page from a patched one.
 func samePage(a, b string) bool {
-	return strings.TrimSuffix(a, "/") == strings.TrimSuffix(b, "/")
+	path := func(p string) string {
+		if i := strings.IndexAny(p, "?#"); i >= 0 {
+			p = p[:i]
+		}
+		return strings.TrimSuffix(p, "/")
+	}
+	return path(a) == path(b)
 }
 
 // cssColour pulls one declaration out of an inline style attribute.
@@ -457,10 +475,22 @@ func a11yFixes() []a11yFix {
 						`<a class="link" href="/explore" aria-current="page" `, 1)
 					return d
 				},
+				func(d document) document {
+					// (c) the marker keeps a query but is moved to another
+					// page's path. The explorer's own switcher marks
+					// /explore?patch=... , so the query has to be ignored to
+					// read that as /explore -- this control proves ignoring it
+					// did not also stop the path from being compared.
+					d.html = reMarkedA.ReplaceAllStringFunc(d.html, func(tag string) string {
+						return strings.Replace(tag, `href="/explore?`, `href="/matchups/mid?`, 1)
+					})
+					return d
+				},
 			},
 			mutations: []string{
 				"the aria-current=\"page\" marker is not emitted at all",
 				"a marker is emitted on /explore regardless of the page being served",
+				"a query-carrying marker is emitted on another page's path",
 			},
 		},
 		{
@@ -732,6 +762,9 @@ func TestServedA11yContract(t *testing.T) {
 		}},
 		{"matchups-mid", "/matchups/mid", func(r *Renderer) (*Page, error) {
 			return r.MatchupsPage("mid", DefaultMatchupQuery(), true)
+		}},
+		{"explore", "/explore", func(r *Renderer) (*Page, error) {
+			return r.ExplorePage(url.Values{"per": {"30"}}, true)
 		}},
 		{"about", "/about", func(r *Renderer) (*Page, error) { return r.AboutPage() }},
 		{"legal-terms", "/legal/terms", func(r *Renderer) (*Page, error) { return r.TermsPage() }},
