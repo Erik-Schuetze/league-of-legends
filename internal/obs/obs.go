@@ -84,7 +84,7 @@ type Metrics struct {
 	riotRequests     *prometheus.CounterVec
 	riotDuration     *prometheus.HistogramVec
 	riotRetries      *prometheus.CounterVec
-	riotKeyAge       prometheus.Gauge
+	riotKeyAge       *prometheus.GaugeVec
 	queueClaimed     prometheus.Counter
 	matchesPersisted prometheus.Counter
 	rawBytes         prometheus.Counter
@@ -121,10 +121,14 @@ func NewMetrics() *Metrics {
 			Name: "lolstats_riot_retries_total",
 			Help: "Retries the Riot client decided to make, by reason.",
 		}, []string{"method", "reason"}),
-		riotKeyAge: prometheus.NewGauge(prometheus.GaugeOpts{
+		// A vector with no labels, unlike the plain Gauge this used to be: the
+		// series does not exist until a known age has been published, so a
+		// process that cannot say how old its key is scrapes without the
+		// metric instead of with a 0 - and 0 is a key rotated a moment ago.
+		riotKeyAge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "lolstats_riot_key_age_seconds",
 			Help: "Age of the configured Riot API key, when its issue time is known.",
-		}),
+		}, nil),
 		queueClaimed: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "lolstats_queue_claimed_total",
 			Help: "fetch_queue rows claimed by this process.",
@@ -203,7 +207,10 @@ func (m *Metrics) IncRiotRetry(method, reason string) {
 	m.riotRetries.WithLabelValues(method, reason).Inc()
 }
 
-func (m *Metrics) SetRiotKeyAge(seconds float64) { m.riotKeyAge.Set(seconds) }
+// SetRiotKeyAge publishes how long the current key has been in use by this
+// process. The first call brings the series into existence; a process that has
+// never had a known age scrapes without it rather than with a 0.
+func (m *Metrics) SetRiotKeyAge(seconds float64) { m.riotKeyAge.WithLabelValues().Set(seconds) }
 
 func (m *Metrics) AddQueueClaimed(n int) {
 	if n > 0 {

@@ -95,16 +95,30 @@ func (k *KeyProvider) set(key string, now time.Time) {
 	}
 }
 
-// Age is how long the current key has been in use by this process. A
-// development key expires after 24 hours, so this is the number the alert and
-// the maintain job read.
-func (k *KeyProvider) Age() time.Duration {
+// AgeKnown is how long the current key has been in use by this process, and
+// whether that is known at all. A development key expires after 24 hours, so
+// this is the number the alert and the maintain job read.
+//
+// The second result is what makes the reading usable. A provider that holds no
+// key has no age, and answering 0 is indistinguishable from a key rotated a
+// moment ago - two readings that call for opposite actions, which is how a
+// gauge that always read 0 stayed unnoticed. The crawl worker asks for both
+// results and publishes the metric only when the age is known.
+func (k *KeyProvider) AgeKnown() (time.Duration, bool) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if k.current == "" {
-		return 0
+		return 0, false
 	}
-	return k.now().Sub(k.firstSeen)
+	return k.now().Sub(k.firstSeen), true
+}
+
+// Age is the one-value form the readiness probe prints. It reads 0 when the age
+// is unknown, so a caller that publishes the number rather than displaying it
+// asks AgeKnown instead.
+func (k *KeyProvider) Age() time.Duration {
+	age, _ := k.AgeKnown()
+	return age
 }
 
 // Source describes where the key came from, for the startup log. It names the
