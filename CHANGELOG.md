@@ -172,10 +172,6 @@ short. "Breaking" means something that used to work no longer does.
   a `TestEmbeddedProjectionsMatchTheRepository` drift test that does not exist
   (the two projection copies are byte-equal; nothing tests that they stay so).
 
-- `AGENTS.md` no longer frames the repository as a shared tree edited by several
-  concurrent agents, and no longer points at `docs/contracts.md` section 6 for
-  the ownership map that section 6 was. Its rules - the README's job, the ADR
-  rule, the house style, "before you say it works" - are unchanged.
 - Citations to a design document that is not in this repository were dropped
   from `deploy/`, `.github/`, `Dockerfile`, `Makefile`, `scripts/` and the docs -
   the `plan.md` and `plan section N` pointers, which named a file a reader could
