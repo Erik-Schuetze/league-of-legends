@@ -27,7 +27,7 @@ the index of what has moved since and why this ceiling is data-dependent.
 | Corpus | 1,058 routes (origin `sitemap.xml`) |
 | Audited routes | 9 (the brief's mandated five, plus a second role for the same champion, a second indexable champion role, and a second tier-list/matchup role) — **14 in §5.1's current edge round (r10)**, which adds `/explore/`, `/champions/kennen/` and all three remaining matchup roles; r9's 11-route edge round is kept in §5.4 |
 | Not measured | static Astro/Caddy tier, and production network latency (see §8). The exceptions are §5.1's r10 and §5.4's r9 rounds, which were taken against `https://lol.erik-schuetze.dev` itself and therefore *are* production-path measurements |
-| Edge build measured (r10) | `59d6920` → build of `3886631`, image `sha256:17a977e0…`; Argo `834ef58d` Synced/Healthy, both `lolstats-go-web` pods on that digest, `restarts=0` (§5.4, §11.9) |
+| Edge build measured (r10) | the tier r10 measured ran `ce91477`'s pin, image `sha256:69cba3bb…`, built from `5e08b23`, which **descends from `3886631`** (§11.9's bound, pinned by `59d6920` → `sha256:17a977e0…`); Argo's `lolstats` application Synced/Healthy, both `lolstats-go-web` pods on `sha256:69cba3bb…`, `restarts=0` — re-verified live 2026-09-18T03:35:55Z (§5.1, §5.4, §11.9) |
 
 ## 2. Instrument and positive control
 
@@ -114,7 +114,7 @@ because the namespace was shared with other agents' pods.
 | CLS ≤0.1 | worst **0.002** (max 0.0019 across every round, r9's worst 0.0017, r10's worst 0.0018) | **PASS** |
 | TBT ≤200 ms | **0 ms** on every route in r1–r4 and r6–r10; the single exception in any round is **227.4 ms** on `/matchups/mid/` in r5 (`fetchTime` 2026-09-17T23:53:32Z, §11.9) — the same route and round as the 2,938,099 B reading, over this threshold there and back to **0 ms** in r9 and r10 | **PASS** on the current round, **FAIL** once, before §11.9 bounded the grid |
 | INP ≤200 ms | not emitted by Lighthouse in navigation mode | **NOT MEASURED** |
-| HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** — of the r1/r2 revisions of those routes. Later rounds measured `/matchups/{mid,top}/` at **164,502 B** (r3/r4) and **2,768,758 B** (r5) on the same tier. **Measured after §11.9 bounded the grid** — worst **75,888 B / 74.1 KiB** (r7, shipped fixture posture, 11 routes) and **65,453 B / 63.9 KiB** (r8, live, 8 routes) — so the row holds on both postures, and **the image carrying §11.9 is deployed** (`59d6920`, build of `3886631`, digest `sha256:17a977e0…`; Argo `834ef58d` Synced/Healthy, both pods on that digest, `restarts=0`), so the conditional that used to hang on this row — *"it did not hold on the tier as it ran before that image"* — is discharged: **it holds on the tier as it runs now.** Measured, not projected. **On the edge itself the worst document is 96,747 B / 94.5 KiB (`/explore/`, r10, `fetchTime` 2026-09-18T03:25Z) and the five `/matchups/*` routes are 33,995–69,490 B, so the row passes there too, with 55.5 KiB to spare on the worst route
+| HTML ≤150 KB uncompressed | worst audited 65.4 KiB; worst of all 1,058 routes 66.8 KiB | **PASS** — of the r1/r2 revisions of those routes. Later rounds measured `/matchups/{mid,top}/` at **164,502 B** (r3/r4) and **2,768,758 B** (r5) on the same tier. **Measured after §11.9 bounded the grid** — worst **75,888 B / 74.1 KiB** (r7, shipped fixture posture, 11 routes) and **65,453 B / 63.9 KiB** (r8, live, 8 routes) — so the row holds on both postures, and **the image carrying §11.9 is deployed** — `59d6920` pinned the build of `3886631`, and the build the tier runs now (`ce91477` → `sha256:69cba3bb…`, built from `5e08b23`) descends from it; Argo `lolstats` Synced/Healthy, both pods on `sha256:69cba3bb…`, `restarts=0`, re-verified 2026-09-18T03:35:55Z — so the conditional that used to hang on this row — *"it did not hold on the tier as it ran before that image"* — is discharged: **it holds on the tier as it runs now.** Measured, not projected. **On the edge itself the worst document is 96,747 B / 94.5 KiB (`/explore/`, r10, `fetchTime` 2026-09-18T03:25Z) and the five `/matchups/*` routes are 33,995–69,490 B, so the row passes there too, with 55.5 KiB to spare on the worst route
 (`96,747` against `150 KiB = 153,600 B`). r9 measured the same row on the edge before the explorer fix, at 141,790 B / 138.5 KiB (§5.4), which also passed — 11.5 KiB to spare.** See note (b) |
 | HTML ≤40 KB gzipped | worst as served on the wire 10.2 KiB (`/tier-list/top/`, Lighthouse); worst across all 1,058 routes 9.5 KiB (`/about/` = 9,731 B). The same page is 9.3 KiB when re-gzipped with zlib defaults, i.e. the origin's own gzip output runs ~8% larger than zlib — the audited on-wire figure is the conservative one | **PASS** |
 | islands ≤2/page, both deferred | max **1** island/page, on 10 of 1,058 pages; 0 blocking scripts | **PASS** |
@@ -231,8 +231,10 @@ LeBlanc), so a subset that drops a glyph fails silently and data-dependently.
 §11.8 deferred the definitive measurement of the 300 KB *traffic* ceiling until the edge dialled the Go
 tier, and refused to buy time with a fixture measurement instead. That run was taken as **r9**
 (`2026-09-18T02:45–02:47Z`, kept in **§5.4**), and it measured one route over the ceiling. This section
-is the round taken **after §11.9's bounded grid reached the edge** (`59d6920`, build of `3886631`,
-digest `sha256:17a977e0…`, Argo `834ef58d` Synced/Healthy, both pods on that digest, `restarts=0`):
+is the round taken **after §11.9's bounded grid reached the edge**. The tier was running `ce91477`'s pin
+— `sha256:69cba3bb…`, the image built from `5e08b23`, which descends from `3886631`, §11.9's bound,
+pinned by `59d6920` → `sha256:17a977e0…`; Argo's `lolstats` application Synced/Healthy, both pods on
+`sha256:69cba3bb…`, `restarts=0`, re-verified live 2026-09-18T03:35:55Z:
 **mobile preset, cold cache, 14 routes, against `https://lol.erik-schuetze.dev` itself** — the public
 origin, `data-state="live"`, basic auth, no port-forward, no fixtures, no local binary. It is the newest
 round by `fetchTime`, so **the current state is r10**. Raw reports `docs/evidence/lh-r10-*.json.gz`,
@@ -269,6 +271,21 @@ Everything the R15 change was for holds on the edge: the four routes §5 records
 the three matchup roles the harness had never fetched from the edge. **R15 remains an owner-decision item
 and this section changes no delivery** (per the coordinator's standing decision); the ceiling is
 **not moved**, and page weight stays a design/owner call rather than something this lane implements.
+
+**Positive control on currency: r10's bytes are still the edge's bytes, so no eleventh round is owed.**
+"Which image is deployed" is not a stable way to describe this tier tonight — six pins landed between
+§11.9's own (`59d6920`, 00:30Z) and the one r10 measured (`ce91477`, 03:16Z) — so what was re-checked is
+the bytes. A `curl -u … -o … -w '%{size_download}'` sweep at **2026-09-18T03:35:55Z** returned eight
+documents **byte-identical to r10's**: `/tier-list/top/` **91,139**, `/explore/` **96,747**,
+`/matchups/{top,jungle,mid,bottom,support}/` **50,233 / 33,995 / 49,846 / 69,490 / 58,975**, and
+`/champions/ahri/top/` **34,603 B**. The tier had not moved underneath the bytes either: the two
+`lolstats-go-web` pods that r10 measured (started **2026-09-18T03:20:09Z** and **03:20:15Z**, both before
+r10's first fetch at 03:23:14Z) are still the two pods serving at **03:38:31Z**, both on
+`sha256:69cba3bb…` with `restarts=0`, and Argo's `lolstats` application reads `Synced`/`Healthy` — at
+`21dc103`, the commit that carries this section, so the document of record and the delivery have not
+diverged. The round therefore still describes the tier as it runs now, and
+the invocation and target for repeating it are the ones §11.8 already records — nothing about the
+instrument has to be reconstructed.
 
 **Reconciliation 1 — where §5's pre-removal totals went, request by request.** The gap between §5's
 1,013.3 KiB and any measurement of the page after §11.2 is the **29 Data Dragon champion PNGs** that
@@ -348,6 +365,22 @@ measurement. One route did not reproduce to the byte and is reported rather than
 `curl` read `/matchups/mid/` at **49,846 B** against r9's **49,870 B**, 24 B apart on an unchanged
 artifact — three orders of magnitude below the movements this section is about, but it is a difference
 and it is on the record; r10's audit then measured that route at exactly **49,846 B**.
+
+**Reconciliation 3 — the coordinator's own edge reads, against these rounds.** The coordinator read the
+same edge by `curl` in this window, and those figures are put beside the audits rather than under them
+(all reported by message, no artifact archived, so this paragraph carries the provenance it cannot carry
+as a file): `/matchups/{top,jungle,mid,bottom,support}/` at **50,257 / 33,923 / 49,870 / 68,840 / 56,595
+B** and `/tier-list/top/` at **91,154 B**. Magnitudes agree everywhere, and the `/matchups/*` spread
+against r10 — up to **+2,380 B** on `/matchups/support/` — is the data growth the ladder above describes.
+Two things are **not** explained and are recorded as such rather than smoothed: (i) the coordinator's
+`/tier-list/top/` reads **ascend 88,387 → 90,198 → 91,154 B** over the window while r9, r10 and this
+lane's 03:04Z / 03:12Z / 03:35Z re-reads are all flat at **91,139 B**, so the last of them is **15 B
+above** the figure three independent re-reads return on the same route — the ascending part is the
+corpus, the 15 B is not accounted for; and (ii) two further reads of `/matchups/bottom/` differ by
+**4 B** (68,844 → 68,840) and of `/matchups/support/` by **68 B** (56,527 → 56,595) on unchanged routes.
+A 4 B to 956 B spread between instruments on one route is three orders of magnitude below the movements
+this section is about, and none of it changes a verdict — but it is on the record, because the audit's
+job is the verdict and the last byte is not reproducible to the byte across instruments.
 
 ### 5.3 The FAIL r9 measured has a landed fix, and r10's audit confirms it by measurement
 
@@ -990,10 +1023,14 @@ not over it, and §5.4 holds the per-route table. The four routes the row record
 429.7 / 447.7 / 939.0 / 1013.3 KiB — measure 251.1-253.6 KiB on the edge. **That r9 FAIL is the state
 before §11.9's bound reached the edge, and it is closed by the round below.**
 
-**And the run that closes it: r10, taken after §11.9's bounded grid was deployed.** `59d6920` pinned
-`sha256:17a977e0…` (build of `3886631`), Argo `834ef58d` read back Synced/Healthy with both pods on that
-digest and `restarts=0`, and the edge's own bytes confirm it before the round was taken — so r10 is a
-measurement of the delivered grid, not of a tree that was about to be delivered. It is **14 routes**
+**And the run that closes it: r10, taken after §11.9's bounded grid was deployed.** The tier r10
+measured ran `ce91477`'s pin — `sha256:69cba3bb…`, the image built from `5e08b23`, which descends from
+`3886631` (§11.9's bound, pinned by `59d6920` → `sha256:17a977e0…`) — and Argo's `lolstats` application
+read back Synced/Healthy with both pods on `sha256:69cba3bb…` and `restarts=0`, re-verified live at
+2026-09-18T03:35:55Z, so r10 is a measurement of the delivered grid, not of a tree that was about to be
+delivered. **The pin, not the digest, is the fragile half of that sentence**: six pins have landed on
+this tier in one night, each naming a different build, so what this section attests is the bytes r10
+measured, and §5.1 re-reads them. It is **14 routes**
 (the 11 above plus `/matchups/{jungle,bottom,support}/`, which no earlier round had fetched from the
 edge), `fetchTime` **2026-09-18T03:23–03:25Z**, and its result is **13 PASS, 1 FAIL** — the same §6.2
 SEO 69, and **zero weight failures**: worst first load `/explore/` **263,438 B / 257.3 KiB, 43,762 B

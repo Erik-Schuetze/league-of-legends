@@ -1111,9 +1111,44 @@ checkTrue(
 );
 checkTrue(
   '§5 HTML row records the deploying image as delivered rather than as a conditional',
-  row('HTML ≤150 KB uncompressed').includes('`sha256:17a977e0…`') &&
+  row('HTML ≤150 KB uncompressed').includes('`sha256:69cba3bb…`') &&
+    row('HTML ≤150 KB uncompressed').includes('`ce91477`') &&
     row('HTML ≤150 KB uncompressed').includes('it holds on the tier as it runs now') &&
     row('HTML ≤150 KB uncompressed').includes('Measured, not projected'),
+);
+// This tier re-pinned six times in one night, so "the image carrying §11.9 is deployed" has to name the
+// image the *current round* actually measured, and keep the ancestry that ties it to §11.9's own pin,
+// rather than the digest of whichever pin happened to be newest when the sentence was written. The
+// older digest is not deleted: it stays as the pin that landed §11.9, labelled as that.
+checkTrue(
+  'the report names the image the current round measured, and its descent from the pin that landed §11.9',
+  [
+    '`ce91477`',
+    '`sha256:69cba3bb…`',
+    '`5e08b23`',
+    '`3886631`',
+    '`59d6920`',
+    '`sha256:17a977e0…`',
+  ].every((s) => doc.includes(s)) &&
+    /\bdescends? from\b/.test(doc) &&
+    /2026-09-18T03:35:55Z/.test(doc),
+  'the digest the tier runs, the pin that installed it, and the re-verification clock must all be present',
+);
+// A round that stopped describing the tier would be a stale record with a fresh date on it, so the
+// document carries the re-read that says the current round has not drifted behind the deploy.
+checkTrue(
+  '§5 carries the re-read showing the current round bytes are still the served bytes',
+  doc.includes("byte-identical to r10's") && doc.includes('03:35:55Z') && doc.includes('no eleventh round is owed'),
+);
+// The coordinator's own edge reads disagree with each other, and one of them with three re-reads of the
+// same route, by 15 B. The document records the disagreement rather than averaging it away: a
+// reconciliation that does not close to the byte is still worth more than a tidy number.
+checkTrue(
+  'the coordinator edge reads are reconciled, including the ones that disagree',
+  doc.includes('Reconciliation 3') &&
+    doc.includes('91,154') &&
+    /15 B\s+above/.test(doc) &&
+    doc.includes('68,840'),
 );
 // §5's SEO row assigns `is-crawlable` to a route in each round. That assignment is not decoration:
 // the failure follows the cells the served artifact stores, so it moves between the two champion
