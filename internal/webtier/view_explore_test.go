@@ -207,6 +207,39 @@ func TestExploreSortFilterAndPageChangeTheOutput(t *testing.T) {
 	}
 }
 
+// TestExploreDefaultWindowIsInsideThePageBudget pins the window /explore opens
+// with. This route's first load is what the plan's page-quality budget is
+// measured on, so the default is a budget decision and not a taste: 100 rows at
+// roughly 900 B a row is what put the default document plus its always-loaded
+// subresources over the 300 KiB ceiling, and 50 clears it with room for the row
+// cost and the fixed chrome to keep growing. The default also has to be one of
+// the windows explorePerOptions offers, or the "Rows per page" selector cannot
+// render the page's own state as selected.
+func TestExploreDefaultWindowIsInsideThePageBudget(t *testing.T) {
+	t.Parallel()
+	const compliant = 50
+	def := DefaultExploreQuery()
+	if def.Per != compliant {
+		t.Errorf("the explorer opens with per=%d and the compliant window is per=%d", def.Per, compliant)
+	}
+	offered := false
+	for _, option := range explorePerOptions {
+		if option == def.Per {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Errorf("the default per=%d is not one of the windows explorePerOptions offers (%v)",
+			def.Per, explorePerOptions)
+	}
+
+	_, live := newTestServer(t, fixtureOptions())
+	rows := exploreTableRows(t, get(t, live, explorePath).text())
+	if len(rows) != def.Per {
+		t.Errorf("the default first load rendered %d rows, want its window's %d", len(rows), def.Per)
+	}
+}
+
 // TestExploreWithheldCellIsNotZeroAndNotEmpty is the honesty assertion. A cell
 // the artifact publishes with too few games must render its count, must render
 // the word "withheld" in markup that says it is withheld, must carry no rate in
