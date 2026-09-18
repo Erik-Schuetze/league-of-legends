@@ -255,13 +255,12 @@ real filter bar must pass, so a future tightening cannot quietly reject the page
 a reader receives. The gate is run in CI
 (`.github/workflows/docker-build.yml`) plain, over the served corpus, and with
 the controls, so a future weakening of either rule - or a control that silently
-stops planting - fails the build. The same `make` targets also run as the whole
-of `.github/workflows/gates.yml` (`Launch gates`), because in the build workflow
-they sit after the Go test step: on 2026-09-17 an unrelated parity failure meant
-the `verify` job stopped before any of them ran, so the run showed nothing about
-the compliance gate either. A launch gate whose result cannot be read while some
-other check is red is not evidence, so the two signals are now independent while
-still being one definition per gate.
+stops planting - fails the build. The steps themselves are guarded with
+`if: always()`, because they sit after the Go test step: on 2026-09-17 an
+unrelated parity failure meant the `verify` job stopped before any of them ran,
+so the run showed nothing about the compliance gate either. A launch gate whose
+result cannot be read while some other check is red is not evidence, so each step
+reports independently while there is still one definition per gate.
 
 ## Amendment 2: the served corpus, and what "interactive" actually means
 
@@ -926,7 +925,7 @@ a compliance change, not a copy change.
   `bin/cgnu-after.log`,
   `bin/bv-noseed-before.log` vs `bin/bv-noseed-after.log`, and
   `bin/bv-seeded-after.log`. Both controls run in CI as the `Gate controls (fail
-  closed)` step in `gates.yml` and `docker-build.yml`; the first green run that
+  closed)` step of `docker-build.yml`; the first green run that
   executes them is
   [35288990220](https://github.com/Erik-Schuetze/league-of-legends/actions/runs/35288990220)
   (`3199527`), where the log shows `make compliance-gnu` exiting `2` with docker
@@ -1050,21 +1049,24 @@ a compliance change, not a copy change.
   origin no denylist knows, and a filter-bar-shaped form with no server-side
   path - plus the opposite direction, the tier's own filter bar, which must pass.
   `make compliance-negative-control` and `make compliance-gnu` (now including the
-  captured served corpus) both run in CI.
-- **The launch gates moved into their own workflow, on 2026-09-17.**
-  `.github/workflows/gates.yml` (`Launch gates`) runs `make verify-serving-local`,
-  `make compliance`, `make compliance-negative-control`, `make compliance-served`
-  (then an alias of `compliance`; it is still listed, which costs nothing) and
-  `make compliance-gnu` as a job of its own. The reason is attribution, not
-  convenience: in `docker-build.yml` these steps run after the Go test step, and a
-  red `Test` step - which is what happened on 2026-09-17, for a design-layer
-  parity mismatch owned by another lane - stops the job before any compliance
-  result is produced. `docker-build.yml` still carries every step, because its
-  `verify` job is what stands between a commit and a published image; the
-  workflow file's header records this. The immediate consequence is that the
-  compliance evidence for that date is readable even while the parity gate was
-  red - a gate that existed only until 2026-09-18, when it was retired with the
-  reference tree; see gap 7 and the next entry.
+  captured served corpus) both run in CI as steps of `docker-build.yml`.
+- **The launch gates report independently of the steps above them, on
+  2026-09-17.** In `docker-build.yml` the four gate steps
+  (`make verify-serving-local`, `make compliance`,
+  `make compliance-negative-control`, `make gate-controls`,
+  `make compliance-gnu`) carry `if: always()`, so a red `Test` step - which is
+  what happened on 2026-09-17, for a design-layer parity mismatch - no longer
+  stops the job before any compliance result is produced. That is attribution,
+  not convenience: a gate whose result is unreadable while some other check is
+  red is not evidence. The job still fails overall if any step failed, so
+  `build-and-push` does not run on a red gate. Between 2026-09-17 and 2026-09-18
+  the same five targets ran a second time as a job of their own in
+  `.github/workflows/gates.yml` (`Launch gates`); that workflow was deleted on
+  2026-09-18 as a duplicate of the `verify` job, which already ran every one of
+  its steps. The immediate consequence is that the compliance evidence for
+  2026-09-17 is readable even while the parity gate was red - a gate that existed
+  only until 2026-09-18, when it was retired with the reference tree; see gap 7
+  and the next entry.
 - **The parity gate gained a mutation control, on 2026-09-17.** **Deleted
   2026-09-18** with the gate it controlled (`8e23d67`): both
   `scripts/parity-mutation-control.sh` and `make parity-mutation-control` are gone,
@@ -1086,5 +1088,6 @@ a compliance change, not a copy change.
   *refused* rather than written over the tree. The control was also controlled:
   with a stub `make` that exited 0 - a gate that no longer compared anything - the
   control reported `RESULT: FAIL - 3 control(s) held, 3 broken`
-  (`bin/parity-mutation-stub.log`). It ran as the last step of `Launch gates`,
-  after every scan that read the reference tree, because it rewrote it in place.
+  (`bin/parity-mutation-stub.log`). It ran as the last gate step of the
+  `verify` and `Launch gates` jobs, after every scan that read the reference
+  tree, because it rewrote it in place.

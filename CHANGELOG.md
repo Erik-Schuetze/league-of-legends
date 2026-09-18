@@ -61,6 +61,14 @@ short. "Breaking" means something that used to work no longer does.
   `internal/parquet/**`) never existed. `docs/contracts.md` is still normative
   for the aggregate shapes, the route table, the Go interfaces and the image
   contract (its sections 1, 2, 4 and 5).
+- `.github/workflows/gates.yml` (`Launch gates`) - a duplicate of the `verify`
+  job in `docker-build.yml`, step for step: the same build, serving-contract,
+  compliance, negative-control, gate-control and GNU-userland steps, in a second
+  workflow that triggered on the same events, so every push and pull request ran
+  all of them twice. The one thing it provided - a gate result that is readable
+  while some other check is red - is now provided by `if: always()` on those
+  steps, which is where `docs/compliance.md` records the 2026-09-17 incident
+  that made them independent.
 - `backlog.md` - the deferred-work file. Each item was either already done or a
   plan for a workstream that is no longer being run in parallel.
 - `web/**` - the Astro tree (218 files), deleted on 2026-09-18. Production has
