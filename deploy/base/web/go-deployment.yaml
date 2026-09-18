@@ -20,6 +20,23 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    # sha-3886631: the revision that bounds the matchup matrix, and the largest
+    # page-size change this tier has served.
+    #   - /matchups/<role> no longer renders the whole N x N matrix: the grid is
+    #     a window of the champions the artifact's cells name, 12 x 12 = 144
+    #     cells with the rows carried a page at a time, ?q= still carries one
+    #     champion's complete row across the role's whole column axis, and the
+    #     note under the grid discloses what the page left out.
+    #   - /matchups/mid served 2,768,758 B of HTML and /matchups/bottom
+    #     2,100,737 B, against the plan's 150 KB ceiling (plan section 7.4);
+    #     /matchups/top served 33,881 B only because its artifact stores no
+    #     cell to name an axis from. The bounds are sized from measured bytes -
+    #     224 B for a published cell, 99 B for a dash, 53,015 B of live chrome
+    #     on the heaviest route - so the default view is at most 88 KB and a
+    #     filter's 276 cells at most 120 KB.
+    #   - internal/webtier/view_matchups_test.go is new: it measures the served
+    #     bytes of every query shape the route answers, which is the assertion
+    #     whose absence let a 2.7 MB page pass the gate.
     # sha-f69d654: the revision that makes the crawler-facing copy honest and the
     # /about champion count legible, on top of the frozen-CSS strip.
     #   - /robots.txt no longer asserts "static" and "live" in literals; it
@@ -29,14 +46,14 @@ metadata:
     #     (f69d654).
     #   - the frozen inline layer is 6,777 B rather than 14 KB (5ba2bc5), which
     #     is most of the page-size change between this pin and the last one.
-    # The digest before this one (sha-9f23333) served literal "static"/"live"
+    # The digest before sha-3886631 (sha-9f23333) served literal "static"/"live"
     # words in robots.txt, which is a false statement on a server-rendered tier
     # under any posture - the reader that cannot notice is the one reading it.
     #
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:31ed706ee2b846ad6e70ba222154cd60f4d24bed18fff073f4d29d53049ce4af
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:17a977e075fbb5074c837e23d5dc3b0238e8a392464951fcb14fdc839ae35d8a
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
