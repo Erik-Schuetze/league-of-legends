@@ -20,6 +20,19 @@ metadata:
     # The image this tier is pinned to, consumed by the overlay's `replacements`
     # block: the deployment tree pins one repository for three binaries, and
     # kustomize's `images` transformer therefore cannot pin this one alone.
+    # sha-5c626df: the revision that makes the sitemap advertise exactly the
+    # routes whose pages ask to be indexed, and nothing else.
+    #   - /sitemap.xml enumerated its routes from the manifest alone while the
+    #     page builders decided indexability per page, so the two disagreed in
+    #     both directions on the live edge: /champions/ahri/top renders
+    #     `noindex,follow` and was advertised (1 <loc>), and /explore renders
+    #     `index,follow` and was in none of the 1058 entries. routeList now
+    #     filters champion and role routes through the same predicate the page
+    #     builders use and appends /explore; sitemap_invariant_test.go asserts
+    #     `in_sitemap == page_is_indexable` in both directions over every route
+    #     the tier can serve, and fails with 1707 violations against the old
+    #     routeList. **No page's rendered robots meta changes** - this moves the
+    #     advertisement, not the product.
     # sha-3886631: the revision that bounds the matchup matrix, and the largest
     # page-size change this tier has served.
     #   - /matchups/<role> no longer renders the whole N x N matrix: the grid is
@@ -53,7 +66,7 @@ metadata:
     # A digest bump is not a data-posture change (see env below): the image is the
     # same tree whatever this Deployment declares the posture to be, so the two
     # lines move independently.
-    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:17a977e075fbb5074c837e23d5dc3b0238e8a392464951fcb14fdc839ae35d8a
+    lolstats.dev/pinned-image: ghcr.io/erik-schuetze/league-of-legends@sha256:37e466151c06a291b1ee28c57f006ffe681c9a5bd141f64f3d54214738dd7380
   labels:
     app.kubernetes.io/name: lolstats
     app.kubernetes.io/component: web-go
