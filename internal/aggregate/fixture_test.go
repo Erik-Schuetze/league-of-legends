@@ -85,6 +85,30 @@ type fixtureMatch struct {
 	// bare writes a payload with no envelope at all, which is the corruption
 	// the fail-closed test feeds in.
 	bare bool
+	// duration overrides info.gameDuration in seconds. Zero means the default
+	// 1830, which is the value every nightly expectation was computed against,
+	// so only a fixture that needs a short game sets it.
+	duration int
+	// endResult overrides info.endOfGameResult. Empty means GameComplete, which
+	// every nightly fixture carries; the timeline dataset is the only consumer
+	// that reads the field, for its ledger.
+	endResult string
+}
+
+// endResultOf is info.endOfGameResult, defaulted the way durationOf defaults
+// the duration.
+func (m fixtureMatch) endResultOf() string {
+	if m.endResult == "" {
+		return "GameComplete"
+	}
+	return m.endResult
+}
+
+func (m fixtureMatch) durationOf() int {
+	if m.duration > 0 {
+		return m.duration
+	}
+	return 1830
 }
 
 func (m fixtureMatch) championsOf(team int) [5]int {
@@ -295,9 +319,10 @@ func renderMatch(m fixtureMatch) string {
 		}
 		fmt.Fprintf(&b, "%q", puuid)
 	}
-	fmt.Fprintf(&b, `]},"info":{"gameCreation":%d,"gameDuration":1830,"gameMode":"CLASSIC",`+
-		`"gameVersion":%q,"mapId":11,"platformId":%q,"queueId":%d,"gameType":"MATCHED_GAME","teams":[`,
-		created.UnixMilli(), m.patch+".612.9234", m.platform, m.queue)
+	fmt.Fprintf(&b, `]},"info":{"gameCreation":%d,"gameDuration":%d,"gameMode":"CLASSIC",`+
+		`"gameVersion":%q,"mapId":11,"platformId":%q,"queueId":%d,"gameType":"MATCHED_GAME",`+
+		`"endOfGameResult":%q,"teams":[`,
+		created.UnixMilli(), m.durationOf(), m.patch+".612.9234", m.platform, m.queue, m.endResultOf())
 
 	teams := [2]int{100, 200}
 	for ti, team := range teams {
@@ -353,10 +378,11 @@ func renderParticipant(m fixtureMatch, team, seat, role, champion int, index fix
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `{"puuid":%q,"riotIdGameName":"fixture-summoner-%02d","riotIdTagline":"FIXT",`+
-		`"summonerId":"fixture-summoner-%02d","teamId":%d,"championId":%d,"championName":"Fixture",`+
+	fmt.Fprintf(&b, `{"participantId":%d,"puuid":%q,"riotIdGameName":"fixture-summoner-%02d",`+
+		`"riotIdTagline":"FIXT","summonerId":"fixture-summoner-%02d","teamId":%d,`+
+		`"championId":%d,"championName":"Fixture",`+
 		`"teamPosition":%q,"individualPosition":%q,"win":%t,`,
-		fixturePuuids[seat], seat+1, seat+1, team, champion, teamPosition, individualPosition, team == m.winner)
+		seat+1, fixturePuuids[seat], seat+1, seat+1, team, champion, teamPosition, individualPosition, team == m.winner)
 	for slot, item := range items {
 		fmt.Fprintf(&b, `"item%d":%d,`, slot, item)
 	}
@@ -364,8 +390,8 @@ func renderParticipant(m fixtureMatch, team, seat, role, champion int, index fix
 	fmt.Fprintf(&b, `"perks":{"styles":%s,"statPerks":{"offense":5008,"flex":5008,"defense":5002},`+
 		`"perkIds":[8005,9111,9105,8014,8139,8126,5008,5008,5002],"perkStyle":8000,"perkSubStyle":8100},`,
 		runePage(!containsIndex(m.badRunes, index)))
-	fmt.Fprintf(&b, `"kills":%d,"deaths":%d,"assists":%d,"totalMinionsKilled":180,"goldEarned":12345}`,
-		3+seat, 2+seat%3, 7+seat)
+	fmt.Fprintf(&b, `"kills":%d,"deaths":%d,"assists":%d,"totalMinionsKilled":%d,"goldEarned":12345}`,
+		3+seat, 2+seat%3, 7+seat, m.durationOf()/10)
 	return b.String()
 }
 

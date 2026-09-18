@@ -41,6 +41,7 @@ project makes deliberately.
 | Source | Provides | Basis | Load-bearing |
 | --- | --- | --- | --- |
 | Riot MATCH-V5 | Match summaries: participants, champions, roles, items, runes, summoner spells, win, team bans | Riot API Terms; development key under the General Policies | Yes |
+| Riot MATCH-V5 timelines | Per-minute frames and events for one match: CS, XP, gold, level and position per participant, plus objectives and kills | Riot API Terms; development key under the General Policies | No - it feeds the `timeline-v1` feature dataset, which sits outside the `agg/v1` reader contract |
 | Riot LEAGUE-V4 | Ranked ladder entries per tier and division, used to seed the crawl frontier | Riot API Terms | Yes |
 | Riot ACCOUNT-V1 | PUUID resolution and account identifiers | Riot API Terms | Yes |
 | Data Dragon | Champion, item, rune and summoner spell static data plus patch versions | Riot's permitted static data / press kit | Yes |
@@ -51,6 +52,44 @@ behind the `source_toggles` switch, disabled by default, never load-bearing, and
 subject to the enablement checkpoint in `docs/compliance.md`. The full position,
 including the permanently excluded targets and the date the decision must be
 re-reviewed, is in "Scraping: disabled by default" below.
+
+## Match timelines
+
+`GET /lol/match/v5/matches/{matchId}/timeline` is the second MATCH-V5 resource the
+project reads, and it is a separate request from the summary rather than a field
+of it. It returns the match envelope (`metadata.matchId`,
+`metadata.participants`), `info.frameInterval` and `info.frames[]`, where a frame
+carries the per-participant minute - CS, XP, gold, level and position - together
+with the event stream. `internal/riot/timeline.go` is the DTO and states what is
+modelled and what is deliberately not: the event array stays the verbatim payload
+and is read with `json_extract`, as the summary's own events already are, because
+the event set is wide, polymorphic and partly undocumented.
+
+**The endpoint documents no query parameters.** A timeline is a whole-match
+resource, so there is nothing to page, filter or narrow: the match id is the
+entire request, and a caller that wants one minute of a match still fetches all
+of it. That is the opposite of the match-id list endpoint, which takes `start`,
+`count`, `queue`, `type`, `startTime` and `endTime`.
+
+**The payload size is an estimate, not a measurement.** A timeline is roughly ten
+times a match summary: reports put a summary near 100 KB and a timeline near
+1.1 MB, and both are third-party measurement rather than Riot documentation or
+this project's own archive. Budget about 1 MB uncompressed and expect tens of KB
+compressed. No measured per-timeline figure exists yet - the first real batch
+measures one, and this page is where it is recorded - so until then the estimate
+is a budget to plan against, not a property of the archive.
+
+Frames are no longer spaced a uniform 60 s - gaps of roughly 60.5-71.3 s have
+been observed since around patch 16.1 - so a minute is
+`floor(frame_timestamp_ms / 60000)` and never the frame index. Timeline payloads
+are written verbatim to an append-only archive of their own,
+`raw/riot/match-v5-timeline/dt=<fetch date>/part-N.parquet[.zst]`, partitioned by
+fetch date under the discipline "What the raw archive retains" describes above.
+The partition is separate because the two payloads have different retention at
+Riot, so a partition holding both would answer "what do we have for this date"
+with a half-empty answer for one of the two. That retention asymmetry, and what
+it forces on any feature built from timelines, is in "Retention and rate limits,
+and what they force" above.
 
 ## What the raw archive retains
 
@@ -518,7 +557,8 @@ of the real `web/dist` build, 1063 pages, over local HTTP.
   storage module, reached at a different page size only by chance. **The
   shipped 2048-byte cap is load-bearing**: it is what keeps HTML out of a cache that
   would return damaged pages, and raising it would need the storage defect fixed first.
-- `sh scripts/verify-serving.sh http://127.0.0.1:8095` exits 0 against this image.
+- The serving script of the day, pointed at that image on `127.0.0.1:8095`, exited
+  0. Both the script and the image were deleted on 2026-09-18.
 
 **G0.7 Legal posture - pass.** Every artefact the pass condition names exists, line by
 line:
@@ -658,9 +698,16 @@ than as the agent that measured the failure. Date: 2026-09-17.
 
 Riot production rate limits (read from response headers, never hardcoded - the
 published changelog is stale), the Postgres major version, the DuckDB release to
-pin, TimescaleDB's licence split if it is ever reconsidered, the Astro major
-version, and every third-party bundle-size comparison that influenced a frontend
-decision.
+pin, Riot's plugin policy, and TimescaleDB's licence split if it is ever
+reconsidered. So is the timeline frame interval, observed at roughly 60.5-71.3 s
+per frame rather than a uniform 60 s since around patch 16.1, because every
+minute-bucketed column in `timeline-v1` is derived from
+`floor(frame_timestamp_ms / 60000)` and would silently shift if the spacing
+changed again. Three entries were dropped on 2026-09-18 when the web tier was
+retired (`docs/decisions/ADR-011-retire-the-web-tier.md`): the Astro major
+version, the inner Caddy release, and every third-party bundle-size comparison
+that influenced a frontend decision. None of them has a consumer in this
+repository any more.
 
 ## Primary sources
 

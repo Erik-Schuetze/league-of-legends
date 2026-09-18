@@ -208,12 +208,12 @@ func TestClaimJobsSkipsLockedRowsAndReturnsUrgentFirst(t *testing.T) {
 	s, mock, rec := newTestStore(t, nil)
 
 	claimedAt := testNow.Add(-time.Second)
-	rows := sqlmock.NewRows([]string{"id", "match_id", "priority", "attempts", "not_before", "claimed_at", "status"}).
-		AddRow(3, "EUW1_3", 200, 1, testNow, claimedAt, "claimed").
-		AddRow(1, "EUW1_1", 0, 0, testNow, claimedAt, "claimed").
-		AddRow(2, "EUW1_2", 100, 2, testNow.Add(-time.Hour), claimedAt, "claimed")
+	rows := sqlmock.NewRows([]string{"id", "match_id", "kind", "priority", "attempts", "not_before", "claimed_at", "status"}).
+		AddRow(3, "EUW1_3", "match", 200, 1, testNow, claimedAt, "claimed").
+		AddRow(1, "EUW1_1", "match", 0, 0, testNow, claimedAt, "claimed").
+		AddRow(2, "EUW1_2", "match", 100, 2, testNow.Add(-time.Hour), claimedAt, "claimed")
 	mock.ExpectQuery(sqlPattern(claimJobsSQL)).
-		WithArgs(testNow.UTC(), 20, string(contract.JobClaimed)).
+		WithArgs(testNow.UTC(), 20, string(contract.JobClaimed), string(contract.KindMatch)).
 		WillReturnRows(rows)
 
 	items, err := s.ClaimJobs(context.Background(), 20, testNow)
@@ -253,8 +253,8 @@ func TestClaimJobsClampsItsLimit(t *testing.T) {
 	t.Run("an oversized limit is capped", func(t *testing.T) {
 		s, mock, _ := newTestStore(t, nil)
 		mock.ExpectQuery(sqlPattern(claimJobsSQL)).
-			WithArgs(testNow.UTC(), maxClaimLimit, string(contract.JobClaimed)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "match_id", "priority", "attempts", "not_before", "claimed_at", "status"}))
+			WithArgs(testNow.UTC(), maxClaimLimit, string(contract.JobClaimed), string(contract.KindMatch)).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "match_id", "kind", "priority", "attempts", "not_before", "claimed_at", "status"}))
 		items, err := s.ClaimJobs(context.Background(), maxClaimLimit*10, testNow)
 		if err != nil {
 			t.Fatalf("ClaimJobs: %v", err)
@@ -335,28 +335,26 @@ func TestJobStateChangesAreGuardedByTheStateTheyExpect(t *testing.T) {
 // the last two parameters, after the five per row.
 func enqueueSQL(rows int) string {
 	var sb strings.Builder
-	sb.WriteString("INSERT INTO fetch_queue (match_id, priority, attempts, not_before, status) VALUES ")
+	sb.WriteString("INSERT INTO fetch_queue (match_id, kind, priority, attempts, not_before, status) VALUES ")
 	for i := 0; i < rows; i++ {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		base := i * 5
-		sb.WriteString("($")
-		sb.WriteString(strconvI(base + 1))
-		sb.WriteString(", $")
-		sb.WriteString(strconvI(base + 2))
-		sb.WriteString(", $")
-		sb.WriteString(strconvI(base + 3))
-		sb.WriteString(", $")
-		sb.WriteString(strconvI(base + 4))
-		sb.WriteString(", $")
-		sb.WriteString(strconvI(base + 5))
+		base := i * 6
+		for p := 1; p <= 6; p++ {
+			if p == 1 {
+				sb.WriteString("($")
+			} else {
+				sb.WriteString(", $")
+			}
+			sb.WriteString(strconvI(base + p))
+		}
 		sb.WriteString(")")
 	}
-	sb.WriteString(" ON CONFLICT (match_id) DO UPDATE SET ")
+	sb.WriteString(" ON CONFLICT (match_id, kind) DO UPDATE SET ")
 	sb.WriteString(reviveDeadRowSet)
 	sb.WriteString(" WHERE ")
-	sb.WriteString(reviveDeadRowWhere(rows*5+1, rows*5+2))
+	sb.WriteString(reviveDeadRowWhere(rows*6+1, rows*6+2))
 	return sb.String()
 }
 
@@ -379,8 +377,8 @@ func TestEnqueueMatchesDedupesInsideOneBatch(t *testing.T) {
 		{MatchID: "EUW1_1", Priority: 0},
 	}
 	mock.ExpectExec(sqlPattern(enqueueSQL(2))).
-		WithArgs("EUW1_1", 0, 0, testNow.UTC(), string(contract.JobPending),
-			"EUW1_2", 100, 0, testNow.UTC(), string(contract.JobPending),
+		WithArgs("EUW1_1", string(contract.KindMatch), 0, 0, testNow.UTC(), string(contract.JobPending),
+			"EUW1_2", string(contract.KindMatch), 100, 0, testNow.UTC(), string(contract.JobPending),
 			string(contract.JobDead), revivalBudget).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -646,7 +644,7 @@ func TestDeadLetteredWorkIsRecoverable(t *testing.T) {
 	t.Run("re-discovering a retired match revives its row", func(t *testing.T) {
 		s, mock, _ := newTestStore(t, nil)
 		mock.ExpectExec(sqlPattern(enqueueSQL(1))).
-			WithArgs("EUW1_1", 100, 0, testNow.UTC(), string(contract.JobPending),
+			WithArgs("EUW1_1", string(contract.KindMatch), 100, 0, testNow.UTC(), string(contract.JobPending),
 				string(contract.JobDead), revivalBudget).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		if _, err := s.EnqueueMatches(context.Background(), []contract.QueueItem{{MatchID: "EUW1_1", Priority: 100}}); err != nil {
@@ -655,14 +653,14 @@ func TestDeadLetteredWorkIsRecoverable(t *testing.T) {
 		// The parameter is the whole guarantee: the conflict clause only
 		// touches rows in this state, so a pending or claimed row keeps its
 		// attempts and its deadline.
-		if !strings.Contains(enqueueSQL(1), "WHERE fetch_queue.status = $6") {
+		if !strings.Contains(enqueueSQL(1), "WHERE fetch_queue.status = $7") {
 			t.Fatal("the enqueue conflict clause no longer guards on the retired status")
 		}
 		// The second half of the guard is the revival budget, and it is what
 		// makes the revival terminate: a row that is rediscovered by every walk
 		// of every player who played it would otherwise be re-queued forever,
 		// each revival restarting the attempt budget that exists to retire it.
-		if !strings.Contains(enqueueSQL(1), "fetch_queue.revivals < $7") {
+		if !strings.Contains(enqueueSQL(1), "fetch_queue.revivals < $8") {
 			t.Fatal("the enqueue conflict clause revives a dead row regardless of how often it has already been revived")
 		}
 		if revivalBudget < 1 {

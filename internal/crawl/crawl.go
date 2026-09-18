@@ -101,15 +101,17 @@ func (d *Deps) normalize() {
 type Fetcher interface {
 	// MatchWithPayload returns the summary and the verbatim response body.
 	MatchWithPayload(ctx context.Context, matchID string) (riot.MatchDTO, []byte, error)
+	// TimelineWithPayload returns the timeline and the verbatim response body.
+	TimelineWithPayload(ctx context.Context, matchID string) (riot.TimelineDTO, []byte, error)
 	MatchIDs(ctx context.Context, q riot.MatchListQuery) ([]string, error)
 	LeagueEntriesWithPayload(ctx context.Context, q riot.LeagueQuery) ([]riot.LeagueEntryDTO, []byte, error)
 	ApexLeague(ctx context.Context, queue, tier string) ([]riot.LeagueEntryDTO, []byte, error)
 }
 
 // Adapter exposes *riot.Client as the frozen contract.RiotClient. It exists so
-// that any consumer that only knows the contract (the aggregate side, a future
-// timeline fetcher) can be handed the same client the crawler uses, without
-// that consumer importing internal/riot's option surface.
+// that any consumer that only knows the contract can be handed the same client
+// the crawler uses, without that consumer importing internal/riot's option
+// surface.
 type Adapter struct {
 	Client *riot.Client
 }
@@ -120,6 +122,17 @@ func NewAdapter(c *riot.Client) *Adapter { return &Adapter{Client: c} }
 // Match implements contract.RiotClient.
 func (a *Adapter) Match(ctx context.Context, matchID string) (riot.MatchDTO, error) {
 	return a.Client.Match(ctx, matchID)
+}
+
+// Timeline implements contract.RiotClient.
+func (a *Adapter) Timeline(ctx context.Context, matchID string) (riot.TimelineDTO, error) {
+	return a.Client.Timeline(ctx, matchID)
+}
+
+// TimelineWithPayload implements Fetcher: the archive stores the bytes Riot
+// sent, so the crawl path needs the body rather than the decoded value.
+func (a *Adapter) TimelineWithPayload(ctx context.Context, matchID string) (riot.TimelineDTO, []byte, error) {
+	return a.Client.TimelineWithPayload(ctx, matchID)
 }
 
 // MatchIDsByPUUID implements contract.RiotClient.

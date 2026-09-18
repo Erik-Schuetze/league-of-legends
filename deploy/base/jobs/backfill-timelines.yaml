@@ -1,0 +1,164 @@
+# Enqueues a bounded weekly sample of timeline fetches. A timeline is a second
+# request per match - summaries and timelines are separate methods with separate
+# rate-limit budgets - so this job is deliberately neither nightly nor daily:
+# every run adds one more request per match it selects, and nothing downstream is
+# waiting on any of them.
+#
+# What it does is one control-plane write. It selects matches the pipeline
+# already holds, within the timeline window, and inserts a `kind='timeline'` row
+# per match into `fetch_queue`; the long-running worker fetches them under the
+# same claim, retry, backoff, dead-letter and revival machinery as a summary
+# fetch. No Riot call is made here, which is why there is no key below, and why
+# `-dry-run` is the way to see the selection - and therefore the request budget a
+# run will spend - before it is spent. See
+# docs/decisions/ADR-012-ingest-match-timelines.md.
+#
+# The window is why a schedule is needed at all. Riot keeps timelines for one
+# year against two for summaries, and the horizon is 330 days because a request
+# inside the last weeks of the window is a request against a payload Riot may
+# already have dropped. A match is therefore reachable for roughly 47 weekly
+# passes, and the selection is ordered by a hash of `match_id` rather than by
+# recency, so each pass takes the next slice of the eligible year instead of
+# re-sampling the newest patch.
+#
+# Sunday 06:00, in the same zone as every other job here. That is clear of the
+# 00:10 discover-seeds and the 01:00 nightly aggregate, of the hourly `maintain`
+# at :20, and two hours past the Sunday 04:00 `backfill` - the other job that
+# spends Riot budget - and it is after the 04:30 postgres dump and the 05:00
+# restic snapshot rather than beside them. It also opens no outward socket: only
+# this namespace's postgres port, which `allow-namespace-egress` covers, so this
+# component is deliberately absent from `allow-riot-egress`.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backfill-timelines
+  labels:
+    app.kubernetes.io/name: lolstats
+    app.kubernetes.io/component: backfill-timelines
+spec:
+  schedule: "0 6 * * 0"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # One statement and a bounded insert; `maintain`'s 30 minutes is the
+      # template, and the fetching this enqueues happens in the worker, not here.
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 43200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lolstats
+            app.kubernetes.io/component: backfill-timelines
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          # Same cold-start dial race as `maintain` (see that file for the
+          # measurement): this job opens postgres before it does anything else,
+          # and restartPolicy: Never means a retry is a fresh pod with a fresh
+          # namespace, so a refused first dial is fatal rather than transient.
+          initContainers:
+            - name: wait-for-postgres
+              image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  if [ -z "${LOLSTATS_POSTGRES_DSN:-}" ]; then
+                      echo "wait-for-postgres: LOLSTATS_POSTGRES_DSN is empty" >&2
+                      exit 1
+                  fi
+                  authority=${LOLSTATS_POSTGRES_DSN##*@}
+                  authority=${authority%%/*}
+                  host=${authority%%:*}
+                  port=${authority##*:}
+                  deadline=$(( $(date +%s) + 120 ))
+                  until nc -z -w 2 "$host" "$port"; do
+                      if [ "$(date +%s)" -ge "$deadline" ]; then
+                          echo "wait-for-postgres: ${host}:${port} did not accept a connection" >&2
+                          exit 1
+                      fi
+                      echo "wait-for-postgres: retrying ${host}:${port}"
+                      sleep 1
+                  done
+                  echo "wait-for-postgres: ${host}:${port} is accepting connections"
+              env:
+                - name: LOLSTATS_POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: DSN
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+          containers:
+            - name: backfill-timelines
+              # TODO: pin to a digest with the other workloads once a tag exists.
+              image: ghcr.io/erik-schuetze/league-of-legends:latest
+              command: ["/lolstats-ingest"]
+              # The one argv flag is the bound: an unbounded enqueue is the one
+              # thing this manifest must not be able to do. It happens to equal
+              # the compiled default (crawl.DefaultTimelineLimit, 1000), so the
+              # run is the same whether the flag or the default decides it - and
+              # a binary that knows the verb arrived with the flag. The horizon
+              # (330 days) and the duration floor (600s) are left to their
+              # defaults so the selection rule moves with the code in
+              # internal/crawl rather than being frozen here.
+              args: ["backfill-timelines", "-limit", "1000"]
+              envFrom:
+                - configMapRef:
+                    name: lolstats-config
+              env:
+                - name: GOMEMLIMIT
+                  value: 256MiB
+                # Enqueuing is a write against the control plane and nothing
+                # else: the selection is a SQL query over `matches`, and the
+                # fetch itself happens in the worker. Riot is not called, so
+                # this job gets no Riot key even when one exists.
+                - name: LOLSTATS_POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: lolstats-postgres
+                      key: DSN
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                # No data volume, deliberately: this run reads `matches` in
+                # postgres and writes `fetch_queue`, and never opens the raw
+                # archive - the payloads are the worker's business, after it
+                # claims these rows. `jobs/migrate.yaml` is the other
+                # control-plane-only job and takes the same shape.
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

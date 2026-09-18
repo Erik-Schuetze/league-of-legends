@@ -3,7 +3,8 @@
 This is the design and operations note for `cmd/lolstats-aggregate`, the only
 producer of the `agg/v1` artifacts the site serves. It covers the engine pin,
 the extraction rules, the cell policy, the gates that make it fail closed, the
-publish protocol, the audit row, and the deterministic demo mode. The rest of
+publish protocol, the audit row, the deterministic demo mode, and the separate
+`timeline-v1` feature dataset (section 13). The rest of
 the contract lives in `docs/contracts.md` (frozen), the nightly operational
 steps in `docs/runbooks/rebuild-aggregates.md`, and the decisions with their
 alternatives in `docs/decisions/` (index in `docs/decisions/README.md`).
@@ -12,7 +13,7 @@ alternatives in `docs/decisions/` (index in `docs/decisions/README.md`).
 | --- | --- |
 | Input | the immutable raw archive, `raw/riot/match-v5/dt=<date>/part-*.parquet[.zst]` |
 | Engine | DuckDB **1.4.5 LTS**, run as a subprocess, pinned by release, version asserted at startup |
-| Never read | timelines. A tier list is computed from match summaries alone |
+| Never read | timelines. This build reads match summaries only; timelines feed the separate `timeline-v1` dataset (section 13) |
 | Output | `agg/v1/manifest.json` plus one directory per `p/<patch>/<region>/<queue>/<bracket>` |
 | Publish | staged directory, then `rename(2)`; `manifest.json` swaps last |
 | Failure | the build fails, rolls itself back, and the previous artifacts stay live |
@@ -523,8 +524,7 @@ still on disk for the moment the rename takes, and a reader should reach the
 live tree or nothing, never the previous copy under a temporary name), the
 decompressed raw-archive scratch (which lives at `<staging>/.scratch` and is
 removed with the staging tree), and the on-disk `build-runs/` breadcrumbs, which
-live beside the aggregate root and are not under any path the serving tier
-reads.
+live beside the aggregate root and are not under the published path.
 
 ## 8. The audit row
 
@@ -760,3 +760,103 @@ injected as an interface, `Now` is injected, and the audit sink falls back to a
 file. That is what makes the whole build verifiable offline against
 `fixtures/agg/`, and it is why the DuckDB client is the only external thing a
 test has to find.
+
+## 13. The `timeline-v1` feature dataset
+
+`lolstats-aggregate features` builds a second dataset, from match timelines
+rather than match summaries. It shares a binary and an archive root with the
+nightly build and nothing else: it is not part of `agg/v1`, and
+`docs/decisions/ADR-012-ingest-match-timelines.md` is the decision behind it.
+
+| Question | Answer |
+| --- | --- |
+| Input | both raw archives: summaries from `raw/riot/match-v5/dt=<date>/part-*.parquet[.zst]` and timelines from `raw/riot/match-v5-timeline/dt=<date>/part-*.parquet[.zst]` |
+| Output | `<AGG_DATASET_ROOT>/timeline-v1/` with `manifest.json`, `README.md`, `schema.json` and one directory per table |
+| Dataset root | `LOLSTATS_AGG_DATASET_ROOT`, default `/var/lib/lolstats/datasets` |
+| Tables | `match_index`, `participant_minutes`, `events`, `lane_matchups`, `participant_early`, `match_objectives` |
+| Publish | staged directory, then `rename(2)`; `manifest.json` swaps last |
+| Failure | the build fails, rolls itself back, and the previous dataset stays live |
+| Contract | none. The manifest is a build receipt, not a reader contract |
+
+Each table is a directory of Parquet parts rather than one file, so a reader
+globs a table instead of opening a name that depends on how many batches the
+build happened to use. Participants are identified only by the 1-based
+`participant_id` 1-10 within a match; no `puuid` is published. The timeline
+`events[]` array is read verbatim from the payload with `json_extract` rather
+than through modelled Go structs, the same way summary events are read.
+
+### Why it is a separate build
+
+- **`agg/v1` is a frozen reader contract with `min_cell_n: 100`.** A
+  minute-level dataset cannot be suppressed at that floor - a lane matchup is
+  two participants, not a hundred - so folding timelines into `agg/v1` would
+  either break the contract or publish cells the contract forbids.
+- **The nightly tier list must not depend on the timeline extract.** The nightly
+  build still reads `match-v5` alone, so a bad timeline run cannot fail the
+  nightly artifacts. The one shared surface is the source walk in
+  `internal/aggregate/rawarchive.go`.
+- **The shape is expected to move.** The dataset is versioned `timeline-v1`
+  under its own root, so a reshape publishes `timeline-v2` beside it rather than
+  reinterpreting `timeline-v1` for readers that already have it.
+
+### Gates: fail closed
+
+A run publishes a complete dataset or changes nothing, and each gate has a
+sentinel error so the log names the cause.
+
+| Gate | Fails when | Sentinel |
+| --- | --- | --- |
+| timeline archive readable | the timeline archive holds no Parquet part | `ErrNoTimelineArchive` |
+| orphans | a timeline payload has no summary row | `ErrFeatureOrphans` |
+| eligible matches | every match in scope was excluded | `ErrFeatureNoEligibleMatches` |
+| reconciliation | a per-matchup table is not one row per participant | `ErrFeatureReconciliation` |
+| schema agreement | a built table's columns are not the columns `schema.json` describes | `ErrFeatureSchemaDrift` |
+
+### Publishing
+
+Publishing is the discipline of section 7 applied to a second tree: the whole
+dataset is built in a staging directory beside `timeline-v1`, each table
+directory is moved into place with `rename(2)`, and `manifest.json` swaps last,
+so a failed run leaves the previous dataset live. `rename(2)` does not cross
+filesystems, so the staging directory sits inside the dataset root.
+
+### Documents, and what the manifest is not
+
+`schema.json`, `README.md` and `manifest.json` are rendered by the build. The
+schema document and the README are generated from the same column specification
+the build checks every table against, so a documented column that was not built
+- or a built column that was not documented - fails `ErrFeatureSchemaDrift`
+rather than shipping, and the emitted documents cannot drift from the SQL.
+
+`manifest.json` is a **build receipt, not a reader contract**; it says so in its
+own `notice` field. It records what the run read, excluded and wrote, and
+nothing about its keys is promised to a future reader. This is the opposite of
+the `agg/v1` manifest (section 4.3 of `docs/contracts.md`), which is the frozen
+index a reader depends on.
+
+### The minute rule
+
+Frame spacing is not a uniform 60 s - observed frames have run roughly 60.5-71.3
+s apart since around patch 16.1 - so a minute is
+`floor(frame_timestamp_ms / 60000)` and never the frame index. Counting frames
+would put "minute 10" up to ten per cent early. `frame_timestamp_ms` is
+published beside every derived `minute` so the irregularity is visible in the
+data.
+
+### Running it
+
+```
+# the engine first: see section 1
+export LOLSTATS_DUCKDB_BIN="$HOME/.local/duckdb/duckdb"
+
+# build the dataset from both raw archives
+lolstats-aggregate features \
+  --raw ./raw --dataset ./data/datasets \
+  --region EUW --queue 420 --min-duration 600
+```
+
+`--min-duration` is the floor below which a short game is recorded as excluded
+rather than published, and it matches the floor the crawl used to choose the
+sample. The dataset lands under `<dataset>/timeline-v1`; the `features` verb
+never opens the aggregate root, so a dataset run cannot touch the live `agg/v1`
+tree.

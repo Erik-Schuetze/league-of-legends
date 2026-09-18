@@ -86,23 +86,23 @@ func (s *Store) EnqueueMatches(ctx context.Context, items []contract.QueueItem) 
 		chunk := batch[start:end]
 
 		var sb strings.Builder
-		sb.WriteString("INSERT INTO fetch_queue (match_id, priority, attempts, not_before, status) VALUES ")
-		args := make([]any, 0, len(chunk)*5+1)
+		sb.WriteString("INSERT INTO fetch_queue (match_id, kind, priority, attempts, not_before, status) VALUES ")
+		args := make([]any, 0, len(chunk)*6+1)
 		for i, item := range chunk {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			base := i * 5
-			fmt.Fprintf(&sb, "($%d, $%d, $%d, $%d, $%d)", base+1, base+2, base+3, base+4, base+5)
+			base := i * 6
+			fmt.Fprintf(&sb, "($%d, $%d, $%d, $%d, $%d, $%d)", base+1, base+2, base+3, base+4, base+5, base+6)
 			notBefore := item.NotBefore
 			if notBefore.IsZero() {
 				notBefore = now
 			}
-			args = append(args, item.MatchID, item.Priority, item.Attempts, notBefore.UTC(), string(contract.JobPending))
+			args = append(args, item.MatchID, item.Kind.Stored(), item.Priority, item.Attempts, notBefore.UTC(), string(contract.JobPending))
 		}
-		statusArg := len(chunk)*5 + 1
+		statusArg := len(chunk)*6 + 1
 		budgetArg := statusArg + 1
-		fmt.Fprintf(&sb, " ON CONFLICT (match_id) DO UPDATE\nSET %s\nWHERE %s",
+		fmt.Fprintf(&sb, " ON CONFLICT (match_id, kind) DO UPDATE\nSET %s\nWHERE %s",
 			reviveDeadRowSet, reviveDeadRowWhere(statusArg, budgetArg))
 		args = append(args, string(contract.JobDead), revivalBudget)
 
@@ -119,10 +119,14 @@ func (s *Store) EnqueueMatches(ctx context.Context, items []contract.QueueItem) 
 	return added, nil
 }
 
-// dedupeQueueItems collapses repeated match ids, keeping the most urgent
-// priority in the batch. Lower priority values are claimed first, so a match
-// discovered both as a seed and as another player's participant keeps the
+// dedupeQueueItems collapses repeated (match id, kind) pairs, keeping the most
+// urgent priority in the batch. Lower priority values are claimed first, so a
+// match discovered both as a seed and as another player's participant keeps the
 // earlier priority.
+//
+// The kind is part of the key: a summary and a timeline for one match are two
+// different jobs, and collapsing them would silently drop one of the two
+// requests the caller asked for.
 func dedupeQueueItems(items []contract.QueueItem) []contract.QueueItem {
 	seen := make(map[string]int, len(items))
 	out := make([]contract.QueueItem, 0, len(items))
@@ -130,19 +134,20 @@ func dedupeQueueItems(items []contract.QueueItem) []contract.QueueItem {
 		if item.MatchID == "" {
 			continue
 		}
-		if idx, ok := seen[item.MatchID]; ok {
+		key := item.MatchID + "\x00" + item.Kind.Stored()
+		if idx, ok := seen[key]; ok {
 			if item.Priority < out[idx].Priority {
 				out[idx].Priority = item.Priority
 			}
 			continue
 		}
-		seen[item.MatchID] = len(out)
+		seen[key] = len(out)
 		out = append(out, item)
 	}
 	return out
 }
 
-// claimJobsSQL hands out the most urgent ready work.
+// claimJobsSQL hands out the most urgent ready work of one kind.
 //
 // `FOR UPDATE SKIP LOCKED` is what makes two workers safe: a row another worker
 // has already locked is skipped rather than waited on, so the queue never
@@ -153,28 +158,43 @@ func dedupeQueueItems(items []contract.QueueItem) []contract.QueueItem {
 // The attempt counter increments at claim time, not at failure time: a worker
 // that dies mid-fetch must still consume an attempt, otherwise a payload that
 // reliably kills the process would be retried forever.
+//
+// `kind = $4` is not an optimisation. A worker can only fetch one payload type,
+// so a summary worker that claimed a timeline row would have no handler for it
+// and would have to put it back, and a timeline worker that claimed a summary
+// row would fetch the wrong thing under the wrong method label - which is also
+// what the rate limiter keys on.
 const claimJobsSQL = `
 UPDATE fetch_queue q
 SET status = $3, claimed_at = $1, attempts = q.attempts + 1
 WHERE q.id IN (
     SELECT id FROM fetch_queue
-    WHERE status IN ('pending', 'retry') AND not_before <= $1
+    WHERE kind = $4 AND status IN ('pending', 'retry') AND not_before <= $1
     ORDER BY priority, not_before, id
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING q.id, q.match_id, q.priority, q.attempts, q.not_before, q.claimed_at, q.status`
+RETURNING q.id, q.match_id, q.kind, q.priority, q.attempts, q.not_before, q.claimed_at, q.status`
 
-// ClaimJobs reserves up to limit ready jobs for this worker. The returned items
-// are ordered by the same keys the statement ordered by, because the caller's
-// rate limiter should spend its budget on the most urgent work first and
-// RETURNING does not promise an order.
+// ClaimJobs reserves up to limit ready match-summary jobs for this worker.
+//
+// It is ClaimJobsOfKind(ctx, contract.KindMatch, ...) rather than a
+// kind-agnostic claim, because a kind-agnostic claim is the bug: whichever
+// worker ran first would take the other's backlog.
 func (s *Store) ClaimJobs(ctx context.Context, limit int, now time.Time) ([]contract.QueueItem, error) {
+	return s.ClaimJobsOfKind(ctx, contract.KindMatch, limit, now)
+}
+
+// ClaimJobsOfKind reserves up to limit ready jobs of one kind. The returned
+// items are ordered by the same keys the statement ordered by, because the
+// caller's rate limiter should spend its budget on the most urgent work first
+// and RETURNING does not promise an order.
+func (s *Store) ClaimJobsOfKind(ctx context.Context, kind contract.QueueKind, limit int, now time.Time) ([]contract.QueueItem, error) {
 	limit = clampLimit(limit)
 	if limit == 0 {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, claimJobsSQL, now.UTC(), limit, string(contract.JobClaimed))
+	rows, err := s.db.QueryContext(ctx, claimJobsSQL, now.UTC(), limit, string(contract.JobClaimed), kind.Stored())
 	if err != nil {
 		return nil, fmt.Errorf("store: ClaimJobs: %w", err)
 	}
@@ -184,13 +204,15 @@ func (s *Store) ClaimJobs(ctx context.Context, limit int, now time.Time) ([]cont
 	for rows.Next() {
 		var (
 			item      contract.QueueItem
+			jobKind   string
 			notBefore sql.NullTime
 			claimedAt sql.NullTime
 			status    string
 		)
-		if err := rows.Scan(&item.ID, &item.MatchID, &item.Priority, &item.Attempts, &notBefore, &claimedAt, &status); err != nil {
+		if err := rows.Scan(&item.ID, &item.MatchID, &jobKind, &item.Priority, &item.Attempts, &notBefore, &claimedAt, &status); err != nil {
 			return nil, fmt.Errorf("store: ClaimJobs: %w", err)
 		}
+		item.Kind = contract.ParseQueueKind(jobKind)
 		item.NotBefore = notBefore.Time
 		item.ClaimedAt = claimedAt.Time
 		item.Status = contract.JobStatus(status)

@@ -22,7 +22,8 @@ base/                     what the service is
   postgres/               independent Postgres: StatefulSet, Service, PVC
   ingest/                 the long-running worker
   jobs/                   the scheduled jobs, and the PreSync migration hook
-  web/                    the Go serving tier: Deployments, Services, policy
+  web/                    the ClusterIP Service the shared Caddy proxies to
+                          (currently with no workload behind it)
   network/                default-deny and the exceptions to it
 overlays/homelab/         what is different about this cluster
   kustomization.yaml      storage classes, node exclusion, image tags
@@ -98,9 +99,8 @@ file never breaks `kubectl kustomize` or an ArgoCD sync.
 
 What "no Riot key" actually means, because the answer is not uniform:
 
-- **The stack comes up without it.** Postgres, `lolstats-go-web` (the Go serving
-  tier), `lolstats-aggregate`, `maintain` and `backup-postgres` never read the
-  Riot key.
+- **The stack comes up without it.** Postgres, `lolstats-aggregate`, `maintain`
+  and `backup-postgres` never read the Riot key.
 - **The Riot consumers do not.** `lolstats-ingest worker`, `discover-seeds` and
   the `backfill` re-fetch path call `require(cfg.Riot, ...)` and exit non-zero
   with `RIOT_API_KEY is required` when it is unset. The key is an optional env
@@ -110,24 +110,20 @@ What "no Riot key" actually means, because the answer is not uniform:
   and `discover-seeds` failing nightly until the Secret exists. Nothing else
   depends on either of them, and installing the Secret - with no manifest change
   and no restart of anything - is the fix.
-- **And the public site serves the published snapshot, not a preview.** The
-  owner's 2026-09-17 decisions (D-1/D-4, recorded in `docs/decisions` as commit
-  `b262dcd`) answered §15 question 6 in favour of publishing real Riot-derived
-  aggregates and waived the compliance workstream, superseding
-  `docs/decisions/ADR-010-public-preview-posture.md`. The posture is one env var,
-  `LOLSTATS_AGG_FIXTURES`: `base/config.yaml` still carries `"only"` for the
-  workloads that read the shared ConfigMap, and `base/web/go-deployment.yaml`
-  declares `"off"` on its own container so what the public tier serves does not
-  depend on a shared key another lane is free to move. `"off"` means "render
-  `LOLSTATS_AGG_ROOT` and never substitute fixtures" - a snapshot with no
-  manifest is a loud 503, not a table of demo rows.
-  `TestDeployedPostureRendersRealData` in `internal/webtier` resolves every
-  active `LOLSTATS_AGG_FIXTURES` under `base/web/` through the tier's own root
-  selection and fails if the demo tree can be reached. Fixing the key gap below
-  no longer changes what the public site serves; it resumes crawl into a
-  snapshot that is already published.
+- **And nothing is published while it is missing.** The owner's 2026-09-17
+  decisions (D-1/D-4, recorded in `docs/decisions` as commit `b262dcd`) answered
+  §15 question 6 in favour of publishing real Riot-derived aggregates, and they
+  were the reason a serving tier existed at all rather than a preview. That tier
+  is gone as of 2026-09-18: fixing the key gap below resumes the crawl, and the
+  aggregate job will publish real snapshots to `agg/`, but no process in this
+  cluster reads them, so the public name answers 503 either way. What the key
+  buys today is an archive that is being filled rather than frozen.
 - The `backfill` job is suspended and stays that way; it is a manual tool, so a
   missing key only matters on the day someone runs it.
+- `backfill-timelines` needs no key either, and unlike the `backfill` path that is
+  structural rather than incidental: it enqueues a bounded sample of timeline
+  fetches into `fetch_queue` and makes no Riot request itself, so it spends the
+  rate-limit budget only when the worker drains what it wrote.
 - `static-sync`, which mirrored the public Data Dragon CDN and needed no Riot key,
   was deleted on 2026-09-17 with the rest of the static path. The
   `static-sync` subcommand still exists in `cmd/lolstats-ingest`; there is simply
@@ -155,7 +151,7 @@ Two properties are wanted at once, and only this shape gives both.
 else in this directory, so no workload can start against a schema that is behind
 the binary. The alternative - an initContainer on the workloads that touch
 Postgres - orders startup just as well, but it has to be replicated into the
-ingest Deployment and all seven job templates, and it makes a Postgres that is
+ingest Deployment and all eight job templates, and it makes a Postgres that is
 briefly unreachable into a crash-loop of every workload rather than one failed
 hook that says what went wrong.
 
@@ -242,11 +238,21 @@ One RWX volume, `lolstats-data` on the `nfs-client` StorageClass, mounted at
   system can reproduce it.
 - `agg/` - the published aggregates, published by renaming a directory into
   place, so a reader never sees a half-written tree.
-- `site/` - the rendered HTML the deleted static tier used to serve. **Nothing
-  writes it any more** (2026-09-17): `site-build` and the inner Caddy
-  that served the tree are gone, and the Go tier renders from `agg/` per request.
-  Whatever tree is still on the volume is inert - it is not read, and nothing here
-  prunes it, so removing it is a manual `rm` on the volume if you want the space.
+- `datasets/` - the timeline feature dataset, published the same way: every table
+  directory first, then the documents that describe them, then `manifest.json`
+  last, so a failed run leaves the previous dataset live. It is derived from
+  **both** raw archives and is rebuilt by hand with `lolstats-aggregate features`
+  - nothing schedules it, deliberately, so a bad timeline extract cannot fail the
+  nightly tier list. `base/jobs/backfill-timelines.yaml` is the weekly job that
+  fills the timeline half of the archive this dataset reads. See
+  `docs/decisions/ADR-012-ingest-match-timelines.md` and
+  `docs/runbooks/rebuild-aggregates.md`.
+- `site/` - the rendered HTML two deleted tiers used to serve. **Nothing writes
+  it any more** (2026-09-17): `site-build` and the inner Caddy that served the
+  tree are gone, and the Go tier that replaced them rendered from `agg/` per
+  request and was itself retired on 2026-09-18. Whatever tree is still on the
+  volume is inert - it is not read, and nothing here prunes it, so removing it is
+  a manual `rm` on the volume if you want the space.
 
 Postgres keeps its own `longhorn` PVC instead: it wants replicated local NVMe,
 not a network filesystem (see `homecluster/docs/architecture.md` section 3).

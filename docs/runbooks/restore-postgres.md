@@ -117,6 +117,8 @@ Prisma CLI, a Node runtime or the application binary.
 
 Destructive. Read the whole sequence before starting, and prefer a quiet window:
 the nightly jobs run 01:00-05:00 Europe/Berlin and the dump is taken at 04:30.
+Step 3 reads the dump through the `pvc-reader` pod from "Reading the backup tree"
+above, so start it first if it is not already running.
 
 ```
 # 0. keep the current state, even the broken one. It costs a file and it is the

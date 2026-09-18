@@ -55,8 +55,8 @@ import "io/fs"
 //
 // The staging tree, the trash directory that holds displaced artifacts, the
 // decompressed raw-archive scratch, and the file-audit breadcrumbs are read by
-// this process alone: none of them is under a path the serving tier reads, and no
-// other uid has any business in them. They get the tightest mode that still lets
+// this process alone: none of them is under the published path, and no other uid
+// has any business in them. They get the tightest mode that still lets
 // the owner work, which is also what the linter prefers.
 const (
 	// publishedDirPerm is the mode of every directory on a served path.

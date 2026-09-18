@@ -18,7 +18,7 @@ GOVULNCHECK           := go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_
 GOFLAGS  := -trimpath
 LDFLAGS  := -s -w
 
-.PHONY: all build vet test test-race fmt lint vuln types run run-aggregate docker-build clean
+.PHONY: all build vet test test-race fmt lint vuln types run run-aggregate run-features docker-build clean
 
 all: fmt vet lint test build
 
@@ -78,6 +78,16 @@ run: build
 
 run-aggregate: build
 	./bin/lolstats-aggregate build
+
+# Derives the timeline feature dataset from both raw archives - the summaries
+# and the timelines - under LOLSTATS_AGG_DATASET_ROOT. It is a second build and a
+# deliberately separate target rather than a flag on `run-aggregate`: the two
+# publish different trees, and a dataset pass must not be able to touch the
+# frozen agg/v1 reader contract the nightly build publishes. Nothing schedules
+# it, so it is run by hand once the timeline archive has grown. See
+# docs/decisions/ADR-012-ingest-match-timelines.md.
+run-features: build
+	./bin/lolstats-aggregate features
 
 # Local convenience only. CI pins the builder and runtime stages by digest in
 # the Dockerfile and runs this same target.

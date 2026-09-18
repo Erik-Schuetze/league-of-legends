@@ -424,16 +424,22 @@ func queueCondition(alias string, queue int) string {
 
 // platformCondition renders the region predicate for one alias. An empty list
 // cannot happen (a region is always configured) but renders as a predicate that
-// is simply false rather than as a syntax error.
+// is simply false rather than as a syntax error. An empty alias qualifies
+// nothing, which is how the dataset build reuses this over an envelope whose
+// only relation is unnamed.
 func platformCondition(alias string, platforms []string) string {
+	column := "platform_id"
+	if alias != "" {
+		column = alias + "." + column
+	}
 	values := make([]string, 0, len(platforms))
 	for _, platform := range platforms {
 		values = append(values, quoteLiteral(platform))
 	}
 	if len(values) == 1 {
-		return fmt.Sprintf("%s.platform_id = %s", alias, values[0])
+		return fmt.Sprintf("%s = %s", column, values[0])
 	}
-	return fmt.Sprintf("%s.platform_id IN (%s)", alias, strings.Join(values, ", "))
+	return fmt.Sprintf("%s IN (%s)", column, strings.Join(values, ", "))
 }
 
 // patchCondition renders the patch predicate for one alias, or the empty string

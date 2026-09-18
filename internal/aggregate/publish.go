@@ -38,7 +38,14 @@ import (
 type Publisher struct {
 	// AggRoot is the aggregate root, e.g. ./data/agg.
 	AggRoot string
-	Log     *slog.Logger
+	// Files are individual files that belong to the published tree but to no
+	// partition directory, e.g. a dataset's README and its schema document.
+	// They are paths relative to both roots, they are moved after every
+	// directory and before the manifest, and a file that does not exist in the
+	// staging tree refuses the publish before anything is moved - so a reader
+	// never sees a tree whose documentation did not arrive with it.
+	Files []string
+	Log   *slog.Logger
 }
 
 // PublishResult reports what was replaced, for logging and for the audit row's
@@ -77,6 +84,12 @@ func (p Publisher) Publish(stagingRoot string, relativeDirs []string, manifestRe
 	manifestSource := filepath.Join(staging, filepath.FromSlash(manifestRel))
 	if info, err := os.Stat(manifestSource); err != nil || info.IsDir() {
 		return PublishResult{}, fmt.Errorf("publish: staged manifest %s is missing", manifestRel)
+	}
+	for _, rel := range p.Files {
+		source := filepath.Join(staging, filepath.FromSlash(rel))
+		if info, err := os.Stat(source); err != nil || info.IsDir() {
+			return PublishResult{}, fmt.Errorf("publish: staged file %s is missing", rel)
+		}
 	}
 
 	trashRoot := filepath.Join(p.AggRoot, trashDirName())
@@ -129,8 +142,34 @@ func (p Publisher) Publish(stagingRoot string, relativeDirs []string, manifestRe
 		p.Log.Info("published partition", "path", rel, "replaced_existing", moved)
 	}
 
+	// The files are dataset content, so they move before the manifest: the
+	// manifest is the receipt, and a receipt that describes a tree whose
+	// documentation has not arrived is a receipt for the wrong tree.
+	for i, rel := range p.Files {
+		slot := len(relativeDirs) + i
+		live := filepath.Join(p.AggRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(live), publishedDirPerm); err != nil { //nolint:gosec // G301: gosec sees a variable mode; publishedDirPerm is 0755 on purpose - see perms.go.
+			return result, p.rollback(fmt.Errorf("publish: create parent of %s: %w", rel, err), result, trashRoot, slot)
+		}
+		moved, err := displaceFile(live, filepath.Join(trashRoot, fmt.Sprintf("old-%d", slot)))
+		if err != nil {
+			return result, p.rollback(err, result, trashRoot, slot)
+		}
+		result.ReplacedExisting = result.ReplacedExisting || moved
+		if err := os.Rename(filepath.Join(staging, filepath.FromSlash(rel)), live); err != nil {
+			if moved {
+				if restoreErr := os.Rename(filepath.Join(trashRoot, fmt.Sprintf("old-%d", slot)), live); restoreErr != nil {
+					p.Log.Error("publish: could not restore displaced file", "path", live, "error", restoreErr)
+				}
+			}
+			return result, fmt.Errorf("publish: move %s into place: %w", rel, err)
+		}
+		result.Replaced = append(result.Replaced, rel)
+		p.Log.Info("published file", "path", rel, "replaced_existing", moved)
+	}
+
 	if err := os.Rename(manifestSource, filepath.Join(p.AggRoot, filepath.FromSlash(manifestRel))); err != nil {
-		return result, p.rollback(fmt.Errorf("publish: swap manifest: %w", err), result, trashRoot, len(relativeDirs))
+		return result, p.rollback(fmt.Errorf("publish: swap manifest: %w", err), result, trashRoot, len(relativeDirs)+len(p.Files))
 	}
 	result.Replaced = append(result.Replaced, manifestRel)
 	p.Log.Info("published manifest", "path", manifestRel)
@@ -180,6 +219,31 @@ func displace(live, trash string) (bool, error) {
 		return false, fmt.Errorf("publish: stat %s: %w", live, err)
 	case !info.IsDir():
 		return false, fmt.Errorf("publish: %s exists and is not a directory", live)
+	}
+	if err := os.RemoveAll(trash); err != nil {
+		return false, fmt.Errorf("publish: clear trash slot: %w", err)
+	}
+	if err := os.Rename(live, trash); err != nil {
+		return false, fmt.Errorf("publish: displace %s: %w", live, err)
+	}
+	return true, nil
+}
+
+// displaceFile is displace for a regular file.
+//
+// It refuses a directory where a file is expected, for the same reason displace
+// refuses a file: the mistake it catches is a staging tree whose shape is not
+// the shape the caller declared, and a rename that silently renames something
+// else into place is worse than a refused publish.
+func displaceFile(live, trash string) (bool, error) {
+	info, err := os.Stat(live)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("publish: stat %s: %w", live, err)
+	case info.IsDir():
+		return false, fmt.Errorf("publish: %s exists and is not a file", live)
 	}
 	if err := os.RemoveAll(trash); err != nil {
 		return false, fmt.Errorf("publish: clear trash slot: %w", err)

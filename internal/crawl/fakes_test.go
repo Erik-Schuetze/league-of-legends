@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,9 @@ type fakeStore struct {
 	// failExists makes the known-match lookup fail, which is the case where the
 	// worker must fall back to fetching rather than treating "unknown" as "no".
 	failExists error
+	// failProvenance makes the provenance read fail, which is the case where a
+	// timeline job must not fetch a payload it cannot archive.
+	failProvenance error
 }
 
 // fakeJob keeps the queue row state the crawler's transitions depend on.
@@ -60,11 +64,12 @@ type fakeJob struct {
 }
 
 var (
-	_ contract.Store    = (*fakeStore)(nil)
-	_ QueueInspector    = (*fakeStore)(nil)
-	_ MaintenanceStore  = (*fakeStore)(nil)
-	_ FrontierInspector = (*fakeStore)(nil)
-	_ KnownMatchChecker = (*fakeStore)(nil)
+	_ contract.Store        = (*fakeStore)(nil)
+	_ QueueInspector        = (*fakeStore)(nil)
+	_ MaintenanceStore      = (*fakeStore)(nil)
+	_ FrontierInspector     = (*fakeStore)(nil)
+	_ KnownMatchChecker     = (*fakeStore)(nil)
+	_ MatchProvenanceReader = (*fakeStore)(nil)
 )
 
 func newFakeStore() *fakeStore {
@@ -129,10 +134,15 @@ func (s *fakeStore) EnqueueMatches(_ context.Context, items []contract.QueueItem
 		if item.MatchID == "" {
 			continue
 		}
-		s.log("enqueue %s", item.MatchID)
+		// The kind is part of the row's identity, exactly as the composite
+		// unique constraint in migration 0004 makes it: a match and its
+		// timeline are two jobs, and a duplicate of one is not a duplicate of
+		// the other.
+		item.Kind = contract.ParseQueueKind(string(item.Kind))
+		s.log("enqueue %s %s", item.Kind, item.MatchID)
 		duplicate := false
 		for _, job := range s.jobs {
-			if job.item.MatchID == item.MatchID && job.status != "dead" {
+			if job.item.MatchID == item.MatchID && job.item.Kind == item.Kind && job.status != "dead" {
 				duplicate = true
 				break
 			}
@@ -152,12 +162,20 @@ func (s *fakeStore) EnqueueMatches(_ context.Context, items []contract.QueueItem
 	return added, nil
 }
 
-// ClaimJobs hands out ready rows in priority order and flips them to claimed,
-// mirroring the SELECT ... FOR UPDATE SKIP LOCKED ... ORDER BY priority.
-func (s *fakeStore) ClaimJobs(_ context.Context, limit int, now time.Time) ([]contract.QueueItem, error) {
+// ClaimJobs hands out ready match-summary rows, which is what every caller
+// before timelines meant.
+func (s *fakeStore) ClaimJobs(ctx context.Context, limit int, now time.Time) ([]contract.QueueItem, error) {
+	return s.ClaimJobsOfKind(ctx, contract.KindMatch, limit, now)
+}
+
+// ClaimJobsOfKind hands out ready rows of one kind in priority order and flips
+// them to claimed, mirroring the SELECT ... FOR UPDATE SKIP LOCKED ... ORDER BY
+// priority with its `kind = $4` filter.
+func (s *fakeStore) ClaimJobsOfKind(_ context.Context, kind contract.QueueKind, limit int, now time.Time) ([]contract.QueueItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.log("claim-jobs %d", limit)
+	kind = contract.ParseQueueKind(string(kind))
+	s.log("claim-jobs %s %d", kind, limit)
 	if s.failClaim != nil {
 		return nil, s.failClaim
 	}
@@ -166,6 +184,9 @@ func (s *fakeStore) ClaimJobs(_ context.Context, limit int, now time.Time) ([]co
 	}
 	ready := make([]int64, 0, len(s.jobs))
 	for id, job := range s.jobs {
+		if job.item.Kind != kind {
+			continue
+		}
 		if job.status != "pending" && job.status != "retry" {
 			continue
 		}
@@ -187,6 +208,86 @@ func (s *fakeStore) ClaimJobs(_ context.Context, limit int, now time.Time) ([]co
 		out = append(out, job.item)
 	}
 	return out, nil
+}
+
+// TimelineCandidates mirrors the store's selection: served matches only, the
+// duration floor, and a job already covering a match taken as done.
+func (s *fakeStore) TimelineCandidates(_ context.Context, q contract.TimelineQuery) (contract.TimelineCandidates, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log("timeline-candidates %d", q.Limit)
+
+	region := q.Region
+	if region == "" {
+		region = "EUW1"
+	}
+	queueID := q.QueueID
+	if queueID == 0 {
+		queueID = 420
+	}
+	floor := q.MinDurationS
+	if q.IncludeShort {
+		floor = 0
+	}
+
+	var out contract.TimelineCandidates
+	for _, id := range s.matchOrder {
+		rec := s.matches[id]
+		if rec.Region != region || rec.QueueID != queueID || rec.GameCreation.Before(q.Since) {
+			continue
+		}
+		out.Eligible++
+		if floor > 0 && rec.GameDurationS < floor {
+			out.ShortExcluded++
+			continue
+		}
+		covered := false
+		for _, job := range s.jobs {
+			if job.item.MatchID == id && job.item.Kind == contract.KindTimeline {
+				covered = true
+				if job.status == "pending" || job.status == "claimed" || job.status == "retry" {
+					out.AlreadyQueued++
+				} else {
+					out.AlreadyDone++
+				}
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		out.Ready++
+		if q.Limit > 0 && len(out.Matches) >= q.Limit {
+			continue
+		}
+		out.Matches = append(out.Matches, contract.TimelineCandidate{
+			MatchID:       rec.MatchID,
+			Region:        rec.Region,
+			QueueID:       rec.QueueID,
+			Patch:         rec.Patch,
+			GameVersion:   rec.GameVersion,
+			GameCreation:  rec.GameCreation,
+			GameDurationS: rec.GameDurationS,
+		})
+	}
+	sort.Slice(out.Matches, func(i, j int) bool { return out.Matches[i].MatchID < out.Matches[j].MatchID })
+	return out, nil
+}
+
+// MatchProvenance returns the archived summary's record, or crawl's terminal
+// "no such match" answer when the fake's control plane does not hold one.
+func (s *fakeStore) MatchProvenance(_ context.Context, matchID string) (contract.MatchRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log("provenance %s", matchID)
+	if s.failProvenance != nil {
+		return contract.MatchRecord{}, s.failProvenance
+	}
+	rec, ok := s.matches[matchID]
+	if !ok {
+		return contract.MatchRecord{}, fmt.Errorf("store: MatchProvenance %s: %w", matchID, ErrMatchNotFound)
+	}
+	return rec, nil
 }
 
 func (s *fakeStore) CompleteJob(ctx context.Context, id int64) error {
@@ -735,8 +836,12 @@ var errTestStoreDown = errors.New("test: control plane unavailable")
 type fakeFetcher struct {
 	mu sync.Mutex
 
-	dtos    map[string]riot.MatchDTO
-	bodies  map[string][]byte
+	dtos   map[string]riot.MatchDTO
+	bodies map[string][]byte
+
+	timelines      map[string]riot.TimelineDTO
+	timelineBodies map[string][]byte
+
 	history map[string][]string
 	pages   map[string][]riot.LeagueEntryDTO
 	apexes  map[string][]riot.LeagueEntryDTO
@@ -771,13 +876,15 @@ var (
 
 func newFakeFetcher(key string) *fakeFetcher {
 	return &fakeFetcher{
-		dtos:    map[string]riot.MatchDTO{},
-		bodies:  map[string][]byte{},
-		history: map[string][]string{},
-		pages:   map[string][]riot.LeagueEntryDTO{},
-		apexes:  map[string][]riot.LeagueEntryDTO{},
-		errors:  map[string]error{},
-		key:     key,
+		dtos:           map[string]riot.MatchDTO{},
+		bodies:         map[string][]byte{},
+		timelines:      map[string]riot.TimelineDTO{},
+		timelineBodies: map[string][]byte{},
+		history:        map[string][]string{},
+		pages:          map[string][]riot.LeagueEntryDTO{},
+		apexes:         map[string][]riot.LeagueEntryDTO{},
+		errors:         map[string]error{},
+		key:            key,
 	}
 }
 
@@ -837,6 +944,15 @@ func (f *fakeFetcher) serve(id string, dto riot.MatchDTO, body []byte) {
 	f.bodies[id] = body
 }
 
+// serveTimeline registers a timeline fixture, and a nil body for a timeline the
+// fake should answer with 404.
+func (f *fakeFetcher) serveTimeline(id string, dto riot.TimelineDTO, body []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.timelines[id] = dto
+	f.timelineBodies[id] = body
+}
+
 func (f *fakeFetcher) MatchWithPayload(_ context.Context, matchID string) (riot.MatchDTO, []byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -852,6 +968,24 @@ func (f *fakeFetcher) MatchWithPayload(_ context.Context, matchID string) (riot.
 		return riot.MatchDTO{}, nil, &riot.StatusError{Method: "match", Status: 404}
 	}
 	return dto, f.bodies[matchID], nil
+}
+
+// TimelineWithPayload answers from the served timelines and reports a 404 for a
+// timeline the fake does not hold, which is how the tests reach the aged-out
+// path: Riot keeps a timeline for one year against the summary's two, so a
+// missing timeline is the normal terminal outcome rather than an anomaly.
+func (f *fakeFetcher) TimelineWithPayload(_ context.Context, matchID string) (riot.TimelineDTO, []byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("timeline:" + matchID)
+	if err, ok := f.errors["timeline:"+matchID]; ok {
+		return riot.TimelineDTO{}, nil, err
+	}
+	dto, ok := f.timelines[matchID]
+	if !ok {
+		return riot.TimelineDTO{}, nil, &riot.StatusError{Method: "timeline", Status: 404}
+	}
+	return dto, f.timelineBodies[matchID], nil
 }
 
 func (f *fakeFetcher) MatchIDs(_ context.Context, q riot.MatchListQuery) ([]string, error) {
@@ -958,9 +1092,13 @@ type fakeWriter struct {
 	static      []staticWrite
 	flushes     int
 
-	failMatch  error
-	failLeague error
-	failFlush  error
+	timelineMetas  []contract.MatchMeta
+	timelineBodies map[string][]byte
+
+	failMatch    error
+	failTimeline error
+	failLeague   error
+	failFlush    error
 
 	// onWrite runs after a payload has been archived, which is the moment a
 	// test can land a shutdown between the archive write and the row close.
@@ -981,7 +1119,24 @@ var (
 )
 
 func newFakeWriter() *fakeWriter {
-	return &fakeWriter{matchBodies: map[string][]byte{}}
+	return &fakeWriter{matchBodies: map[string][]byte{}, timelineBodies: map[string][]byte{}}
+}
+
+// WriteTimeline records a timeline separately from the summaries, because the
+// two counts answer different questions: writeCount() is "how many matches did
+// this batch retain", and a timeline write is not one of them.
+func (w *fakeWriter) WriteTimeline(_ context.Context, timeline riot.TimelineDTO, meta contract.MatchMeta) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.failTimeline != nil {
+		return w.failTimeline
+	}
+	if meta.MatchID == "" {
+		meta.MatchID = timeline.Metadata.MatchID
+	}
+	w.timelineMetas = append(w.timelineMetas, meta)
+	w.timelineBodies[meta.MatchID] = timeline.TimelineRawPayload()
+	return nil
 }
 
 func (w *fakeWriter) WriteMatch(_ context.Context, match riot.MatchDTO, meta contract.MatchMeta) error {
@@ -1127,6 +1282,7 @@ func (s *fakeStore) forceEnqueue(items ...contract.QueueItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, item := range items {
+		item.Kind = contract.ParseQueueKind(string(item.Kind))
 		s.nextID++
 		item.ID = s.nextID
 		s.jobs[s.nextID] = &fakeJob{item: item, status: "pending", notBefore: item.NotBefore}

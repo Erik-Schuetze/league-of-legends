@@ -113,52 +113,17 @@ interface Build { kind: string; key: number[]; label: string; n: number; wins: n
 interface SkillOrder { order: string; n: number; wins: number; win_rate: number; }
 ```
 
-`skill_orders` is present and empty in v1. Timelines are not fetched, so no
-acceptably sized sample exists for it yet, and the page hides the section when
+`skill_orders` is present and empty in v1. `agg/v1` does not read the timeline
+archive, so no acceptably sized sample exists for it here; the skill orders for
+matches that have timelines are published in the separate `timeline-v1` dataset
+(`docs/aggregation.md`), not in this contract. The page hides the section when
 the array is empty rather than rendering a table of forty games.
 
 `Partition` in the manifest repeats the envelope fields for its segment plus
 `cells_published`, `build_run_id`, `git_sha`, `champions: number[]` and
-`matchup_roles: Role[]`. Those last two are the index the frontend uses to build
-links without listing the tree: a champion route that is not in `champions` does
-not exist and must 404 at build time.
-
-### 1.3 Route table
-
-Every route is **rendered at request time** by the Go serving tier
-(`lolstats-web`, section 4.4) from the artifacts below - not pre-rendered into a
-directory of HTML. `<root>` is the aggregate root on the tier's volume, and the
-tier exposes it at the URL prefix `/agg`, so a page that needs
-`<root>/v1/manifest.json` reads `/agg/v1/manifest.json` through the same origin
-it is served from. There is no CORS exception and no second server.
-
-| Route | Artifacts read | JavaScript |
-| --- | --- | --- |
-| `/` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/patches.json`, `<root>/v1/p/<latest>/tierlist.json` | none |
-| `/tier-list/<role>` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/champions.json`, `<root>/v1/p/<latest>/<region>/<queue>/<bracket>/tierlist.json` | `TableIsland`, deferred |
-| `/patch/<version>/tier-list/<role>` | as above with `<version>` in place of `<latest>` | `TableIsland`, deferred |
-| `/champions/<slug>` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/champions.json`, `<root>/v1/p/<latest>/champions/<champion_id>.json` | `HeatmapIsland` only on the matchup section |
-| `/champions/<slug>/<role>` | as above; the role selects which `ChampionRole` is rendered | same |
-| `/matchups/<role>` | `<root>/v1/manifest.json`, `<root>/v1/static/<ddragon>/champions.json`, `<root>/v1/p/<latest>/matchups/<role>.json` | `HeatmapIsland`, deferred |
-| `/about` | none | none |
-| `/legal/terms` | none | none |
-| `/legal/privacy` | none | none |
-| `/disclaimer` | none | none |
-
-`<region>`, `<queue>` and `<bracket>` in the paths above are not route
-parameters. They are read from the manifest's `latest` partition and substituted
-into every URL. The site publishes one region and one bracket in v1, and the
-route stays free of them so that adding a second region is a new manifest entry
-rather than a new route.
-
-`<champion_id>` is looked up from `static/<ddragon>/champions.json` by matching
-the route's `<slug>` against `ChampionSlug(champion.key)`. `<slug>` is never
-parsed back into a champion name.
-
-No route requires JavaScript to render its primary content. Patch switching is
-plain links between snapshots, and the sort/filter/paging controls are GET forms
-that the tier answers server-side; the islands only add interaction on top of a
-page that is already complete.
+`matchup_roles: Role[]`. Those last two are the index a reader uses to build
+links without listing the tree: a champion that is not in `champions` has no
+published artifact, and a reader must treat it as absent rather than guess.
 
 ## 2. Go interfaces
 
@@ -172,12 +137,14 @@ package contract
 
 type RiotClient interface {
 	Match(ctx context.Context, matchID string) (riot.MatchDTO, error)
+	Timeline(ctx context.Context, matchID string) (riot.TimelineDTO, error)
 	MatchIDsByPUUID(ctx context.Context, q MatchListQuery) ([]string, error)
 	LeagueEntries(ctx context.Context, q LeagueQuery) ([]riot.LeagueEntryDTO, error)
 }
 
 type RawWriter interface {
 	WriteMatch(ctx context.Context, match riot.MatchDTO, meta MatchMeta) error
+	WriteTimeline(ctx context.Context, timeline riot.TimelineDTO, meta MatchMeta) error
 	WriteLeagueEntries(ctx context.Context, entries []riot.LeagueEntryDTO, meta LeagueMeta) error
 	Flush(ctx context.Context) error
 }
@@ -242,10 +209,12 @@ type MetricsRecorder interface {
 
 Rules that the signatures do not express:
 
-- **There is no `Timeline` method on `RiotClient`.** Timelines are a second
-  request per match for data only the optional skill-order section uses, and v1
-  ships without that section. Adding the method now buys a rate-limit cost and
-  no product.
+- **`RiotClient` has a `Timeline` method.** Timelines are a second ingested
+  payload: they are fetched per match, archived under their own source, and
+  built into the separate `timeline-v1` dataset that is not part of this
+  contract. The method and `RawWriter.WriteTimeline` are governed by
+  `docs/decisions/ADR-012-ingest-match-timelines.md`; the `agg/v1` artifacts stay
+  computed from match summaries alone.
 - **`ClaimJobs` and `ClaimFrontier` must use `FOR UPDATE SKIP LOCKED`.** The
   crawler is required to be safe to run concurrently with itself. Handing the
   same row to two callers is a bug in the implementation, not in the caller.
@@ -261,7 +230,9 @@ Rules that the signatures do not express:
 - **A failed build leaves the previous artifacts live.** `BuildResult.Status` is
   `ok`, `failed` or `quarantined`; publishing nothing beats publishing garbage.
 
-`RiotClient` returns `riot.MatchDTO`. The DTO subset is frozen to what Match-V5
+`RiotClient.Match` returns `riot.MatchDTO`; `RiotClient.Timeline` returns
+`riot.TimelineDTO` and is not part of this contract (ADR-012). The `MatchDTO`
+subset is frozen to what Match-V5
 summaries carry: `championId`, `teamPosition`, `individualPosition`, `win`,
 `item0`..`item6`, `perks.styles`, `summoner1Id`/`summoner2Id`, the match
 `teams[].bans`, and the match metadata/goal fields. Nothing else may be added to
@@ -310,16 +281,17 @@ Publishing nothing beats publishing garbage, so a build that fails leaves the
 previous tree - and the previous manifest - live.
 
 The static tree is synced as a whole by version directory and old version
-directories are pruned after one release of overlap. The raw archive is
-`raw/riot/match-v5/dt=<date>/part-<n>.parquet.zst`, append-only, never rewritten
-and never migrated in place.
+directories are pruned after one release of overlap. The raw archives are
+`raw/riot/match-v5/dt=<date>/part-<n>.parquet[.zst]` (match summaries) and
+`raw/riot/match-v5-timeline/dt=<date>/part-<n>.parquet[.zst]` (match timelines),
+each append-only, never rewritten and never migrated in place.
 
 ### 4.3 The frozen manifest contract
 
 `manifest.json` is the one file a reader may depend on for the shape of
 everything else, so its keys are frozen. Frozen does not mean optional: a
-missing key is a contract break, and `scripts/verify-serving.sh` fails when the
-served manifest does not carry them.
+missing key is a contract break, and a reader must fail closed on a manifest that
+does not carry them rather than rendering a page with holes in it.
 
 | Key | Frozen value or meaning |
 | --- | --- |

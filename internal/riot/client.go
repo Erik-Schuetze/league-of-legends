@@ -24,6 +24,7 @@ import (
 const (
 	MethodMatch         = "match"
 	MethodMatchIDs      = "match-ids"
+	MethodTimeline      = "timeline"
 	MethodLeagueEntries = "league-entries"
 	MethodAccount       = "account"
 )
@@ -642,6 +643,41 @@ func (c *Client) MatchWithPayload(ctx context.Context, matchID string) (MatchDTO
 	}
 	dto.retainRaw(body)
 	return dto, body, nil
+}
+
+// TimelineWithPayload fetches a match timeline and returns the response body
+// verbatim.
+//
+// The endpoint takes no query parameters. A timeline is a whole-match resource;
+// it cannot be narrowed to the first ten minutes, so one call is one timeline
+// and the whole payload is the price of any minute in it.
+//
+// A 404 here is a terminal answer, not a retryable one. Riot retains match
+// history for two years and timelines for one, so a match that is still
+// fetchable as a summary can have no timeline left. The caller distinguishes
+// the two through IsNotFound; retrying would spend the rate-limit budget of a
+// closing window on a request that cannot succeed.
+func (c *Client) TimelineWithPayload(ctx context.Context, matchID string) (TimelineDTO, []byte, error) {
+	var dto TimelineDTO
+	body, err := c.get(ctx, endpoint{
+		method: MethodTimeline,
+		base:   c.opts.RegionalBaseURL,
+		path:   "/lol/match/v5/matches/" + url.PathEscape(matchID) + "/timeline",
+	}, &dto)
+	if err != nil {
+		return TimelineDTO{}, nil, err
+	}
+	if dto.Metadata.MatchID == "" {
+		dto.Metadata.MatchID = matchID
+	}
+	dto.retainTimelineRaw(body)
+	return dto, body, nil
+}
+
+// Timeline fetches a match timeline without retaining the raw body.
+func (c *Client) Timeline(ctx context.Context, matchID string) (TimelineDTO, error) {
+	dto, _, err := c.TimelineWithPayload(ctx, matchID)
+	return dto, err
 }
 
 // MatchIDs lists recent match ids for a puuid, newest first.

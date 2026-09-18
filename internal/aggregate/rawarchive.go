@@ -17,13 +17,24 @@ import (
 // Raw archive layout, frozen by docs/contracts.md section 4:
 //
 //	<raw root>/riot/match-v5/dt=<YYYY-MM-DD>/part-00001.parquet.zst
+//	<raw root>/riot/match-v5-timeline/dt=<YYYY-MM-DD>/part-00001.parquet.zst
 //
-// The match-v5 directory is the only input this build reads. Timelines are
-// never read: the tier list is computed from match summaries alone.
+// Two sources live side by side under one root, and which one a walk reads is
+// the caller's choice rather than the layout's: the nightly tier-list build
+// reads match-v5 alone (a bad timeline extract must not be able to fail it),
+// and the feature dataset build reads both. RawArchive.Source is that choice.
+// The layout is otherwise identical, so the staging, magic-sniffing and
+// partition-pruning code below is shared verbatim.
 
 const (
-	rawSourceDir   = "match-v5"
-	rawPartitionPr = "dt="
+	// rawSourceDir is the match summary source, and the default a zero Source
+	// resolves to.
+	rawSourceDir = "match-v5"
+	// RawSourceTimeline is the match timeline source, whose rows are the
+	// timeline payloads for the same matches. See
+	// docs/decisions/ADR-012-ingest-match-timelines.md.
+	RawSourceTimeline = "match-v5-timeline"
+	rawPartitionPr    = "dt="
 )
 
 // ArchivePart is one parquet part inside one date partition of the archive.
@@ -35,17 +46,46 @@ type ArchivePart struct {
 	Path string
 }
 
-// RawArchive is a read-only view of the immutable raw match archive.
+// RawArchive is a read-only view of one source of the immutable raw archive.
 type RawArchive struct {
 	// Root is the raw root from configuration, e.g. ./data/raw.
 	Root string
 	// Before prunes partitions that cannot contribute to the window. When the
 	// zero value, nothing is pruned.
 	Before string
+	// Source names the payload directory to walk. Empty means the match
+	// summary source, which is what every caller written before timelines
+	// existed means, so the zero value is the old behaviour.
+	Source string
 }
 
-// ErrArchiveEmpty reports an archive with no match-v5 parts at all.
-var ErrArchiveEmpty = errors.New("raw archive contains no match-v5 parquet parts")
+var (
+	// ErrArchiveEmpty reports an archive with no match-v5 parts at all.
+	ErrArchiveEmpty = errors.New("raw archive contains no match-v5 parquet parts")
+	// ErrNoTimelineArchive reports that the timeline archive holds nothing to
+	// build a dataset from. It is separate from ErrArchiveEmpty because the
+	// two mean opposite things to an operator: an empty summary archive is a
+	// crawler that has not run, and an empty timeline archive is a backfill
+	// that has not run - and the dataset build is allowed to fail on the
+	// second while the tier list is not.
+	ErrNoTimelineArchive = errors.New("raw archive contains no timeline parquet parts")
+)
+
+// sourceDir is the payload directory this view walks.
+func (a RawArchive) sourceDir() string {
+	if a.Source == "" {
+		return rawSourceDir
+	}
+	return a.Source
+}
+
+// emptyErr is the sentinel an empty walk of this source reports.
+func (a RawArchive) emptyErr() error {
+	if a.Source == RawSourceTimeline {
+		return ErrNoTimelineArchive
+	}
+	return ErrArchiveEmpty
+}
 
 // Parts walks the archive and returns the parts that may contribute to the
 // build window.
@@ -57,7 +97,7 @@ var ErrArchiveEmpty = errors.New("raw archive contains no match-v5 parquet parts
 // kept: the crawler may backfill, and the SQL filters on the per-match
 // timestamp anyway.
 func (a RawArchive) Parts() ([]ArchivePart, error) {
-	base := filepath.Join(a.Root, "riot", rawSourceDir)
+	base := filepath.Join(a.Root, "riot", a.sourceDir())
 	entries, err := os.ReadDir(base)
 	if err != nil {
 		return nil, fmt.Errorf("read raw archive %s: %w", base, err)
@@ -87,7 +127,7 @@ func (a RawArchive) Parts() ([]ArchivePart, error) {
 		}
 	}
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("%w under %s", ErrArchiveEmpty, base)
+		return nil, fmt.Errorf("%w under %s", a.emptyErr(), base)
 	}
 	// Deterministic order: the engine's file list must not depend on readdir.
 	sort.Slice(parts, func(i, j int) bool { return parts[i].Path < parts[j].Path })
