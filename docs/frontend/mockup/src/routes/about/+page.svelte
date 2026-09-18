@@ -7,7 +7,7 @@
   import SectionHeader from "$lib/components/SectionHeader.svelte";
   import SuppressionSummary from "$lib/components/SuppressionSummary.svelte";
   import Well from "$lib/components/Well.svelte";
-  import { cells, coverage, dataSource, partitions, unpublishedPairs } from "$lib/data/demo.generated";
+  import { cells, coverage, partitions, unpublishedPairs } from "$lib/data/demo.generated";
   import { contactEmail, derivedOnlySentence, nonEndorsementNotice, siteName } from "$lib/legal";
 </script>
 
@@ -38,7 +38,7 @@
   </PageHeader>
 
   <ProvenanceLine
-    source={dataSource}
+    source={coverage.source}
     variant="block"
     detail="This mockup renders committed fixture artifacts from fixtures/site/v1. The shape matches the production contract; the values do not describe real matches."
   />

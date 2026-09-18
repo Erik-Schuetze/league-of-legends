@@ -127,6 +127,15 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Changed
 
+- The review mockup's data contract seam. Its generated module hand-declared
+  `Coverage`, `Cell`, `RankedRow`, `Champion` and `ChampionRolePage` instead of
+  importing the contract, and that copy had drifted: `Coverage` had lost
+  `schema` and `source` and gained three fields that live on `Partition`, and
+  `RankedRow` merged the contract's `Build` and `SkillOrder` into one
+  all-optional type. The types now come from `schema/agg.d.ts` through a single
+  type-only import surface, `mockup/src/lib/agg.ts`, and the provenance label
+  reads `coverage.source` rather than a separately injected constant. No
+  rendering changed; the assertion suite passes 461/461 as before.
 - Documents that described the deleted static tier as live were corrected on
   2026-09-18, without a behaviour change: the README no longer calls the
   pipeline a scaffold, `CHANGELOG.md`'s own notes no longer say the ingest and

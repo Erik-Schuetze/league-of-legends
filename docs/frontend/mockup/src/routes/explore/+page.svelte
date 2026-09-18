@@ -40,7 +40,6 @@
     cells,
     championById,
     coverage,
-    dataSource,
     generatedAt,
     latestPatch,
     partitions,
@@ -547,7 +546,7 @@
         <li>Tiers are assigned within the partition, so a tier is a rank, not a threshold.</li>
         <li>Pick and ban rates are shares of all games in the same window.</li>
       </ul>
-      <ProvenanceLine source={dataSource} detail={`fixtures/site/v1 · build run ${coverage.build_run_id}`} />
+      <ProvenanceLine source={coverage.source} detail={`fixtures/site/v1 · build run ${coverage.build_run_id}`} />
     </Card>
   </div>
 

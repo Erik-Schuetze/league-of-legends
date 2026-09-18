@@ -3,38 +3,41 @@
 // Provenance: demo artifacts, not live data. The mockup labels every surface
 // that consumes this module with a provenance line.
 
-export type Role = "TOP" | "JUNGLE" | "MID" | "BOTTOM" | "SUPPORT";
-export type Tier = "S+" | "S" | "A" | "B" | "C" | "D";
+// No type below is declared here. They all come from the artifact contract in
+// schema/agg.d.ts, which is generated from internal/aggmodel. A second
+// hand-written copy of a generated contract is a copy that drifts, and it
+// drifts without failing anything.
 
-export interface SourceWindow { from: string; to: string; }
+import type {
+  Bracket, Build, Cell, Champion as ChampionPage, ChampionRole, Envelope,
+  Manifest, Partition, Role, SkillOrder, Source, StaticChampion, Tier, Window,
+} from "$lib/agg";
 
-export interface Coverage {
-  patch: string; region: string; queue: number; bracket: string;
-  generated_at: string; source_window: SourceWindow;
-  min_cell_n: number; suppressed_cells: number; cells_published: number;
-  build_run_id: number; git_sha: string;
-}
+export type {
+  Bracket, Build, Cell, ChampionRole, Role, SkillOrder, Source, Tier,
+};
 
-export interface Cell {
-  champion_id: number; role: Role; n: number; wins: number;
-  win_rate: number; pick_rate: number; ban_rate: number;
-  tier: Tier; ci95_half_width: number;
-}
+export type SourceWindow = Window;
 
-export interface RankedRow {
-  kind?: string; key?: Array<number | string>; label?: string; order?: string;
-  n: number; wins: number; win_rate: number;
-}
+/** The static champion catalogue, without the icon path: the mockup draws no
+ *  champion art. */
+export type Champion = Omit<StaticChampion, "icon">;
 
-export interface ChampionRolePage {
-  champion_id: number; champion_slug: string;
-  roles: Array<{
-    role: Role; stats: Cell; items: RankedRow[];
-    runes: RankedRow[]; spells: RankedRow[]; skill_orders: RankedRow[];
-  }>;
-}
+/** The envelope of the partition this module renders, plus the three
+ *  build-level fields that live on the partition index rather than on the
+ *  envelope. Both halves come from the contract, so this projection cannot
+ *  invent a field the pipeline does not publish. */
+export type Coverage = Envelope &
+  Pick<Partition, "cells_published" | "build_run_id" | "git_sha">;
+
+/** One champion's per-role breakdown. The contract's champion page extends
+ *  Envelope, but every page here belongs to the same partition, so the envelope
+ *  that is constant across the build is dropped. */
+export type ChampionRolePage = Omit<ChampionPage, keyof Envelope>;
 
 export const coverage: Coverage = {
+  "schema": 1,
+  "source": "demo",
   "patch": "16.18",
   "region": "EUW",
   "queue": 420,
@@ -51,9 +54,10 @@ export const coverage: Coverage = {
   "git_sha": "0000000000000000000000000000000000000002"
 };
 
-export const dataSource = "demo";
-
-export const generatedAt = "2026-09-15T04:10:00Z";
+/* The build the whole artifact set belongs to, which is not the same moment as
+   the partition envelope's generated_at. Provenance labels read
+   `coverage.source` instead: the source of the data actually on screen. */
+export const generatedAt: Manifest["generated_at"] = "2026-09-15T04:10:00Z";
 
 /** Every partition the build published. A partition absent from this list has
  *  no published data at all, which is a distinct state from an empty filter. */
@@ -88,8 +92,6 @@ export const latestPatch = "16.18";
 export const ddragonVersion = "16.18.1";
 export const roles: Role[] = ["TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT"];
 export const tiers: Tier[] = ["S+", "S", "A", "B", "C", "D"];
-
-export interface Champion { id: number; key: string; slug: string; name: string; roles: Role[]; }
 
 export const champions: Champion[] = [
   {

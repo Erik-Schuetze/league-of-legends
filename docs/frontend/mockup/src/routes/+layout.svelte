@@ -5,7 +5,7 @@
   import ProvenanceLine from "$lib/components/ProvenanceLine.svelte";
   import SiteNav from "$lib/components/SiteNav.svelte";
   import SiteFooter from "$lib/components/SiteFooter.svelte";
-  import { coverage, dataSource } from "$lib/data/demo.generated";
+  import { coverage } from "$lib/data/demo.generated";
 
   interface Props {
     children: Snippet;
@@ -30,7 +30,7 @@
         This is the design mockup for the rebuilt frontend. It renders committed demo artifacts, not live
         match data, and requests nothing outside this origin.
       </Banner>
-      <ProvenanceLine source={dataSource} detail="committed fixture artifacts · no live ingest" />
+      <ProvenanceLine source={coverage.source} detail="committed fixture artifacts · no live ingest" />
     </div>
     {@render children()}
   </div>

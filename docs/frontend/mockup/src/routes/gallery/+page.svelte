@@ -6,7 +6,7 @@
   import ProvenanceLine from "$lib/components/ProvenanceLine.svelte";
   import SectionHeader from "$lib/components/SectionHeader.svelte";
   import Well from "$lib/components/Well.svelte";
-  import { coverage, dataSource, generatedAt } from "$lib/data/demo.generated";
+  import { coverage, generatedAt } from "$lib/data/demo.generated";
 
   import ControlsSection from "./ControlsSection.svelte";
   import DataDisplaySection from "./DataDisplaySection.svelte";
@@ -94,7 +94,7 @@
         buildRunId={coverage.build_run_id}
         variant="card"
       />
-      <ProvenanceLine source={dataSource} detail="fixtures/site/v1" />
+      <ProvenanceLine source={coverage.source} detail="fixtures/site/v1" />
     </Card>
   </div>
 
