@@ -195,12 +195,26 @@ type KeySource interface {
 	Key() (string, bool)
 }
 
+// KeyAger is the key-age surface the report loop reads, and the reason
+// lolstats_riot_key_age_seconds exists at all. It is optional and separate from
+// KeySource: a fetcher that cannot tell how old its key is publishes no gauge,
+// rather than a zero that would be read as a key rotated a moment ago. The
+// consumer asks a question the provider has to be able to decline to answer,
+// which is why Age reports whether the duration means anything.
+type KeyAger interface {
+	Age() (time.Duration, bool)
+}
+
 // The keyless idle path is reached through a type assertion, so a fetcher that
 // quietly loses these methods would turn "idle" into "claim rows, fail each
 // one, burn their attempts" without any test failing. Asserting the wiring at
-// compile time is what keeps a keyless worker honest.
+// compile time is what keeps a keyless worker honest. KeyAger is pinned for the
+// same reason, one step further: its only other implementer is the crawl test
+// fake, and a fake satisfying an assertion is exactly how the key-age gauge
+// stayed dead while CI passed.
 var (
 	_ KeySource = (*riot.Client)(nil)
+	_ KeyAger   = (*riot.Client)(nil)
 	_ Pacer     = (*riot.Client)(nil)
 )
 
@@ -912,9 +926,7 @@ func (w *Worker) report(ctx context.Context, force bool) {
 			"advertised", w.pacer.Advertised(),
 			"effective_rps", w.pacer.EffectiveRate())
 	}
-	if k, ok := w.deps.Fetcher.(interface {
-		Age() (time.Duration, bool)
-	}); ok {
+	if k, ok := w.deps.Fetcher.(KeyAger); ok {
 		if age, known := k.Age(); known {
 			w.deps.Metrics.SetRiotKeyAge(age.Seconds())
 			if age > KeyWarnAge {

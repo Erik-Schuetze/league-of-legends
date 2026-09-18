@@ -53,6 +53,17 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Fixed
 
+- `lolstats_riot_key_age_seconds` was scraped as a constant `0`. The only writer
+  sat behind a `Age() (time.Duration, bool)` assertion on the crawl worker's
+  `Fetcher`, and the only type that satisfied it was the crawl test fake: the
+  real client exposed `Keys()` and no `Age`, so the gauge kept its default of
+  `0` - the reading of a key rotated a moment ago - while CI stayed green.
+  `riot.Client.Age` now answers the assertion through `KeyProvider.AgeKnown`,
+  which reports an unknown age rather than `0`, the assertion is pinned at
+  compile time on the real type at both ends, and the gauge is a label-less
+  vector so the series is *absent* until a known age is published instead of
+  defaulting to `0`.
+
 - Demo fixture data published contradictory numbers. `web/scripts/make-fixtures.mjs`
   drew each number independently, so the tier list, champion page,
   champion-by-role page and matchup matrix disagreed about the same
