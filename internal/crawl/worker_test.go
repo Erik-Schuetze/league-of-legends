@@ -1095,3 +1095,55 @@ func TestReportHeartbeatMakesAHealthyCrawlReadableAndAStalledOneLoud(t *testing.
 		}
 	}
 }
+
+// A crawl parked on Riot's Retry-After has to say so too. The pause branch
+// skipped the report entirely, so its only trace was a debug line - invisible
+// at the level production runs at - and a loop holding a rate-limit wait wrote
+// nothing at all. That is the same silence the heartbeat above exists to end,
+// one branch further in: the measured case of a crawler that was fetching the
+// whole time looked identical to one that had stopped, and a crawler parked on
+// a limiter looked like it did not exist.
+func TestAPausedCrawlReportsTheWaitItIsHolding(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clock := newStopClock(testBaseTime(), 3, cancel)
+	store := newFakeStore()
+	fetcher := newFakeFetcher("RGAPI-test-key")
+	fetcher.blocked = 5 * time.Second
+	writer := newFakeWriter()
+	store.forceEnqueue(contract.QueueItem{MatchID: "EUW1_1"})
+
+	var buf bytes.Buffer
+	deps := testDeps(store, fetcher, writer, clock)
+	deps.Log = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	w := mustWorker(t, WorkerOptions{Deps: deps})
+
+	if err := w.Run(ctx); err != nil {
+		t.Fatalf("Run: %v, want nil: a cancelled context is a normal shutdown", err)
+	}
+	if got := fetcher.fetchCount(""); got != 0 {
+		t.Fatalf("the worker made %d Riot calls while the limiter held it", got)
+	}
+	healthy := buf.String()
+	// Exactly one line names the wait, and it is the pause branch that writes
+	// it: without the report there the count is zero, because the run fetches
+	// nothing at all while the limiter holds it and the forced report at
+	// shutdown claims only waits that were actually served.
+	if got := strings.Count(healthy, `"paused_on_rate_limit"`); got != 1 {
+		t.Fatalf("a paused crawl wrote %d wait reports, want 1: %s", got, healthy)
+	}
+	if got := strings.Count(healthy, `"msg":"crawl pipeline status"`); got != 2 {
+		t.Fatalf("a paused crawl wrote %d status lines, want 2 (the wait and the shutdown): %s", got, healthy)
+	}
+	for _, want := range []string{
+		`"level":"INFO"`,
+		`"msg":"crawl pipeline status"`,
+		`"paused_on_rate_limit":"5s"`,
+		`"matches_retained":0`,
+	} {
+		if !strings.Contains(healthy, want) {
+			t.Fatalf("a paused crawl did not report %s: %s", want, healthy)
+		}
+	}
+}
