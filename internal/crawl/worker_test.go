@@ -1099,10 +1099,12 @@ func TestReportHeartbeatMakesAHealthyCrawlReadableAndAStalledOneLoud(t *testing.
 // A crawl parked on Riot's Retry-After has to say so too. The pause branch
 // skipped the report entirely, so its only trace was a debug line - invisible
 // at the level production runs at - and a loop holding a rate-limit wait wrote
-// nothing at all. That is the same silence the heartbeat above exists to end,
-// one branch further in: the measured case of a crawler that was fetching the
-// whole time looked identical to one that had stopped, and a crawler parked on
-// a limiter looked like it did not exist.
+// nothing at all: the same silence the heartbeat above exists to end, one
+// branch further in. The state is not the common one - a suspension is capped
+// by the call's retry wait budget while a busy pass runs longer than that, so
+// the loop usually reaches the top after the suspension has expired - but a
+// pass that returns quickly inside one parks here, and that crawl was
+// invisible.
 func TestAPausedCrawlReportsTheWaitItIsHolding(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

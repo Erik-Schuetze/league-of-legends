@@ -53,18 +53,29 @@ short. "Breaking" means something that used to work no longer does.
 
 ### Fixed
 
-- The crawl worker wrote nothing while it was parked on Riot's `Retry-After`.
-  The loop reports after a pass that fetched, and the branch that waits out a
-  rate limit jumped straight back to the top of the loop, so a throttled crawl
-  emitted only a `Debug` line - invisible at `LOLSTATS_LOG_LEVEL=info` - for as
-  long as the limiter held it. Measured in production on 2026-09-18: heartbeat
-  spacing of 121 s against a `DefaultReportInterval` of 60 s, i.e. about half
-  the iterations were wait iterations that logged nothing. The wait branch now
-  makes the same report a fetch does, naming the wait it is holding
-  (`paused_on_rate_limit`), and a wait cut short by shutdown is not claimed as
-  served. This is the same defect the heartbeat was added for - a healthy
-  throttled crawl and a stopped one writing the same bytes - one branch
-  further in.
+- The crawl worker wrote nothing while it was parked on Riot's `Retry-After`:
+  the loop reports after a pass that fetched, and the branch that waits out a
+  rate limit jumped straight back to the top of the loop, so a crawler the
+  limiter was holding emitted only a `Debug` line - invisible at
+  `LOLSTATS_LOG_LEVEL=info`. The wait branch now makes the same report a fetch
+  does, naming the wait it is holding (`paused_on_rate_limit`), and a wait cut
+  short by shutdown is not claimed as served.
+
+  **What this entry does not claim.** The change was first justified by a
+  heartbeat spacing of 109-121 s measured against `DefaultReportInterval` of
+  60 s on 2026-09-18, read as "about half the iterations were waits". That
+  reading is wrong and was falsified by measuring the same lines again:
+  `matches_retained` advanced 20 -> 98 -> 198 -> 251 across those heartbeats, so
+  the loop was fetching throughout and the spacing is the length of a pass, not
+  a parked wait. No `paused_on_rate_limit` line appeared in the fifteen minutes
+  observed on the `sha-94f71e2` deployment. The reason is arithmetic: a
+  suspension is capped by the call's retry wait budget (60 s) while a pass in
+  the measured regime takes 60-120 s, so the loop normally returns to the top
+  after the suspension has already expired. The branch is reached when a pass
+  returns quickly inside a suspension - an empty queue whose claims are all
+  deferred - and that state is pinned by
+  `TestAPausedCrawlReportsTheWaitItIsHolding` rather than by a production sighting.
+  It is kept because the alternative is a state that writes nothing at all.
 
 - `lolstats_riot_key_age_seconds` was scraped as a constant `0`. The only writer
   sat behind a `Age() (time.Duration, bool)` assertion on the crawl worker's
